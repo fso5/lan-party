@@ -32,9 +32,11 @@ import {
   NetEvent,
   Reader,
   Writer,
+  readRoundOver,
   readShellSpawn,
   readSnapshot,
   writeInput,
+  type WireRoundOver,
   type WireTank,
 } from './protocol.js';
 import type { PeerId, Transport } from './transport.js';
@@ -93,6 +95,13 @@ export class MatchClient {
   private history: HistoryEntry[] = [];
   private tickAccumulatorMs = 0;
   private pendingInput: TankInput = emptyInput();
+
+  /**
+   * Latest round result from the host, or null before any round has ended.
+   * This is the client's whole view of the scoreboard -- it is told, never
+   * calculated, so a reconciliation replay cannot disturb it.
+   */
+  lastRound: WireRoundOver | null = null;
 
   /** Diagnostics, surfaced in the debug HUD. */
   reconciles = 0;
@@ -300,6 +309,12 @@ export class MatchClient {
       const cx = idx % this.world.arena.width;
       const cy = Math.floor(idx / this.world.arena.width);
       this.world.arena.set(cx, cy, 0);
+    } else if (kind === NetEvent.RoundOver) {
+      // Taken from the host verbatim rather than derived. Deriving it here
+      // would re-run during every reconciliation replay and score the same
+      // round repeatedly -- which is exactly why match state lives outside
+      // WorldState. See rules.ts.
+      this.lastRound = readRoundOver(r);
     }
   }
 

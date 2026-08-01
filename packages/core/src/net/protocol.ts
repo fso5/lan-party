@@ -464,6 +464,169 @@ export function readMatchStart(r: Reader): WireMatchStart {
   return { mapId, seed, hostTick, yourTankId, players, bots };
 }
 
+/**
+ * Lobby.
+ *
+ * This is where "teams, one or many" is actually decided. The simulation keys
+ * every hostility decision off `team`, so a lobby that can put eight players on
+ * eight teams gets free-for-all, and one that puts them on two gets 4v4, with
+ * no other code aware of the difference. Nothing here caps the team count below
+ * the roster size on purpose.
+ *
+ * The host is authoritative. Clients *request* a team and the host answers with
+ * a roster; a client never assumes its own request took. Two players tapping
+ * the same team at once is normal, and the alternative -- optimistic local
+ * team changes -- shows two phones disagreeing about who is on which side right
+ * up until the match starts.
+ */
+export enum LobbyOp {
+  /** Host -> everyone, reliable. The authoritative roster and settings. */
+  Roster = 1,
+  /** Host -> one client, reliable. Tells it which slot is itself. */
+  Welcome = 2,
+  /** Client -> host. "Seat me, this is my name." */
+  Join = 3,
+  /** Client -> host. "Put me on this team." */
+  SetTeam = 4,
+  /** Client -> host. Ready toggle. */
+  SetReady = 5,
+}
+
+/** Roster ceiling. Eight tanks is also the snapshot budget's limit. */
+export const MAX_LOBBY_SLOTS = 8;
+
+/**
+ * Name length in *bytes*, not characters.
+ *
+ * Phone names are full of emoji, and one emoji is four bytes. Truncating on a
+ * byte count without respecting codepoint boundaries produces a partial
+ * sequence that TextDecoder renders as a replacement character, so a player
+ * named with an emoji would see their name mangled on every other phone.
+ */
+export const MAX_NAME_BYTES = 16;
+
+/**
+ * Truncate to `MAX_NAME_BYTES` without splitting a UTF-8 codepoint.
+ *
+ * Continuation bytes are 10xxxxxx, so walking back off them lands on the start
+ * of the character that would have been cut in half.
+ */
+export function clampName(name: string): string {
+  const enc = new TextEncoder().encode(name);
+  if (enc.length <= MAX_NAME_BYTES) return name;
+  let end = MAX_NAME_BYTES;
+  while (end > 0 && (enc[end] & 0xc0) === 0x80) end--;
+  return new TextDecoder().decode(enc.subarray(0, end));
+}
+
+export interface WireLobbySlot {
+  /** Stable id assigned by the host. Survives other players leaving. */
+  slotId: number;
+  name: string;
+  team: number;
+  ready: boolean;
+  isHost: boolean;
+}
+
+export interface WireRoster {
+  mapId: number;
+  /** 0 = free-for-all, 1 = teams. Labelling only; the sim does not branch. */
+  mode: number;
+  roundsToWin: number;
+  slots: WireLobbySlot[];
+}
+
+export function writeRoster(w: Writer, r: WireRoster): void {
+  w.u8(MsgType.Lobby).u8(LobbyOp.Roster);
+  w.u8(r.mapId).u8(r.mode).u8(r.roundsToWin);
+  w.u8(r.slots.length);
+  for (const s of r.slots) {
+    w.u8(s.slotId).u8(s.team);
+    w.u8((s.ready ? 1 : 0) | (s.isHost ? 2 : 0));
+    w.str(clampName(s.name));
+  }
+}
+
+export function readRoster(r: Reader): WireRoster {
+  const mapId = r.u8();
+  const mode = r.u8();
+  const roundsToWin = r.u8();
+  const count = r.u8();
+  if (count > MAX_LOBBY_SLOTS) {
+    // A corrupt count would otherwise drive a loop that reads garbage until it
+    // runs off the end. Refusing early names the real problem.
+    throw new Error(`roster claims ${count} slots, over the ${MAX_LOBBY_SLOTS} limit`);
+  }
+  const slots: WireLobbySlot[] = [];
+  for (let i = 0; i < count; i++) {
+    const slotId = r.u8();
+    const team = r.u8();
+    const flags = r.u8();
+    slots.push({
+      slotId,
+      team,
+      ready: (flags & 1) !== 0,
+      isHost: (flags & 2) !== 0,
+      name: r.str(),
+    });
+  }
+  return { mapId, mode, roundsToWin, slots };
+}
+
+/** Client -> host requests, and the host's welcome. All tiny. */
+export function writeLobbyJoin(w: Writer, name: string): void {
+  w.u8(MsgType.Lobby).u8(LobbyOp.Join).str(clampName(name));
+}
+
+export function writeLobbySetTeam(w: Writer, team: number): void {
+  w.u8(MsgType.Lobby).u8(LobbyOp.SetTeam).u8(team);
+}
+
+export function writeLobbySetReady(w: Writer, ready: boolean): void {
+  w.u8(MsgType.Lobby).u8(LobbyOp.SetReady).u8(ready ? 1 : 0);
+}
+
+export function writeLobbyWelcome(w: Writer, slotId: number): void {
+  w.u8(MsgType.Lobby).u8(LobbyOp.Welcome).u8(slotId);
+}
+
+/**
+ * Round result.
+ *
+ * Sent reliably, because a client cannot derive it. The scoreboard rides along
+ * rather than being recomputed locally: match state deliberately lives outside
+ * `WorldState` (see rules.ts), so a client replaying its history during
+ * reconciliation would otherwise award and un-award rounds as it re-simulates.
+ */
+export interface WireRoundOver {
+  /** Winning team, or DRAW. */
+  winner: number;
+  /** Host tick the next round begins. */
+  resumeAtTick: number;
+  scores: { team: number; score: number }[];
+}
+
+/** DRAW is -1 in memory; it travels as 0xff because the field is a byte. */
+const WIRE_DRAW = 0xff;
+
+export function writeRoundOver(w: Writer, r: WireRoundOver): void {
+  w.u8(MsgType.Event).u8(NetEvent.RoundOver);
+  w.u8(r.winner < 0 ? WIRE_DRAW : r.winner);
+  w.u16(r.resumeAtTick & 0xffff);
+  w.u8(r.scores.length);
+  for (const s of r.scores) w.u8(s.team).u8(s.score);
+}
+
+export function readRoundOver(r: Reader): WireRoundOver {
+  const raw = r.u8();
+  const winner = raw === WIRE_DRAW ? -1 : raw;
+  const resumeAtTick = r.u16();
+  const count = r.u8();
+  const scores: { team: number; score: number }[] = [];
+  for (let i = 0; i < count; i++) scores.push({ team: r.u8(), score: r.u8() });
+  return { winner, resumeAtTick, scores };
+}
+
 /** Estimated bytes/sec downstream to one client, for budget checks in tests. */
 export function estimateDownstreamBps(tankCount: number, snapshotHz: number): number {
   const snapshotBytes = 4 + tankCount * 6;

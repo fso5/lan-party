@@ -19,6 +19,7 @@
 
 import { datan2 } from '../math.js';
 import { cloneWorld, step, type WorldState } from '../sim.js';
+import { DEFAULT_RULES, createMatch, updateMatch, standings, type MatchRules, type MatchState } from '../rules.js';
 import { TICK_HZ } from '../tuning.js';
 import { emptyInput, EventKind, type TankInput } from '../types.js';
 import {
@@ -27,6 +28,7 @@ import {
   Reader,
   Writer,
   readInput,
+  writeRoundOver,
   writeShellSpawn,
   writeSnapshot,
 } from './protocol.js';
@@ -66,10 +68,25 @@ export class MatchHost {
    */
   localTankId = -1;
 
+  /**
+   * Rounds and scoring. Host-owned and host-only: clients are told the result
+   * rather than deriving it, because a client replaying its input history
+   * during reconciliation would re-run any locally-derived scoring and award
+   * the same round several times.
+   */
+  readonly match: MatchState;
+
   constructor(
     public world: WorldState,
     private transport: Transport,
+    rules: MatchRules = DEFAULT_RULES,
   ) {
+    // Seed the scoreboard from whoever is actually in the arena, so a lobby
+    // that seated four players on four teams gets a four-way free-for-all and
+    // one that seated them on two gets 2v2, with nothing here needing to know
+    // which arrangement it was handed.
+    this.match = createMatch(rules, [...new Set(world.tanks.map((t) => t.team))].sort((a, b) => a - b));
+
     transport.setEvents({
       onPacket: (from, data) => this.handlePacket(from, data),
       onPeerLeave: (peerId) => this.removeClient(peerId),
@@ -211,6 +228,17 @@ export class MatchHost {
         w.u8(MsgType.Event).u8(NetEvent.BlockDestroyed).u16(ev.a & 0xffff);
         this.pendingEvents.push(w.finish());
       }
+    }
+
+    // Scoring runs after the step, so this tick's deaths count toward it.
+    if (updateMatch(this.match, this.world)) {
+      const w = new Writer(32);
+      writeRoundOver(w, {
+        winner: this.match.lastRoundWinner ?? -1,
+        resumeAtTick: this.match.resumeAtTick,
+        scores: standings(this.match),
+      });
+      this.pendingEvents.push(w.finish());
     }
 
     this.flushEvents();
