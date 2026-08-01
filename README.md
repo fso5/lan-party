@@ -18,10 +18,22 @@ Every push builds a new APK and attaches it, alongside `tanks.html` — the same
 game as a single 108 KB file that opens in any browser and runs offline. Both
 are generated from source by CI, so neither can go stale.
 
-Bluetooth is not wired up in the app yet. The transport is built and tested
-(37 tests, including a full match over the BLE code path), but the native
-module that owns advertising and the GATT server is still to come. Single-player
-and two-players-on-one-phone work offline today.
+Tap **Bluetooth** in the app to host or join a match with nearby phones — no
+internet, no WiFi, no pairing. The native module compiles and ships in the APK,
+but it has **not been verified on hardware**: that needs two devices in hand.
+Everything above the radio is tested (37 tests, including a full match over the
+BLE code path against a simulated link).
+
+### iPhone
+
+There is no way to put a native iOS app on an iPhone without either a paid
+Apple Developer account or a Mac — that is Apple's constraint, not ours. So:
+
+- **Today, free:** open `tanks.html` in Safari. Single-player and 2P work.
+  No Bluetooth — iOS Safari has no Web Bluetooth at all, and never has.
+- **Bluetooth on iPhone:** needs an Apple Developer account ($99/yr). With one,
+  `eas build --platform ios --profile preview` builds in the cloud and installs
+  via TestFlight, with no laptop involved. `eas.json` is configured for it.
 
 ## Playing it with no laptop and no internet
 
