@@ -27,6 +27,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # enablement: true turns Pages on via the API if it is not already, so
+      # deploying does not depend on someone having flipped a settings toggle by
+      # hand. Requires the pages: write permission granted above.
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

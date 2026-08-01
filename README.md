@@ -6,6 +6,18 @@ Phone held sideways. Left stick drives, right stick aims the turret independentl
 buttons fire shells and lay mines. Shells ricochet off walls and kill in one hit —
 including your own shell, including you.
 
+## Install it
+
+**Android — [download the APK](https://github.com/fso5/tanks-mobile/releases/latest)**
+
+Open that link on the phone, tap the `.apk`, allow "install unknown apps" when
+the browser asks. Built in CI on every push, so there is no laptop anywhere in
+the delivery path.
+
+Bluetooth is not wired up in the app yet — the transport is built and tested,
+but the native module that owns advertising and the GATT server is still to
+come. Single-player and two-players-on-one-phone work offline today.
+
 ## Playing it with no laptop and no internet
 
 `packages/proto/dist/tanks-proto.html` is one self-contained file with zero
