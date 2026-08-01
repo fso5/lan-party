@@ -21,13 +21,15 @@ Where that stands:
 | On a phone — iPhone via the web app, Android via the APK | done |
 | Match rules — rounds, scoring, free-for-all and several teams | done, live in the host |
 | Bluetooth — transport, framing, native GATT on both platforms | written, **never run on a radio** |
-| WiFi hotspot — WebSocket server, so an iPhone can join with no Apple account | protocol done, **no TCP socket in the app yet** |
+| WiFi hotspot — host on Android, join from any browser, no Apple account | built, **never run on a real hotspot** |
 | Lobby — the wire protocol for rosters, teams and round results | done |
-| Lobby — the screen you tap to host, join and pick a side | **not built** |
+| Host screen — tap to host, shows the URL to read out | built |
+| Lobby — picking teams and a map before the match | **not built** — hosting seats everyone free-for-all |
 
-The honest summary: everything under the multiplayer is built and tested against
-simulated links, and none of it has moved a byte between two real phones. Two
-things would change that — a lobby screen, and a listening socket in the app.
+The honest summary: the whole path is now built, and it has been driven end to
+end — a real socket, a real WebSocket client, a real match — but only ever on
+one machine. **It has never run on an actual hotspot between two actual
+phones.** That is the one thing left to find out.
 
 Phone held sideways. Left stick drives, right stick aims the turret independently,
 buttons fire shells and lay mines. Shells ricochet off walls and kill in one hit —
@@ -58,16 +60,32 @@ Every push builds a new APK and attaches it, alongside `tanks.html` — the same
 game as a single 108 KB file that opens in any browser and runs offline. Both
 are generated from source by CI, so neither can go stale.
 
-Tap **Bluetooth** in the app to host or join a match with nearby phones — no
-internet, no WiFi, no pairing. The native module compiles and ships in the APK,
-but it has **not been verified on hardware**: that needs two devices in hand.
-Everything above the radio is tested (99 tests, including a full match over the
-BLE code path against a simulated link).
+## Playing together
 
-One caveat, because "the module ships in the APK" reads as more than it is:
-nothing in the JavaScript currently imports the adapter, so Metro drops it and
-the radio is present but unreachable in the build on the release right now. The
-lobby is what connects them.
+No internet, no accounts, nothing installed on the iPhones.
+
+**On the Android phone:**
+
+1. Turn on Personal Hotspot. It does **not** need internet — it is only being
+   used as a local network.
+2. Open Tanks! → **Host over WiFi** → **Start hosting**.
+3. It shows a URL, something like `http://192.168.43.1:8080`. Read it out.
+
+**On every other phone, iPhone included:**
+
+4. Join that hotspot in WiFi settings.
+5. Open a browser and type the URL. The game loads from the host phone.
+
+**Back on the host:** it counts who has joined. Tap **Start match**.
+
+The URL has to be typed, and it has to be the `http://` one from the host — not
+the web app above. An HTTPS page is not allowed to talk to a local IP, so the
+cached web app cannot be the client here.
+
+Bluetooth is a separate route that needs no hotspot at all. The native module
+compiles and ships in the APK, but nothing in the JavaScript imports it yet, so
+it is present and unreachable in the current build — and it has never been run
+on a radio. WiFi is the path that works today.
 
 ### iPhone, and why WiFi beats Bluetooth here
 
@@ -119,7 +137,7 @@ what `net/websocket.ts` is for, and it is why Bluetooth is not the only route.
 
 ```
 npm install
-npm test  --workspace @tanks/core      # 99 tests, headless
+npm test  --workspace @tanks/core      # 111 tests, headless
 npm test  --workspace @tanks/app       # 28 tests
 npm run build --workspace @tanks/proto # -> packages/proto/dist/tanks-proto.html
 npm run smoke --workspace @tanks/proto # drives the built page in a real browser
@@ -222,6 +240,7 @@ packages/core/src/
     transport.ts  BLE / LAN / loopback interface
     protocol.ts   binary wire format
     websocket.ts  a WebSocket server, so a phone can host over WiFi
+    lanhost.ts    serves the page and carries the match, on one port
 ```
 
 Maps are authored as ASCII so a level reads as a picture in source:
@@ -249,13 +268,14 @@ Maps are authored as ASCII so a level reads as a picture in source:
 10. ~~WebSocket server — so a phone can host over a hotspot and an iPhone can
     join in Safari with no Apple account~~ — done, dependency-free and
     interop-tested against a real client
-11. **Lobby screen, and a TCP socket in the app.** The two things standing
-    between the tested stack and phones actually playing. Nothing in JS
-    imports the radio or opens a listening socket until these exist.
-12. Host migration
-13. Mods: more maps, map editor
+11. ~~A listening socket in the app, and a screen to host from~~ — done. An
+    Android phone hosts over its hotspot and serves the page it hosts.
+12. **Teams and maps in the lobby.** Hosting currently seats everyone on their
+    own team, which is free-for-all. The protocol carries teams already.
+13. Host migration
+14. Mods: more maps, map editor
 
-99 tests passing. Steps 5 and 6 are deliberately ordered: debugging prediction
+111 tests passing. Steps 5 and 6 are deliberately ordered: debugging prediction
 and reconciliation over UDP is tractable; debugging it *simultaneously* with
 debugging BLE is not.
 
