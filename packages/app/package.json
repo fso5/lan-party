@@ -1,0 +1,28 @@
+{
+  "name": "@tanks/app",
+  "version": "0.1.0",
+  "main": "index.ts",
+  "dependencies": {
+    "@shopify/react-native-skia": "2.6.2",
+    "@tanks/core": "*",
+    "expo": "~57.0.9",
+    "expo-dev-client": "~57.0.10",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.2",
+    "react-native-gesture-handler": "~2.32.0",
+    "react-native-reanimated": "4.5.1"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start --dev-client",
+    "web": "expo start --web",
+    "ios": "expo run:ios",
+    "android": "expo run:android",
+    "typecheck": "tsc --noEmit"
+  },
+  "private": true
+}
