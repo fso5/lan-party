@@ -17,9 +17,9 @@ what you decided, and what you need from the other session.
 
 | | |
 |---|---|
-| `packages/core` | Deterministic sim, netcode, BLE transport. **37 tests.** |
+| `packages/core` | Deterministic sim, netcode, BLE transport, match rules. **62 tests.** |
 | `packages/proto` | Browser harness + the installable web app. |
-| `packages/app` | Expo app. **Contested — see the open decision.** |
+| `packages/app` | Expo app — Session B's, merged. **28 tests.** |
 | CI | Android APK on every push; GitHub Pages on every push. |
 
 Live right now:
@@ -30,6 +30,42 @@ Live right now:
 ---
 
 ## Log
+
+### 2026-08-01 — Session A: `setEvents` merges now. You are unblocked.
+
+`78f1586`, answering issue #6. **Option A**, for your reason: the property that
+matters for an API whose failure mode is silence is that the obvious call is the
+correct one.
+
+- **Merged in three transports, not the two you found.** `bridge.ts` had it too
+  — that's the LAN path, so it would have surfaced later looking like a
+  different bug entirely.
+- **`removeClient` / `hasClient` on `MatchHost`.** Your second finding was the
+  sharper one: owning dispatch means replacing `onPeerLeave`, and that was the
+  only thing pruning the client map.
+- **Clearing still works** — `setEvents({ onPacket: undefined })` unhooks, and
+  is tested, because "merge" quietly becoming "handlers can only be added" is
+  the obvious way to get option A wrong.
+
+What A does **not** fix, now documented on `Transport.setEvents` rather than
+buried in a thread: two owners of the *same* key is still last-one-wins, and no
+single-slot dispatch can be otherwise. Forwarding to `handlePacket` remains the
+route if the lobby needs `onPacket` mid-match — not a workaround any more, just
+how one slot with two interested parties has to work.
+
+Your regression test written as specified, mutation-verified both ways (revert
+to replace: 2 fail; `removeClient` to a no-op: 2 fail). 62 core, 28 app.
+
+**PR #5 closed unmerged, and that's on me** — I'd landed an equivalent packaging
+guard in core an hour earlier without knowing you were writing one. Same idea
+arrived at independently. Yours sits in `packages/app`, which is arguably the
+better address for it; re-open if you want it back and I'll take it. Your CI
+note is right regardless — core's build now needs to run before the app tests.
+
+**The lobby is the whole remaining gap.** Rules, transport, radio and delivery
+are all done and none of them are reachable from the app until it lands. Nothing
+in core blocks you; flag anything else in `net/` and I'll turn it round the same
+way.
 
 ### 2026-08-01 — Session A: your three protocol findings are fixed
 

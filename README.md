@@ -54,8 +54,13 @@ are generated from source by CI, so neither can go stale.
 Tap **Bluetooth** in the app to host or join a match with nearby phones — no
 internet, no WiFi, no pairing. The native module compiles and ships in the APK,
 but it has **not been verified on hardware**: that needs two devices in hand.
-Everything above the radio is tested (37 tests, including a full match over the
+Everything above the radio is tested (62 tests, including a full match over the
 BLE code path against a simulated link).
+
+One caveat, because "the module ships in the APK" reads as more than it is:
+nothing in the JavaScript currently imports the adapter, so Metro drops it and
+the radio is present but unreachable in the build on the release right now. The
+lobby is what connects them.
 
 ### iPhone
 
@@ -89,15 +94,12 @@ Two *separate* phones can't play each other in a browser with no laptop: there's
 nothing to run the host on, and Web Bluetooth doesn't exist on iOS at all. That
 needs the native app, which is what `BleTransport` is for.
 
-## Status
-
-The deterministic simulation core and the netcode are built and tested, and a
-browser prototype is playable. No Bluetooth transport and no mobile app yet;
-see the roadmap.
+## Build it
 
 ```
 npm install
-npm test  --workspace @tanks/core     # 28 tests, headless
+npm test  --workspace @tanks/core      # 62 tests, headless
+npm test  --workspace @tanks/app       # 28 tests
 npm run build --workspace @tanks/proto # -> packages/proto/dist/tanks-proto.html
 npm run smoke --workspace @tanks/proto # drives the built page in a real browser
 npm run serve --workspace @tanks/proto  # single-player, serve on your LAN
@@ -192,6 +194,7 @@ packages/core/src/
   map.ts         tile grid, ASCII map parser, line-of-sight
   physics.ts     tank sliding, shell ricochet (DDA), swept collision
   sim.ts         the tick function: (state, inputs) -> state
+  rules.ts       rounds, scoring, free-for-all and teams
   ai.ts          enemy behaviour and the shot solver
   maps/          5 campaign missions, 3 versus arenas
   net/
@@ -216,12 +219,17 @@ Maps are authored as ASCII so a level reads as a picture in source:
 5. ~~`BleTransport` — framing, fragmentation, host/client over GATT~~ — done,
    pending a real radio
 6. ~~Android app + cloud APK build, installable with no laptop~~ — done
-7. **Native BLE module** — advertising and the GATT server. The one thing
-   standing between the tested transport and two phones actually playing.
-8. Lobby, teams, host migration
-9. Mods: multi-team, more maps, map editor, native Skia renderer
+7. ~~Native BLE module — advertising and the GATT server~~ — done, compiles and
+   ships in the APK, unverified on hardware
+8. ~~Match rules — rounds, scoring, free-for-all and multi-team~~ — done in
+   core, no UI on it yet
+9. **Lobby** — host, discover, pick a team and a map, start. The one thing
+   standing between the tested transport and two phones actually playing:
+   nothing in JS imports the radio until this exists.
+10. Host migration
+11. Mods: more maps, map editor
 
-37 tests passing. Steps 5 and 6 are deliberately ordered: debugging prediction
+62 tests passing. Steps 5 and 6 are deliberately ordered: debugging prediction
 and reconciliation over UDP is tractable; debugging it *simultaneously* with
 debugging BLE is not.
 
