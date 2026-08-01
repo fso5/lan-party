@@ -18,6 +18,10 @@ on:
       - 'packages/core/**'
       - 'packages/proto/**'
       - '.github/workflows/android.yml'
+      # A lockfile-only change still alters what gets built, and npm ci is
+      # exact-by-design, so it has to retrigger the build.
+      - 'package-lock.json'
+      - 'package.json'
   workflow_dispatch:
 
 permissions:
