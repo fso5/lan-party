@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "Tanks!",
+    "slug": "tanks-mobile",
+    "version": "0.1.0",
+    "orientation": "landscape",
+    "icon": "./assets/icon-512.png",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#16140F",
+    "splash": {
+      "image": "./assets/icon-512.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#16140F"
+    },
+    "android": {
+      "package": "com.fso5.tanks",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon-512.png",
+        "backgroundColor": "#16140F"
+      },
+      "permissions": [
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_ADVERTISE",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
+    },
+    "ios": {
+      "bundleIdentifier": "com.fso5.tanks",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "Tanks! uses Bluetooth to connect to nearby players with no internet.",
+        "UIBackgroundModes": ["bluetooth-central", "bluetooth-peripheral"]
+      }
+    }
+  }
+}

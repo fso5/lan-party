@@ -951,6 +951,41 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+/**
+ * Bridge to the native shell, when running inside the app's WebView.
+ *
+ * The page owns the simulation and the renderer; native owns the radio. This is
+ * the seam -- BleAdapter's sendFrame goes out through here and frames come back
+ * in through receive(). Absent on the web, where window.ReactNativeWebView is
+ * undefined and everything below is simply never used.
+ */
+const nativeBridge = window.ReactNativeWebView
+  ? {
+      post(msg) {
+        window.ReactNativeWebView.postMessage(JSON.stringify(msg));
+      },
+      handlers: new Set(),
+    }
+  : null;
+
+if (nativeBridge) {
+  window.__tanksNative = {
+    receive(json) {
+      let msg;
+      try {
+        msg = JSON.parse(json);
+      } catch {
+        return;
+      }
+      for (const h of nativeBridge.handlers) h(msg);
+    },
+  };
+  nativeBridge.handlers.add((msg) => {
+    if (msg.type === 'ble.unavailable') setNetStatus('no radio');
+  });
+  nativeBridge.post({ type: 'ready' });
+}
+
 // Exposed for the automated multiplayer smoke test, which needs to compare
 // two clients' worlds against each other.
 window.__state = state;

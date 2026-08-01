@@ -1,0 +1,86 @@
+# Builds an installable Android APK in the cloud.
+#
+# This exists so the game can reach a phone with no laptop anywhere in the loop:
+# the APK is attached to a release, and you download and install it directly
+# from the phone's browser.
+#
+# It builds the debug variant deliberately. A release APK needs a signing key,
+# and an unsigned release APK will not install at all -- Android refuses it. The
+# debug variant is signed with the standard debug keystore, which is enough to
+# sideload. Play Store signing is a later problem.
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/app/**'
+      - 'packages/core/**'
+      - 'packages/proto/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - run: npm ci
+
+      # The app embeds the built game, which is built from the core.
+      - run: npm run build --workspace @tanks/core
+      - run: node packages/app/scripts/embed-game.mjs
+
+      # Expo generates the native android/ project from app.json. It is not
+      # committed, so that config stays the single source of truth rather than
+      # drifting from generated Gradle files nobody remembers editing.
+      - name: Generate the native project
+        working-directory: packages/app
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Build the APK
+        working-directory: packages/app/android
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Name the APK after the commit
+        id: apk
+        run: |
+          SRC=$(find packages/app/android -name '*.apk' | head -1)
+          echo "Found APK at $SRC"
+          mkdir -p out
+          cp "$SRC" "out/tanks-${GITHUB_SHA::7}.apk"
+          echo "path=out/tanks-${GITHUB_SHA::7}.apk" >> "$GITHUB_OUTPUT"
+          echo "name=tanks-${GITHUB_SHA::7}.apk" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tanks-apk
+          path: ${{ steps.apk.outputs.path }}
+
+      # A release gives a plain download link a phone browser can follow.
+      # Workflow artifacts are zipped and need a logged-in session to fetch,
+      # which is a miserable thing to do on a phone.
+      - name: Publish to the rolling latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest "${{ steps.apk.outputs.path }}" \
+            --title "Latest build" \
+            --notes "Android APK built from ${GITHUB_SHA::7}. Download on your phone and install." \
+            --latest
