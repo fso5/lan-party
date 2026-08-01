@@ -59,8 +59,14 @@ export interface WorldState {
 export interface MatchConfig {
   arena: Arena;
   seed: number;
-  /** Tanks to create beyond those defined by the arena's enemy list. */
+  /** Human-controlled tanks. */
   players: { team: number; spawnIndex: number }[];
+  /**
+   * AI tanks beyond those the arena's ASCII already places. Versus maps ship
+   * with no enemies so the same map can serve free-for-all or teams, so this is
+   * how the host fills empty spawns.
+   */
+  bots?: { kind: number; team: number; spawnIndex: number }[];
 }
 
 let idCounter = 0;
@@ -106,8 +112,19 @@ export function createWorld(cfg: MatchConfig): WorldState {
     tanks.push(makeTank(idCounter++, TankKind.Player, p.team, spawn.x, spawn.y, spawn.angle));
   }
 
+  // Creation order is part of the wire contract: tank ids come from position,
+  // so host and client must build the roster in exactly this order -- players,
+  // then the arena's own enemies, then explicitly configured bots. A client
+  // that reorders these gets correct tanks under the wrong ids, and every
+  // snapshot afterwards silently applies to the wrong one.
   for (const e of arena.enemies) {
     tanks.push(makeTank(idCounter++, e.kind as TankKind, e.team, e.x, e.y, e.angle));
+  }
+
+  for (const b of cfg.bots ?? []) {
+    const spawn = arena.spawns[b.spawnIndex] ?? arena.spawns[0];
+    if (!spawn) throw new Error(`arena "${arena.name}" has no spawn points`);
+    tanks.push(makeTank(idCounter++, b.kind as TankKind, b.team, spawn.x, spawn.y, spawn.angle));
   }
 
   return {

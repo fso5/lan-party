@@ -122,6 +122,24 @@
     font-variant-numeric: tabular-nums;
   }
 
+  #net-status {
+    font-family: var(--font-num);
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    padding: 0.18rem 0.42rem;
+    border-radius: 999px;
+    border: 1px solid var(--hairline);
+    color: var(--ink-soft);
+  }
+  #net-status[data-state="offline"] { opacity: 0.55; }
+  #net-status[data-state="connecting"] { color: var(--ink); }
+  #net-status:not([data-state="offline"]):not([data-state="connecting"]) {
+    background: var(--aim);
+    border-color: var(--aim);
+    color: #FFF6EC;
+  }
+
   .stats { display: flex; gap: 1rem; margin-left: auto; }
   .stat { display: flex; flex-direction: column; line-height: 1.15; }
   .stat dt {
@@ -260,6 +278,7 @@
   </div>
   <button id="btn-restart">Restart</button>
   <button id="btn-traj" aria-pressed="false" title="Trace the shot through the real ricochet physics">Trajectory</button>
+  <span id="net-status" data-state="offline">offline</span>
   <dl class="stats">
     <div class="stat"><dt>Enemies</dt><dd id="stat-enemies">0</dd></div>
     <div class="stat"><dt>Shells</dt><dd id="stat-shells">0/5</dd></div>

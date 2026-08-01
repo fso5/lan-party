@@ -8,7 +8,7 @@
  */
 
 /** Tile kinds in the arena grid. */
-export const enum Tile {
+export enum Tile {
   /** Open floor. Tanks and shells pass freely. */
   Floor = 0,
   /** Indestructible wall. Blocks tanks; shells ricochet. */
@@ -38,7 +38,7 @@ export type TeamId = number;
  * aim error, fire cadence, and mine behaviour. The values live in tuning.ts so
  * they can be rebalanced without touching AI code.
  */
-export const enum TankKind {
+export enum TankKind {
   Player = 0,
   /** Stationary, slow turret, no lead, single-bounce shells. The tutorial enemy. */
   Brown = 1,
@@ -128,7 +128,7 @@ export interface Mine {
 }
 
 /** Transient visual/audio cues the renderer consumes and discards each tick. */
-export const enum EventKind {
+export enum EventKind {
   ShellFired = 0,
   ShellBounced = 1,
   ShellExpired = 2,

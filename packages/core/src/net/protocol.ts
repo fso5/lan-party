@@ -25,7 +25,7 @@
 
 export const PROTOCOL_VERSION = 1;
 
-export const enum MsgType {
+export enum MsgType {
   /** Host -> client, reliable. Full match setup: arena, teams, seed. */
   MatchStart = 1,
   /** Client -> host, unreliable, every tick. Input only. */
@@ -42,7 +42,7 @@ export const enum MsgType {
 }
 
 /** Events that must arrive, because clients cannot derive them. */
-export const enum NetEvent {
+export enum NetEvent {
   ShellSpawn = 1,
   MineSpawn = 2,
   MineExplode = 3,
@@ -347,6 +347,69 @@ export function readShellSpawn(r: Reader): WireShellSpawn {
     y: dequantPos(qy),
     angle: dequantAngle(r.u8()),
   };
+}
+
+/**
+ * Match setup.
+ *
+ * Sent reliably, once, when a client joins. It carries everything needed to
+ * rebuild the host's world locally: which arena, the RNG seed, and the roster
+ * in the order the host created it.
+ *
+ * Order is what matters most here. Tank ids are assigned by position during
+ * createWorld, so a client that builds its roster in a different order ends up
+ * with correct-looking tanks under the wrong ids, and every subsequent snapshot
+ * silently applies to the wrong tank.
+ */
+export interface WireMatchStart {
+  mapId: number;
+  seed: number;
+  /**
+   * The host's tick when it sent this. The client uses it to start its clock
+   * ahead of the host rather than at zero -- see MatchClient for why running
+   * behind the host makes every snapshot undeliverable.
+   */
+  hostTick: number;
+  /** Tank id this client controls. */
+  yourTankId: number;
+  /** Player slots, in host creation order. */
+  players: { team: number; spawnIndex: number }[];
+  /** AI tanks, in host creation order, appended after the players. */
+  bots: { kind: number; team: number; spawnIndex: number }[];
+}
+
+export function writeMatchStart(w: Writer, m: WireMatchStart): void {
+  w.u8(MsgType.MatchStart);
+  w.u8(PROTOCOL_VERSION);
+  w.u16(m.mapId);
+  w.u32(m.seed);
+  w.u16(m.hostTick & 0xffff);
+  w.u8(m.yourTankId);
+  w.u8(m.players.length);
+  for (const p of m.players) w.u8(p.team).u8(p.spawnIndex);
+  w.u8(m.bots.length);
+  for (const b of m.bots) w.u8(b.kind).u8(b.team).u8(b.spawnIndex);
+}
+
+export function readMatchStart(r: Reader): WireMatchStart {
+  const version = r.u8();
+  if (version !== PROTOCOL_VERSION) {
+    throw new Error(`protocol version mismatch: host speaks ${version}, we speak ${PROTOCOL_VERSION}`);
+  }
+  const mapId = r.u16();
+  const seed = r.u32();
+  const hostTick = r.u16();
+  const yourTankId = r.u8();
+
+  const players: { team: number; spawnIndex: number }[] = [];
+  const playerCount = r.u8();
+  for (let i = 0; i < playerCount; i++) players.push({ team: r.u8(), spawnIndex: r.u8() });
+
+  const bots: { kind: number; team: number; spawnIndex: number }[] = [];
+  const botCount = r.u8();
+  for (let i = 0; i < botCount; i++) bots.push({ kind: r.u8(), team: r.u8(), spawnIndex: r.u8() });
+
+  return { mapId, seed, hostTick, yourTankId, players, bots };
 }
 
 /** Estimated bytes/sec downstream to one client, for budget checks in tests. */

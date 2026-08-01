@@ -55,6 +55,111 @@ const input = {
 const canvas = document.getElementById('arena');
 const ctx = canvas.getContext('2d');
 
+/**
+ * Multiplayer.
+ *
+ * When the page is served by server.mjs there is a WebSocket endpoint on the
+ * same origin. We try it; if nothing answers we stay in single-player. Above
+ * the transport this is the same MatchClient that will run over Bluetooth --
+ * the point of testing this way is that only the transport differs.
+ */
+const net = {
+  socket: null,
+  transport: null,
+  client: null,
+  dispatch: null,
+  status: 'offline',
+};
+
+function setNetStatus(s) {
+  net.status = s;
+  const el = document.getElementById('net-status');
+  el.textContent = s;
+  el.dataset.state = s;
+}
+
+function connectMultiplayer() {
+  if (net.socket) return;
+  const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+  let sock;
+  try {
+    sock = new WebSocket(url);
+  } catch {
+    setNetStatus('offline');
+    return;
+  }
+  sock.binaryType = 'arraybuffer';
+  net.socket = sock;
+  setNetStatus('connecting');
+
+  const transport = new BridgeTransport((_to, data) => {
+    if (sock.readyState === WebSocket.OPEN) sock.send(data);
+  });
+  transport.addPeer({ id: 'host', name: 'host', rtt: -1 });
+  net.transport = transport;
+
+  // Until MatchStart arrives there is no world to attach a MatchClient to, so
+  // hold a temporary handler. MatchClient replaces these events on construction.
+  transport.setEvents({ onPacket: (from, data) => net.dispatch?.(from, data) });
+
+  sock.onmessage = (ev) => transport.receive('host', new Uint8Array(ev.data));
+  net.dispatch = (from, data) => {
+    // The server restarts the match whenever someone joins or leaves, so
+    // MatchStart can arrive at any time -- including long after MatchClient has
+    // taken over. Keep dispatch here and forward the rest.
+    const r = new Reader(data);
+    if (r.u8() === MsgType.MatchStart) {
+      try {
+        beginNetworkedMatch(readMatchStart(r));
+      } catch (err) {
+        setNetStatus('version mismatch');
+        console.error(err);
+        sock.close();
+      }
+      return;
+    }
+    net.client?.handlePacket(from, data);
+  };
+  sock.onerror = () => setNetStatus('offline');
+  sock.onclose = () => {
+    setNetStatus('offline');
+    net.socket = null;
+    net.client = null;
+  };
+}
+
+function beginNetworkedMatch(start) {
+  const map = missionById(start.mapId);
+  if (!map) {
+    setNetStatus('unknown map');
+    return;
+  }
+  // Rebuild the host's world exactly: same arena, same seed, same roster order.
+  const world = createWorld({
+    arena: loadArena(map),
+    seed: start.seed,
+    players: start.players,
+    bots: start.bots,
+  });
+
+  // Start our clock ahead of the host. A client running behind can never apply
+  // a snapshot, because the tick it describes is one we have not simulated yet.
+  world.tick = start.hostTick + CLIENT_LEAD_TICKS;
+
+  state.world = world;
+  state.outcome = null;
+  state.particles.length = 0;
+  net.client = new MatchClient(world, net.transport, 'host', start.yourTankId);
+  // MatchClient grabs the transport events in its constructor; take them back
+  // so MatchStart keeps reaching us.
+  net.transport.setEvents({ onPacket: (from, data) => net.dispatch?.(from, data) });
+  setNetStatus(`player ${start.yourTankId + 1}`);
+
+  document.getElementById('map-name').textContent = map.name;
+  document.getElementById('map-index').textContent = `${start.players.length}P`;
+  resize();
+}
+
 /** Maps world units to canvas pixels; recomputed on resize. */
 let view = { scale: 1, ox: 0, oy: 0 };
 
@@ -63,33 +168,24 @@ function loadMap(i) {
   const map = ALL_MAPS[state.mapIndex];
   const arena = loadArena(map);
 
-  // Versus maps have no scripted enemies, so drop a few in to shoot at --
-  // otherwise the map loads empty and there is nothing to test the feel
-  // against.
-  const players = [{ team: 0, spawnIndex: 0 }];
-  state.world = createWorld({ arena, seed: 1000 + state.mapIndex, players });
-
-  if (state.world.tanks.length === 1) {
-    const kinds = [TankKind.Grey, TankKind.Teal, TankKind.Green];
+  // Versus maps ship with no scripted enemies so the same map can serve
+  // free-for-all or teams, so fill the spare spawns with bots -- otherwise the
+  // map loads empty and there is nothing to test the feel against. Uses the
+  // same bots config the host sends over the wire, so single-player and
+  // networked matches build their rosters through one code path.
+  const bots = [];
+  const kinds = [TankKind.Grey, TankKind.Teal, TankKind.Green];
+  if (arena.enemies.length === 0) {
     for (let s = 1; s < arena.spawns.length; s++) {
-      const sp = arena.spawns[s];
-      state.world.tanks.push({
-        id: state.world.nextEntityId++,
-        kind: kinds[(s - 1) % kinds.length],
-        team: 1,
-        alive: true,
-        x: sp.x,
-        y: sp.y,
-        bodyAngle: 0,
-        turretAngle: 0,
-        shellsOut: 0,
-        minesOut: 0,
-        nextFireTick: 0,
-        nextMineTick: 0,
-        ai: { targetX: sp.x, targetY: sp.y, repathTick: 0, thinkTick: 0, focusId: -1, aimAngle: 0, aimValid: false },
-      });
+      bots.push({ kind: kinds[(s - 1) % kinds.length], team: 1, spawnIndex: s });
     }
   }
+  state.world = createWorld({
+    arena,
+    seed: 1000 + state.mapIndex,
+    players: [{ team: 0, spawnIndex: 0 }],
+    bots,
+  });
 
   state.outcome = null;
   state.outcomeTimer = 0;
@@ -100,6 +196,9 @@ function loadMap(i) {
 }
 
 function playerTank() {
+  // In a networked match every human is a Player-kind tank, so identity comes
+  // from the id the host assigned us, not from the kind.
+  if (net.client) return state.world.tanks.find((t) => t.id === net.client.localTankId);
   return state.world.tanks.find((t) => t.kind === TankKind.Player);
 }
 
@@ -140,9 +239,11 @@ window.addEventListener('keydown', (e) => {
   input.keys.add(k);
   if (k === 't') state.showTrajectory = !state.showTrajectory;
   if (k === 'g') state.showDebug = !state.showDebug;
-  if (k === 'r') loadMap(state.mapIndex);
-  if (k === '[') loadMap(state.mapIndex - 1);
-  if (k === ']') loadMap(state.mapIndex + 1);
+  if (!net.client) {
+    if (k === 'r') loadMap(state.mapIndex);
+    if (k === '[') loadMap(state.mapIndex - 1);
+    if (k === ']') loadMap(state.mapIndex + 1);
+  }
   if (k === 'p') state.running = !state.running;
   if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) e.preventDefault();
 });
@@ -658,9 +759,14 @@ function updateHud() {
     const avg = state.tickTimes.length
       ? state.tickTimes.reduce((a, b) => a + b, 0) / state.tickTimes.length
       : 0;
+    const c = net.client;
     dbg.textContent =
       `tick ${w.tick}  shells ${w.shells.length}  mines ${w.mines.length}  ` +
-      `particles ${state.particles.length}  sim ${(avg * 1000).toFixed(0)}µs/tick`;
+      `sim ${(avg * 1000).toFixed(0)}µs/tick` +
+      (c
+        ? `  |  snap ${c.snapshotsApplied} stale ${c.snapshotsStale} ` +
+          `reconcile ${c.reconciles} resync ${c.resyncs} err ${c.lastError.toFixed(3)}`
+        : '');
   }
 }
 
@@ -674,7 +780,15 @@ function frame(now) {
   const elapsed = Math.min(now - last, 250);
   last = now;
 
-  if (state.running) {
+  if (state.running && net.client) {
+    // MatchClient reassigns .world when it rewinds to reconcile, so re-read it
+    // every frame rather than holding a reference that goes stale mid-match.
+    net.client.setInput(gatherInput());
+    net.client.update(elapsed);
+    state.world = net.client.world;
+    consumeEvents();
+    updateParticles(elapsed / 1000);
+  } else if (state.running) {
     accumulator += elapsed;
     let budget = 8;
     while (accumulator >= TICK_MS && budget-- > 0) {
@@ -695,7 +809,7 @@ function frame(now) {
     updateParticles(elapsed / 1000);
   }
 
-  if (state.outcome) {
+  if (state.outcome && !net.client) {
     state.outcomeTimer += elapsed;
     // Give the explosion a moment to land before resetting.
     if (state.outcomeTimer > 2200) {
@@ -708,6 +822,17 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
+// Exposed for the automated multiplayer smoke test, which needs to compare
+// two clients' worlds against each other.
+window.__state = state;
+window.__net = net;
+
 window.addEventListener('resize', resize);
 loadMap(0);
+
+// Only look for a host when served over plain HTTP -- that is the LAN test
+// server. Opened from a file or a static host there is nothing to connect to,
+// and attempting it would just flash a failed connection at the player.
+if (location.protocol === 'http:') connectMultiplayer();
+
 requestAnimationFrame(frame);

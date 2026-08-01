@@ -33,7 +33,7 @@ export interface Peer {
   rtt: number;
 }
 
-export const enum TransportKind {
+export enum TransportKind {
   Ble = 'ble',
   Lan = 'lan',
   Loopback = 'loopback',

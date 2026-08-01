@@ -17,8 +17,15 @@ npm install
 npm test  --workspace @tanks/core     # 27 tests, headless
 npm run build --workspace @tanks/proto # -> packages/proto/dist/tanks-proto.html
 npm run smoke --workspace @tanks/proto # drives the built page in a real browser
-npm run serve --workspace @tanks/proto  # serve on your LAN -> open on a phone
+npm run serve --workspace @tanks/proto  # single-player, serve on your LAN
+npm run mp    --workspace @tanks/proto  # multiplayer: host + serve on your LAN
 ```
+
+`mp` runs the authoritative host in Node and serves the page; open the printed
+URL on two phones and they play each other. Everything above the transport is
+what will run over Bluetooth -- same `MatchHost`, same `MatchClient`, same wire
+format, same 180-byte payload ceiling -- so moving to a radio is a transport
+swap and nothing else.
 
 `serve` prints a `http://192.168.x.x:8080` URL. Put your phone on the same WiFi,
 open it, and you get the touch build: left thumb drives, right thumb drags to
@@ -122,13 +129,13 @@ Maps are authored as ASCII so a level reads as a picture in source:
 1. ~~Deterministic sim core~~ — done
 2. ~~Netcode: host/client, prediction, rollback reconciliation~~ — done
 3. ~~`LoopbackTransport` with a simulated lossy link~~ — done
-4. Renderer + touch controls (React Native + Skia), single-player campaign
-5. `LanTransport` (UDP over shared WiFi)
+4. ~~WebSocket transport + two-device multiplayer over WiFi~~ — done
+5. Renderer + touch controls (React Native + Skia)
 6. `BleTransport` — the cross-platform one; iOS peripheral role is the hard part
 7. Lobby, teams, host migration
 8. Mods: multi-team, more maps, map editor
 
-27 tests passing. Steps 5 and 6 are deliberately ordered: debugging prediction
+28 tests passing. Steps 5 and 6 are deliberately ordered: debugging prediction
 and reconciliation over UDP is tractable; debugging it *simultaneously* with
 debugging BLE is not.
 

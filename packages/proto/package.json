@@ -6,6 +6,11 @@
   "scripts": {
     "build": "node build.mjs",
     "serve": "node serve.mjs",
-    "smoke": "node build.mjs && node smoke.mjs"
+    "smoke": "node build.mjs && node smoke.mjs",
+    "mp": "node server.mjs"
+  },
+  "dependencies": {
+    "@tanks/core": "*",
+    "ws": "^8.18.0"
   }
 }

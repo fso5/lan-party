@@ -233,3 +233,50 @@ test('world clone is a true deep copy', () => {
     b.tanks.map((t) => [t.x, t.y]),
   );
 });
+
+test('a client whose clock falls behind the host resyncs instead of drifting', () => {
+  // This is the failure that only appeared with two real browsers connected:
+  // a client starting at tick 0 while the host is already running can never
+  // apply a snapshot, because every snapshot describes a tick it has not
+  // simulated yet. Reconciliation silently never happens and the two diverge.
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 11);
+  const hostT = new LoopbackTransport('host', 'Host', net);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+
+  const hostWorld = versusWorld();
+  const host = new MatchHost(hostWorld, hostT);
+  net.connect('host', 'client');
+  host.addClient('client', 1);
+
+  // Run the host well ahead before the client ever starts.
+  const stepMs = 1000 / 60;
+  for (let i = 0; i < 200; i++) {
+    host.update(stepMs);
+    net.advance(stepMs);
+  }
+  assert.ok(hostWorld.tick > 150, 'host should be well ahead');
+
+  // Client starts from a stale world at tick 0 -- the bug condition.
+  const stale = cloneWorld(hostWorld);
+  stale.tick = 0;
+  const client = new MatchClient(stale, clientT, 'host', 1);
+
+  for (let i = 0; i < 400; i++) {
+    client.update(stepMs);
+    net.advance(stepMs);
+    host.update(stepMs);
+    net.advance(0);
+  }
+
+  assert.ok(client.resyncs > 0, 'client should have forced a resync');
+  assert.ok(
+    client.world.tick > hostWorld.tick,
+    `client (${client.world.tick}) must end up ahead of the host (${hostWorld.tick})`,
+  );
+  assert.ok(client.snapshotsApplied > 0, 'client should be applying snapshots after resync');
+
+  const h = hostWorld.tanks.find((t) => t.id === 1)!;
+  const c = client.world.tanks.find((t) => t.id === 1)!;
+  const drift = Math.hypot(h.x - c.x, h.y - c.y);
+  assert.ok(drift < 0.5, `client still ${drift.toFixed(3)} tiles from host after resync`);
+});

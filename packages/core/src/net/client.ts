@@ -35,6 +35,7 @@ import {
   readShellSpawn,
   readSnapshot,
   writeInput,
+  type WireTank,
 } from './protocol.js';
 import type { PeerId, Transport } from './transport.js';
 
@@ -51,11 +52,39 @@ const HISTORY_TICKS = 64;
  */
 const RECONCILE_EPSILON = 1 / 64;
 
+/**
+ * How far ahead of the host the client runs, in ticks.
+ *
+ * This is the least obvious requirement in the whole netcode. The client must
+ * be *ahead*, not merely in sync: a snapshot describes tick T, and the client
+ * can only apply it if T is still in its history ring -- that is, if the client
+ * has already simulated past T. Start the client at tick 0 at the same moment
+ * as the host and it sits permanently behind by the one-way latency, every
+ * snapshot refers to a tick it has not reached, and reconciliation silently
+ * never happens.
+ *
+ * 10 ticks is ~165ms, which covers a bad Bluetooth link's one-way delay plus
+ * jitter. The cost is that your own input takes that long to reach the host,
+ * but you never see it -- prediction shows you the result immediately.
+ */
+const CLIENT_LEAD_TICKS = 10;
+
+/**
+ * Consecutive undeliverable snapshots before we force a resync.
+ *
+ * Clocks drift, phones suspend, a device wedges for a second. Without this the
+ * client would keep predicting happily against a host it can no longer hear
+ * corrections from, and the two would diverge without any visible error.
+ */
+const RESYNC_AFTER_STALE = 25;
+
 interface HistoryEntry {
   tick: number;
   world: WorldState;
   input: TankInput;
 }
+
+export { CLIENT_LEAD_TICKS };
 
 export class MatchClient {
   /** The locally predicted world. This is what the renderer draws. */
@@ -70,6 +99,8 @@ export class MatchClient {
   lastError = 0;
   snapshotsApplied = 0;
   snapshotsStale = 0;
+  resyncs = 0;
+  private consecutiveStale = 0;
 
   constructor(
     initial: WorldState,
@@ -79,7 +110,7 @@ export class MatchClient {
     public localTankId: number,
   ) {
     this.world = initial;
-    transport.setEvents({ onPacket: (from, data) => this.onPacket(from, data) });
+    transport.setEvents({ onPacket: (from, data) => this.handlePacket(from, data) });
   }
 
   setInput(input: TankInput): void {
@@ -115,7 +146,13 @@ export class MatchClient {
     step(this.world, new Map([[this.localTankId, input]]));
   }
 
-  private onPacket(from: PeerId, data: Uint8Array): void {
+  /**
+   * Public so an embedder can own the transport's event wiring and forward
+   * here. The host may send messages this class does not handle -- a match
+   * restart, lobby changes -- and if MatchClient monopolised onPacket those
+   * would be silently dropped by whoever is embedding it.
+   */
+  handlePacket(from: PeerId, data: Uint8Array): void {
     if (from !== this.hostId) return;
     const r = new Reader(data);
     const type = r.u8();
@@ -146,8 +183,16 @@ export class MatchClient {
       // Older than our history, or from the future. Either way we cannot
       // rewind to it. Applying it directly would teleport the player.
       this.snapshotsStale++;
+      this.consecutiveStale++;
+
+      // Persistently undeliverable means our clock has drifted out of the
+      // window entirely -- keep predicting and we diverge from the host with
+      // no visible symptom until someone dies to a shell they never saw. Take
+      // the snapshot as ground truth and restart our clock ahead of it.
+      if (this.consecutiveStale >= RESYNC_AFTER_STALE) this.resyncTo(snap, tick);
       return;
     }
+    this.consecutiveStale = 0;
     this.snapshotsApplied++;
 
     // How far did we drift on our own tank?
@@ -190,6 +235,33 @@ export class MatchClient {
       h.world = cloneWorld(this.world);
       step(this.world, new Map([[this.localTankId, h.input]]));
     }
+  }
+
+  /**
+   * Adopt a snapshot wholesale and restart our clock ahead of it.
+   *
+   * Used only when we have gone deaf to corrections for long enough that
+   * predicting further is worse than a visible jump. History is discarded --
+   * it describes a timeline the host never agreed with.
+   */
+  private resyncTo(snap: { tanks: WireTank[] }, tick: number): void {
+    for (const wire of snap.tanks) {
+      const tank = this.world.tanks.find((t) => t.id === wire.id);
+      if (!tank) continue;
+      tank.x = wire.x;
+      tank.y = wire.y;
+      tank.bodyAngle = wire.bodyAngle;
+      tank.turretAngle = wire.turretAngle;
+      tank.alive = wire.alive;
+    }
+    // Shells in flight cannot be recovered from a snapshot -- they are not in
+    // it. Drop them rather than leave ghosts the host does not know about; the
+    // next spawn event repopulates.
+    this.world.shells.length = 0;
+    this.world.tick = tick + CLIENT_LEAD_TICKS;
+    this.history.length = 0;
+    this.consecutiveStale = 0;
+    this.resyncs++;
   }
 
   private applyEvent(r: Reader): void {
