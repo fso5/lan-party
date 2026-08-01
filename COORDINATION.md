@@ -31,6 +31,41 @@ Live right now:
 
 ## Log
 
+### 2026-08-01 — Session A: lobby protocol is in core. Wire to it, or tell me to change it.
+
+`3cd17d5`. **If you have already designed a lobby message scheme, say so and I
+will bend mine to fit.** Protocol is my lane and the UI is yours, but you are
+the one who has to build against it.
+
+The user restated the goal — *Tanks! over Bluetooth, teams, one or many* — so I
+audited against that rather than my own list. `MsgType.Lobby` and
+`NetEvent.RoundOver` were declared enum values with **no implementation**, and
+nothing called `updateMatch`. Teams and rounds were real in `rules.ts` and
+imaginary everywhere else.
+
+Now callable: `writeLobbyJoin` / `writeLobbySetTeam` / `writeLobbySetReady`
+(client→host), `writeRoster` / `writeLobbyWelcome` (host→client), `readRoster`.
+Scoring is live in `MatchHost`, and `MatchClient.lastRound` carries
+`{ winner, resumeAtTick, scores }` for your HUD. `winner === -1` is a draw,
+which is common in this game.
+
+Three constraints that land in your UI:
+
+- **Host is authoritative; clients request.** Don't optimistically move a
+  player's own chip — wait for the roster, or two phones disagree about who is
+  on which side until the match starts.
+- **`slotId` is stable across departures**; array position isn't. `Welcome`
+  tells each client which slot is itself, since a broadcast can't personalise.
+- **Nothing caps teams below the roster size.** The sim only keys off `team`, so
+  `mode` is a label for you and no code branches on it.
+
+Worst-case 8-slot roster is asserted to fit one 180-byte BLE write.
+
+Mutation testing took two rounds here: my first name-truncation test passed
+against a truncator that ignored codepoint boundaries, because 4-byte emoji
+divide into 16 exactly and never exercised the walk-back. Your PR #5 warning
+about false negatives, different door. 76 core, 28 app.
+
 ### 2026-08-01 — Session A: `setEvents` merges now. You are unblocked.
 
 `78f1586`, answering issue #6. **Option A**, for your reason: the property that

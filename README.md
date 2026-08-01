@@ -14,9 +14,10 @@ Where that stands:
 |---|---|
 | The game — ricochets, mines, destructible terrain, enemy AI, 8 maps | done |
 | On a phone — iPhone via the web app, Android via the APK | done |
-| Match rules — rounds, scoring, free-for-all and teams | done in core, no UI |
+| Match rules — rounds, scoring, free-for-all and several teams | done, live in the host |
 | Bluetooth — transport, framing, native GATT on both platforms | written, **never run on a radio** |
-| Lobby — host, discover, pick teams and a map, start | **not built** |
+| Lobby — the wire protocol for rosters, teams and round results | done |
+| Lobby — the screen you tap to host, join and pick a side | **not built** |
 
 The honest summary: everything under the multiplayer is built and tested against
 a simulated link, and none of it has moved a byte between two real phones. The
@@ -54,7 +55,7 @@ are generated from source by CI, so neither can go stale.
 Tap **Bluetooth** in the app to host or join a match with nearby phones — no
 internet, no WiFi, no pairing. The native module compiles and ships in the APK,
 but it has **not been verified on hardware**: that needs two devices in hand.
-Everything above the radio is tested (62 tests, including a full match over the
+Everything above the radio is tested (76 tests, including a full match over the
 BLE code path against a simulated link).
 
 One caveat, because "the module ships in the APK" reads as more than it is:
@@ -98,7 +99,7 @@ needs the native app, which is what `BleTransport` is for.
 
 ```
 npm install
-npm test  --workspace @tanks/core      # 62 tests, headless
+npm test  --workspace @tanks/core      # 76 tests, headless
 npm test  --workspace @tanks/app       # 28 tests
 npm run build --workspace @tanks/proto # -> packages/proto/dist/tanks-proto.html
 npm run smoke --workspace @tanks/proto # drives the built page in a real browser
@@ -221,15 +222,16 @@ Maps are authored as ASCII so a level reads as a picture in source:
 6. ~~Android app + cloud APK build, installable with no laptop~~ — done
 7. ~~Native BLE module — advertising and the GATT server~~ — done, compiles and
    ships in the APK, unverified on hardware
-8. ~~Match rules — rounds, scoring, free-for-all and multi-team~~ — done in
-   core, no UI on it yet
-9. **Lobby** — host, discover, pick a team and a map, start. The one thing
-   standing between the tested transport and two phones actually playing:
+8. ~~Match rules — rounds, scoring, free-for-all and multi-team~~ — done, and
+   the host scores live rounds over the wire
+9. ~~Lobby protocol — rosters, team changes, round results~~ — done
+10. **Lobby screen** — host, discover, pick a team and a map, start. The one
+   thing standing between the tested stack and two phones actually playing:
    nothing in JS imports the radio until this exists.
-10. Host migration
-11. Mods: more maps, map editor
+11. Host migration
+12. Mods: more maps, map editor
 
-62 tests passing. Steps 5 and 6 are deliberately ordered: debugging prediction
+76 tests passing. Steps 5 and 6 are deliberately ordered: debugging prediction
 and reconciliation over UDP is tractable; debugging it *simultaneously* with
 debugging BLE is not.
 
