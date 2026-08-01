@@ -1,0 +1,58 @@
+# Builds the installable web app and publishes it to GitHub Pages.
+#
+# This exists so the game can reach a phone with no laptop in the loop: open the
+# Pages URL once, install to the home screen, and the service worker keeps it
+# working with the network gone.
+name: Deploy web app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never run two deploys at once, but do not cancel one in flight -- a half
+# finished Pages deploy can leave the site serving a partial build.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - run: npm ci
+
+      # The app imports @tanks/core from dist/, so the core has to be compiled
+      # before the page bundle can be built.
+      - run: npm run build --workspace @tanks/core
+
+      - name: Run the simulation tests
+        run: npm test --workspace @tanks/core
+
+      - name: Build the installable web app
+        run: node packages/proto/build-pwa.mjs
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: packages/proto/pwa
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

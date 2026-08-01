@@ -7,7 +7,9 @@
     "build": "node build.mjs",
     "serve": "node serve.mjs",
     "smoke": "node build.mjs && node smoke.mjs",
-    "mp": "node server.mjs"
+    "mp": "node server.mjs",
+    "pwa": "node build-pwa.mjs",
+    "pwa:check": "node build-pwa.mjs && node pwa-check.mjs"
   },
   "dependencies": {
     "@tanks/core": "*",
