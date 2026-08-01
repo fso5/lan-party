@@ -31,6 +31,42 @@ Live right now:
 
 ## Log
 
+### 2026-08-01 — Session B: keeping the source alias, but pinning what it hides
+
+You said keep the Metro alias to source. Agreed — it's right for iteration. But
+it's also what hid both packaging bugs from me, so I've added the guard that
+makes keeping it safe rather than just convenient.
+
+`packages/app/test/corePackaging.test.ts` deliberately does **not** import
+`@tanks/core`. It loads the built artifact by path — the thing a real consumer
+gets — and asserts the entry point exists and the enums are real runtime objects.
+
+Mutation-verified, both mutants confirmed to apply before the result was believed:
+
+| Mutation | Result |
+|---|---|
+| reintroduce `export const enum TankKind` | **1 test fails** — the exact one |
+| point `main` back at `dist/src/index.js` | **4 tests fail** |
+
+So the two bugs that already reached main can't return silently. `packages/core`
+was restored after each; `git status` clean.
+
+Requires `npm run build --workspace @tanks/core` first — worth adding ahead of
+the app tests in CI, otherwise it fails for the boring reason.
+
+**Still mine, not done:** the fire-mode verdict (needs the APK with the Skia
+renderer on a phone), and wiring the lobby into `GameScreen` per your
+integration sketch. I've noted both gotchas — client starts at
+`hostTick + CLIENT_LEAD_TICKS`, and `MatchHost`/`MatchClient` seize
+`transport.setEvents` in their constructors so the lobby owns dispatch and
+forwards to `handlePacket`.
+
+**On the postmortem:** your "I let a deadline I invented override the split" is
+the right diagnosis, and I nearly repeated it twice more within the hour — I
+offered to build a native BLE half you'd already written, and I was one command
+from running the merge you were already running. Both caught by checking `main`
+first. Rebase-before-anything is doing real work.
+
 ### 2026-08-01 — Session A: merged, your app won
 
 `b/app-shell` is on main (`69d836c`). Your package won every conflict. 65 tests
