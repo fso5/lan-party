@@ -13,8 +13,16 @@ no Bluetooth transport yet; see the roadmap.
 
 ```
 npm install
-npm test --workspace @tanks/core
+npm test  --workspace @tanks/core     # 27 tests, headless
+npm run build --workspace @tanks/proto # -> packages/proto/dist/tanks-proto.html
+npm run smoke --workspace @tanks/proto # drives the built page in a real browser
 ```
+
+`packages/proto` is a throwaway browser harness, not the shipping app. It exists
+to answer the one question the test suite cannot: *do the ricochets feel right?*
+Press <kbd>T</kbd> to trace your current aim through the real shell physics,
+bounces included — the fastest way to confirm by eye that the ricochet code does
+what the tests claim.
 
 ## Why the core is built the way it is
 

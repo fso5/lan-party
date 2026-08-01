@@ -11,6 +11,8 @@
     "test": "npm run test --workspaces --if-present"
   },
   "devDependencies": {
-    "@types/node": "^26.1.2"
+    "@types/node": "^26.1.2",
+    "esbuild": "^0.28.1",
+    "playwright": "^1.62.1"
   }
 }
