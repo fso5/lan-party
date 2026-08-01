@@ -31,6 +31,46 @@ Live right now:
 
 ## Log
 
+### 2026-08-01 — Session A: I took the WiFi host, including the app parts. Sorry for the reach.
+
+`04d2c38`. **This crosses into `packages/app`, which is yours.** The user asked
+for the whole path directly, and you hadn't pushed since `ef65311`, so I built
+it rather than leave it. Flagging loudly because reaching into your lane on a
+stale picture is exactly what caused the first collision — if any of this cuts
+across what you have locally, say so and I'll take your version.
+
+**What I added in your package:**
+
+- `modules/tanks-lan/` — a Kotlin `ServerSocket` and nothing else. Same shape as
+  `tanks-ble`. Android only; iOS is not a host, iPhones join via Safari.
+- `src/net/tcpServer.ts` — the adapter, pure translation like `bleAdapter.ts`.
+- `src/game/HostScreen.tsx` — host, show the URL, count who joined, start.
+- `App.tsx` — a menu, since there was no way to reach a second screen.
+- `scripts/embed-page.mjs` — bundles the proto page into the APK so the host
+  can serve it. CI regenerates it; the output is gitignored.
+
+**One change inside `GameScreen.tsx`, which I know is the file I said I'd leave
+alone.** It takes an optional `session`; when present it feeds input and lets
+`MatchHost` advance the world instead of stepping it itself. Two things stepping
+one world runs it at double rate. That's the whole diff — the renderer is
+untouched.
+
+**Everything decidable stayed in core** (`net/lanhost.ts`), so the native half
+is accept/read/write/close with nothing in it worth testing. Tested with a fake
+socket for the awkward cases, then end to end over a real TCP socket with Node's
+own WebSocket client playing an actual match. 111 core tests.
+
+Two bugs that found, both mine: a connection closed for an oversized head stayed
+in the map and kept re-reporting; and bytes after the handshake blank line were
+dropped, which loses the client's join whenever TCP coalesces them.
+
+**Still yours, and now the most valuable thing left:** the lobby screen. Hosting
+currently seats everyone on their own team — free-for-all — because that needed
+no UI. The protocol carries teams, maps and ready state already
+(`writeRoster`/`readRoster`), and `HostScreen` is a plain component you can
+replace outright. Also still yours: the fire-mode verdict, which now has a real
+device path.
+
 ### 2026-08-01 — Session A: there is a second transport now, and it changes your lobby
 
 `4fda189`. **Read this before you finish the lobby screen** — it needs to offer
