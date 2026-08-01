@@ -80,6 +80,15 @@ const net = {
   status: 'offline',
 };
 
+/** Bluetooth match state. Only meaningful inside the native app. */
+const ble = {
+  adapter: null,
+  transport: null,
+  host: null,
+  hosts: new Map(),
+  role: null,
+};
+
 function setNetStatus(s) {
   net.status = s;
   const el = document.getElementById('net-status');
@@ -518,6 +527,170 @@ function gatherAllInputs() {
   return m;
 }
 
+// --- Bluetooth match ------------------------------------------------------
+
+function showRadioError(text) {
+  const el = document.getElementById('radio-error');
+  el.textContent = text;
+  el.hidden = false;
+}
+
+function renderHostList() {
+  const list = document.getElementById('host-list');
+  if (!ble.hosts.size) {
+    list.innerHTML = '<li class="empty">searching for a host nearby…</li>';
+    return;
+  }
+  list.innerHTML = '';
+  for (const h of ble.hosts.values()) {
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.textContent = h.name || h.id;
+    btn.addEventListener('click', () => {
+      setNetStatus('connecting');
+      ble.adapter.connect(h.id);
+    });
+    li.appendChild(btn);
+    list.appendChild(li);
+  }
+}
+
+function ensureBleTransport() {
+  if (ble.transport) return ble.transport;
+  ble.adapter = createNativeBleAdapter();
+  ble.transport = new BleTransport(ble.adapter);
+  return ble.transport;
+}
+
+/**
+ * Host a match over Bluetooth.
+ *
+ * The host runs the authoritative simulation locally and advertises. Clients
+ * that connect are seated into the running world -- unlike the WiFi test
+ * harness, which restarted the match on every join, because restarting a match
+ * because someone walked into range would be miserable in person.
+ */
+function hostBluetoothMatch() {
+  const transport = ensureBleTransport();
+  const map = VERSUS_MAPS[0];
+  const arena = loadArena(map);
+
+  const players = [{ team: 0, spawnIndex: 0 }];
+  const bots = [];
+  const kinds = [TankKind.Grey, TankKind.Teal, TankKind.Green];
+  for (let sIdx = 1; sIdx < arena.spawns.length; sIdx++) {
+    bots.push({ kind: kinds[(sIdx - 1) % kinds.length], team: 90 + sIdx, spawnIndex: sIdx });
+  }
+
+  const seed = 4242;
+  const world = createWorld({ arena, seed, players, bots });
+  state.world = world;
+  state.localPlayers = 1;
+  ble.host = new MatchHost(world, transport);
+  // The host plays too -- there is no server here, just a phone. Tank 0 is the
+  // first player slot created above.
+  ble.host.localTankId = world.tanks[0].id;
+  ble.role = 'host';
+  ble.match = { mapId: map.id, seed, players, bots };
+
+  transport.setEvents({
+    onPeerJoin: (peer) => seatBluetoothClient(peer),
+    onPeerLeave: () => setNetStatus('hosting'),
+    onPacket: (from, data) => ble.host.handlePacket(from, data),
+    onError: (err) => showRadioError(err.message),
+  });
+
+  transport.host('Tanks!');
+  document.getElementById('lobby').hidden = true;
+  document.getElementById('map-name').textContent = map.name;
+  resize();
+}
+
+/**
+ * Seat a newly connected client into the running match.
+ *
+ * Adds a tank for them rather than rebuilding the world, and tells them the
+ * host's current tick so their clock starts ahead of ours -- a client running
+ * behind can never apply a snapshot.
+ */
+function seatBluetoothClient(peer) {
+  if (!ble.host) return;
+  const world = ble.host.world;
+  const arena = world.arena;
+  const taken = world.tanks.filter((t) => t.kind === TankKind.Player).length;
+  const spawn = arena.spawns[taken] ?? arena.spawns[0];
+
+  const tankId = world.nextEntityId++;
+  world.tanks.push({
+    id: tankId,
+    kind: TankKind.Player,
+    team: taken,
+    alive: true,
+    x: spawn.x,
+    y: spawn.y,
+    bodyAngle: 0,
+    turretAngle: 0,
+    shellsOut: 0,
+    minesOut: 0,
+    nextFireTick: 0,
+    nextMineTick: 0,
+  });
+
+  ble.host.addClient(peer.id, tankId);
+  ble.match.players = ble.match.players.concat([{ team: taken, spawnIndex: taken }]);
+
+  const w = new Writer(64);
+  writeMatchStart(w, { ...ble.match, hostTick: world.tick, yourTankId: tankId });
+  ble.transport.send(peer.id, w.finish(), true);
+  setNetStatus(`hosting · ${taken} joined`);
+}
+
+/** Look for a host and show what turns up. */
+function joinBluetoothMatch() {
+  const transport = ensureBleTransport();
+  ble.role = 'client';
+  ble.hosts.clear();
+  renderHostList();
+
+  transport.setEvents({
+    onPeerJoin: () => {},
+    onPeerLeave: () => setNetStatus('offline'),
+    onPacket: (from, data) => {
+      const r = new Reader(data);
+      if (r.u8() === MsgType.MatchStart) {
+        const start = readMatchStart(r);
+        const map = missionById(start.mapId);
+        if (!map) return;
+        const world = createWorld({
+          arena: loadArena(map),
+          seed: start.seed,
+          players: start.players,
+          bots: start.bots,
+        });
+        world.tick = start.hostTick + CLIENT_LEAD_TICKS;
+        state.world = world;
+        state.localPlayers = 1;
+        net.client = new MatchClient(world, transport, from, start.yourTankId);
+        transport.setEvents({
+          onPacket: (f, d) => net.client.handlePacket(f, d),
+          onPeerLeave: () => setNetStatus('host left'),
+          onError: (err) => showRadioError(err.message),
+        });
+        document.getElementById('lobby').hidden = true;
+        document.getElementById('map-name').textContent = map.name;
+        setNetStatus('playing');
+        resize();
+        return;
+      }
+      net.client?.handlePacket(from, data);
+    },
+    onError: (err) => showRadioError(err.message),
+  });
+
+  transport.discover();
+  document.getElementById('host-list').hidden = false;
+}
+
 // --- Effects -------------------------------------------------------------
 
 function spawnParticles(x, y, count, color, speed, life) {
@@ -909,7 +1082,14 @@ function frame(now) {
   const elapsed = Math.min(now - last, 250);
   last = now;
 
-  if (state.running && net.client) {
+  if (state.running && ble.host) {
+    // The host runs the authoritative simulation; its own input is local.
+    ble.host.setLocalInput(gatherInput());
+    ble.host.update(elapsed);
+    state.world = ble.host.world;
+    consumeEvents();
+    updateParticles(elapsed / 1000);
+  } else if (state.running && net.client) {
     // MatchClient reassigns .world when it rewinds to reconcile, so re-read it
     // every frame rather than holding a reference that goes stale mid-match.
     net.client.setInput(gatherInput());
@@ -980,10 +1160,88 @@ if (nativeBridge) {
       for (const h of nativeBridge.handlers) h(msg);
     },
   };
-  nativeBridge.handlers.add((msg) => {
-    if (msg.type === 'ble.unavailable') setNetStatus('no radio');
-  });
   nativeBridge.post({ type: 'ready' });
+}
+
+/**
+ * BleAdapter over the native bridge.
+ *
+ * This is the whole reason core defines BleAdapter as an interface: the radio
+ * lives in another process, so the adapter's job is only to translate. Framing,
+ * fragmentation and the reliable/unreliable choice all stay in core, where they
+ * are tested against a simulated link with no hardware involved.
+ */
+function createNativeBleAdapter() {
+  const handlers = { frame: null, connected: null, disconnected: null };
+  let payloadSize = 178;
+
+  nativeBridge.handlers.add((msg) => {
+    switch (msg.type) {
+      case 'ble.frame':
+        handlers.frame?.(msg.from, base64ToBytes(msg.frame));
+        break;
+      case 'ble.found':
+        ble.hosts.set(msg.peerId, { id: msg.peerId, name: msg.name, rssi: msg.rssi });
+        renderHostList();
+        break;
+      case 'ble.connected':
+        handlers.connected?.({ id: msg.peerId, name: msg.name, rtt: -1 });
+        setNetStatus('connected');
+        break;
+      case 'ble.disconnected':
+        handlers.disconnected?.(msg.peerId, msg.reason);
+        break;
+      case 'ble.ready':
+        if (typeof msg.payload === 'number' && msg.payload > 20) payloadSize = msg.payload - 2;
+        setNetStatus(msg.role === 'host' ? 'hosting' : 'searching');
+        break;
+      case 'ble.state':
+        // A late MTU negotiation can shrink what one write carries. Shrink with
+        // it: an oversized write is silently truncated, not rejected, which
+        // would corrupt a snapshot rather than drop it.
+        if (msg.state === 'mtu' && typeof msg.payload === 'number') {
+          payloadSize = Math.max(20, msg.payload - 2);
+        }
+        break;
+      case 'ble.error':
+        setNetStatus('radio error');
+        console.warn('[ble]', msg.where, msg.message);
+        showRadioError(`${msg.where}: ${msg.message}`);
+        break;
+    }
+  });
+
+  return {
+    get payloadSize() {
+      return payloadSize;
+    },
+    startAdvertising: async (matchName) => nativeBridge.post({ type: 'ble.host', matchName }),
+    stopAdvertising: async () => nativeBridge.post({ type: 'ble.stop' }),
+    startScanning: async () => nativeBridge.post({ type: 'ble.discover' }),
+    stopScanning: async () => {},
+    connect: async (peerId) => nativeBridge.post({ type: 'ble.connect', peerId }),
+    disconnect: async () => nativeBridge.post({ type: 'ble.stop' }),
+    sendFrame: (to, frame, ack) =>
+      nativeBridge.post({ type: 'ble.send', to, frame: bytesToBase64(frame), ack }),
+    onFrame: (cb) => (handlers.frame = cb),
+    onPeerConnected: (cb) => (handlers.connected = cb),
+    onPeerDisconnected: (cb) => (handlers.disconnected = cb),
+  };
+}
+
+// btoa/atob are the only base64 primitives available in a WebView, and they
+// work on binary strings rather than byte arrays.
+function bytesToBase64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
+}
+
+function base64ToBytes(b64) {
+  const s = atob(b64);
+  const out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out;
 }
 
 // Exposed for the automated multiplayer smoke test, which needs to compare
@@ -998,5 +1256,22 @@ loadMap(0);
 // server. Opened from a file or a static host there is nothing to connect to,
 // and attempting it would just flash a failed connection at the player.
 if (location.protocol === 'http:') connectMultiplayer();
+
+// Bluetooth only exists inside the native app; on the web there is no radio to
+// offer, so the button stays hidden rather than dangling as a dead end.
+if (nativeBridge) {
+  const btBtn = document.getElementById('btn-bt');
+  btBtn.hidden = false;
+  btBtn.addEventListener('click', () => {
+    document.getElementById('lobby').hidden = false;
+    document.getElementById('radio-error').hidden = true;
+  });
+  document.getElementById('btn-host').addEventListener('click', hostBluetoothMatch);
+  document.getElementById('btn-join').addEventListener('click', joinBluetoothMatch);
+  document.getElementById('btn-lobby-close').addEventListener('click', () => {
+    document.getElementById('lobby').hidden = true;
+    nativeBridge.post({ type: 'ble.stop' });
+  });
+}
 
 requestAnimationFrame(frame);

@@ -241,6 +241,44 @@
   }
   .hint { display: flex; align-items: center; gap: 0.3rem; }
 
+  #lobby {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    display: grid;
+    place-items: center;
+    background: var(--table);
+    padding: 1rem;
+    overflow-y: auto;
+  }
+  #lobby[hidden] { display: none; }
+  .lobby-inner {
+    width: min(30rem, 100%);
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    text-align: center;
+  }
+  .lobby-inner h2 {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 650;
+    letter-spacing: -0.015em;
+  }
+  .lobby-inner p { margin: 0; font-size: 0.78rem; color: var(--ink-soft); }
+  .lobby-actions { display: flex; gap: 0.6rem; justify-content: center; }
+  .lobby-actions button { font-size: 0.85rem; padding: 0.5rem 1rem; }
+  #host-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+  #host-list button { width: 100%; font-size: 0.8rem; padding: 0.5rem; }
+  #host-list .empty { font-size: 0.72rem; color: var(--ink-soft); padding: 0.4rem; }
+  #radio-error {
+    color: var(--aim);
+    font-size: 0.72rem;
+    font-family: var(--font-num);
+    word-break: break-word;
+  }
+  .lobby-close { align-self: center; font-size: 0.7rem; opacity: 0.7; }
+
   /* Couch play: split the stage so each seat can see which half is theirs. */
   body[data-seats="2"] #stage::after {
     content: '';
@@ -293,6 +331,7 @@
   </div>
   <button id="btn-restart">Restart</button>
   <button id="btn-2p" aria-pressed="false" title="Two players on one phone">2P</button>
+  <button id="btn-bt" hidden title="Play with nearby phones over Bluetooth">Bluetooth</button>
   <button id="btn-traj" aria-pressed="false" title="Trace the shot through the real ricochet physics">Trajectory</button>
   <span id="net-status" data-state="offline">offline</span>
   <dl class="stats">
@@ -301,6 +340,20 @@
     <div class="stat"><dt>Mines</dt><dd id="stat-mines">0/2</dd></div>
   </dl>
 </header>
+
+<div id="lobby" hidden>
+  <div class="lobby-inner">
+    <h2>Play over Bluetooth</h2>
+    <p>No internet, no WiFi. One phone hosts, the others join.</p>
+    <div class="lobby-actions">
+      <button id="btn-host">Host a match</button>
+      <button id="btn-join">Join a match</button>
+    </div>
+    <ul id="host-list" hidden><li class="empty">searching for a host nearby…</li></ul>
+    <p id="radio-error" hidden></p>
+    <button id="btn-lobby-close" class="lobby-close">Back to single player</button>
+  </div>
+</div>
 
 <div id="stage">
   <canvas id="arena"></canvas>

@@ -20,11 +20,12 @@
  * thing to do before the delivery pipeline and the radio both work.
  */
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { SafeAreaView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 
 import { GAME_HTML } from './src/generated/gameHtml';
+import { createBleBridge, type BleBridgeHandle } from './src/bleBridge';
 
 /**
  * Messages crossing the bridge.
@@ -39,10 +40,12 @@ type BridgeMessage =
   | { type: 'ble.host'; matchName: string }
   | { type: 'ble.discover' }
   | { type: 'ble.connect'; peerId: string }
+  | { type: 'ble.stop' }
   | { type: 'ble.send'; to: string; frame: string; ack: boolean };
 
 export default function App() {
   const webRef = useRef<WebView>(null);
+  const bleRef = useRef<BleBridgeHandle | null>(null);
   const [status, setStatus] = useState('starting');
 
   /** Push an event down into the page. */
@@ -54,6 +57,16 @@ export default function App() {
       `window.__tanksNative && window.__tanksNative.receive(${JSON.stringify(json)}); true;`,
     );
   }, []);
+
+  // The radio outlives individual renders, so it is created once and torn down
+  // with the component -- not rebuilt whenever a callback identity changes.
+  useEffect(() => {
+    bleRef.current = createBleBridge((event) => toWeb(event));
+    return () => {
+      bleRef.current?.dispose();
+      bleRef.current = null;
+    };
+  }, [toWeb]);
 
   const onMessage = useCallback(
     (e: WebViewMessageEvent) => {
@@ -72,15 +85,9 @@ export default function App() {
           console.log('[game]', msg.text);
           break;
 
-        // Bluetooth is not wired up yet -- the native module that owns
-        // advertising and the GATT server is the next piece of work. Answering
-        // explicitly rather than ignoring these keeps the page out of a state
-        // where it waits forever for a host that will never appear.
-        case 'ble.host':
-        case 'ble.discover':
-        case 'ble.connect':
-        case 'ble.send':
-          toWeb({ type: 'ble.unavailable', reason: 'radio not implemented in this build' });
+        default:
+          // Everything else is the radio's business.
+          if (msg.type.startsWith('ble.')) bleRef.current?.handleMessage(msg);
           break;
       }
     },

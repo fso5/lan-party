@@ -56,15 +56,29 @@ export class MatchHost {
   private clients = new Map<PeerId, ClientSlot>();
   private tickAccumulatorMs = 0;
   private pendingEvents: Uint8Array[] = [];
+  private localInput: TankInput = emptyInput();
+
+  /**
+   * The tank the person running the host is driving, or -1 for a dedicated
+   * host with no player. On a phone the host is a player too -- there is no
+   * server -- so without this their own tank would sit inert while everyone
+   * else moved.
+   */
+  localTankId = -1;
 
   constructor(
     public world: WorldState,
     private transport: Transport,
   ) {
     transport.setEvents({
-      onPacket: (from, data) => this.onPacket(from, data),
+      onPacket: (from, data) => this.handlePacket(from, data),
       onPeerLeave: (peerId) => this.clients.delete(peerId),
     });
+  }
+
+  /** Input for the host's own tank, set each frame by the local game loop. */
+  setLocalInput(input: TankInput): void {
+    this.localInput = input;
   }
 
   /** Seat a client in a tank. Returns the tank id it now controls. */
@@ -78,7 +92,13 @@ export class MatchHost {
     });
   }
 
-  private onPacket(from: PeerId, data: Uint8Array): void {
+  /**
+   * Public so an embedder can own the transport's event wiring and forward
+   * here -- the same reason MatchClient exposes it. A lobby needs to see peers
+   * connect and disconnect, and if MatchHost monopolised onPacket those events
+   * would be silently swallowed.
+   */
+  handlePacket(from: PeerId, data: Uint8Array): void {
     const r = new Reader(data);
     const type = r.u8();
     if (type !== MsgType.Input) return;
@@ -131,6 +151,9 @@ export class MatchHost {
       const age = this.world.tick - slot.lastInputTick;
       inputs.set(slot.tankId, age > INPUT_STALE_TICKS ? emptyInput() : slot.lastInput);
     }
+    // The host's own tank has no network round trip -- its input applies on the
+    // very tick it was produced, which is the one genuine advantage of hosting.
+    if (this.localTankId >= 0) inputs.set(this.localTankId, this.localInput);
 
     step(this.world, inputs);
 
