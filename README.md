@@ -151,14 +151,35 @@ Maps are authored as ASCII so a level reads as a picture in source:
 2. ~~Netcode: host/client, prediction, rollback reconciliation~~ — done
 3. ~~`LoopbackTransport` with a simulated lossy link~~ — done
 4. ~~WebSocket transport + two-device multiplayer over WiFi~~ — done
-5. Renderer + touch controls (React Native + Skia)
-6. `BleTransport` — the cross-platform one; iOS peripheral role is the hard part
+5. ~~`BleTransport` — framing, fragmentation, host/client over GATT~~ — done,
+   pending a real radio
+6. React Native app + a `BleAdapter` on react-native-ble-plx
 7. Lobby, teams, host migration
 8. Mods: multi-team, more maps, map editor
 
-28 tests passing. Steps 5 and 6 are deliberately ordered: debugging prediction
+37 tests passing. Steps 5 and 6 are deliberately ordered: debugging prediction
 and reconciliation over UDP is tractable; debugging it *simultaneously* with
 debugging BLE is not.
+
+### Measured over the BLE transport
+
+Full match stack — `MatchHost`, `MatchClient`, prediction, reconciliation — run
+over the BLE framing path against a simulated radio, 30s each:
+
+| Link | avg drift | max drift | reconciles | over the air |
+|---|---|---|---|---|
+| Typical (45ms, 3% loss), 2 tanks | 0.010 tiles | 0.124 | 41 | 851 B/s |
+| Poor (90ms, 10% loss), 2 tanks | 0.028 tiles | 0.287 | 77 | 790 B/s |
+| Typical, 4 tanks | 0.010 tiles | 0.124 | 41 | 1027 B/s |
+
+Against a 2–8 KB/s BLE ceiling. Even on the poor link the worst disagreement is
+0.29 tiles, well under a tank's 0.76-tile width, and no resync was needed.
+
+Host is the GATT **peripheral** and advertises; clients are centrals. That's the
+inverse of the intuitive arrangement, and it's the only one that works
+cross-platform — see the header comment in `net/ble.ts`. Reliability maps onto
+BLE's own two modes (indication vs notification) rather than a hand-rolled ack
+scheme, so a snapshot loss costs nothing and a shell spawn cannot be dropped.
 
 ### Measured netcode behaviour
 
