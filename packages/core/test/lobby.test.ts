@@ -402,3 +402,42 @@ test('with no way to build a round, the match ends honestly', () => {
   assert.equal(host.match.matchWinner, 3);
   assert.equal(host.match.score.get(3), 1, 'one round played, one round scored');
 });
+
+test('the end of a match is announced exactly once', () => {
+  // Without an edge to react to, a screen rendering the match shows a dead
+  // arena for ever: the phase becomes 'finished' and stays there while the
+  // world keeps stepping, and nothing tells the UI to offer a way out.
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 1);
+  const host = new MatchHost(ffaWorld(), new LoopbackTransport('h', 'H', net), {
+    mode: 'ffa',
+    roundsToWin: 1,
+    intermissionTicks: 30,
+  });
+  host.roundBuilder = () => ffaWorld();
+
+  const announced: number[] = [];
+  host.onMatchOver = (winner) => announced.push(winner);
+
+  for (const t of host.world.tanks) if (t.team !== 1) t.alive = false;
+  // Well past the point of decision, so a repeat would show up here.
+  for (let i = 0; i < 60 * 10; i++) host.update(1000 / 60);
+
+  assert.deepEqual(announced, [1], 'fired once, with the winning team');
+  assert.equal(host.match.phase, 'finished');
+});
+
+test('a match that ends for want of a next round is still announced', () => {
+  // The no-roundBuilder path finishes the match inside beginRound rather than
+  // inside updateMatch, so an announcement checked in the wrong place misses it
+  // -- and that is precisely the case where the screen has nothing else to go on.
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 1);
+  const host = new MatchHost(ffaWorld(), new LoopbackTransport('h', 'H', net));
+
+  const announced: number[] = [];
+  host.onMatchOver = (winner) => announced.push(winner);
+
+  for (const t of host.world.tanks) if (t.team !== 3) t.alive = false;
+  for (let i = 0; i < 60 * 8; i++) host.update(1000 / 60);
+
+  assert.deepEqual(announced, [3]);
+});

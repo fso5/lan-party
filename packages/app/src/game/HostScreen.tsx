@@ -33,13 +33,14 @@ import { base64ToBytes } from '../net/base64';
 import { GAME_PAGE_BASE64 } from '../net/gamePage';
 import { GameScreen } from './GameScreen';
 
-type Phase = 'idle' | 'starting' | 'waiting' | 'playing';
+type Phase = 'idle' | 'starting' | 'waiting' | 'playing' | 'over';
 
 export function HostScreen({ onBack }: { onBack: () => void }) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [url, setUrl] = useState<string | null>(null);
   const [players, setPlayers] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [winner, setWinner] = useState<number | null>(null);
 
   const lanRef = useRef<LanHost | null>(null);
   const matchRef = useRef<MatchHost | null>(null);
@@ -187,13 +188,43 @@ export function HostScreen({ onBack }: { onBack: () => void }) {
       seatAll(host, pending.roster);
     };
 
+    // Without this the screen sits on a dead arena for ever once the match is
+    // decided: the phase becomes 'finished', the world keeps stepping, and
+    // there is no way back short of force-quitting the app.
+    host.onMatchOver = (team) => {
+      setWinner(team);
+      setPhase('over');
+    };
+
     seatAll(host, roster);
     matchRef.current = host;
+    setWinner(null);
     setPhase('playing');
   }, [buildRoster, seatAll]);
 
   if (phase === 'playing' && matchRef.current) {
     return <GameScreen session={matchRef.current} />;
+  }
+
+  if (phase === 'over') {
+    // Everyone else is still connected and still looking at the last round, so
+    // the useful thing here is another match rather than a way out.
+    return (
+      <View style={styles.over}>
+        <Text style={styles.title}>
+          {winner === null || winner < 0 ? 'Draw' : `Team ${winner + 1} wins`}
+        </Text>
+        <TouchableOpacity style={styles.button} onPress={startMatch}>
+          <Text style={styles.buttonText}>Play again</Text>
+        </TouchableOpacity>
+        <Text style={styles.label}>
+          Everyone who is still connected is seated automatically.
+        </Text>
+        <TouchableOpacity style={styles.back} onPress={() => setPhase('waiting')}>
+          <Text style={styles.backText}>Back to the lobby</Text>
+        </TouchableOpacity>
+      </View>
+    );
   }
 
   return (
@@ -249,6 +280,7 @@ export function HostScreen({ onBack }: { onBack: () => void }) {
 
 const styles = StyleSheet.create({
   page: { padding: 24, gap: 16, flexGrow: 1, justifyContent: 'center', backgroundColor: '#16140F' },
+  over: { flex: 1, padding: 24, gap: 16, justifyContent: 'center', backgroundColor: '#16140F' },
   title: { fontSize: 28, fontWeight: '700', color: '#EDE5D3' },
   body: { fontSize: 16, lineHeight: 22, color: '#9A9080' },
   label: { fontSize: 14, color: '#9A9080' },

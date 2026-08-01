@@ -19,7 +19,15 @@
 
 import { datan2 } from '../math.js';
 import { cloneWorld, step, type WorldState } from '../sim.js';
-import { DEFAULT_RULES, createMatch, updateMatch, standings, type MatchRules, type MatchState } from '../rules.js';
+import {
+  DEFAULT_RULES,
+  DRAW,
+  createMatch,
+  updateMatch,
+  standings,
+  type MatchRules,
+  type MatchState,
+} from '../rules.js';
 import { TICK_HZ } from '../tuning.js';
 import { emptyInput, EventKind, type TankInput } from '../types.js';
 import {
@@ -94,6 +102,18 @@ export class MatchHost {
    * clients rebuild against it; they cannot derive a new world on their own.
    */
   onRoundStart: ((world: WorldState, round: number) => void) | null = null;
+
+  /**
+   * The match is decided. Fired once, on the tick it happens.
+   *
+   * Without it an embedder has no edge to react to -- the phase simply becomes
+   * `finished` and stays there while the world keeps stepping, so a screen
+   * rendering the match shows a dead arena for ever with no way out. Polling
+   * `match.phase` from a render loop is the alternative and it is worse: the
+   * transition is one tick wide and the screen only redraws when React decides
+   * to.
+   */
+  onMatchOver: ((winner: number) => void) | null = null;
 
   constructor(
     public world: WorldState,
@@ -265,6 +285,12 @@ export class MatchHost {
     // The intermission just elapsed, so a new round begins on this tick.
     if (phaseBefore === 'intermission' && this.match.phase === 'playing') {
       this.beginRound();
+    }
+
+    // Checked after beginRound, which can also finish a match when there is no
+    // way to build another round.
+    if (phaseBefore !== 'finished' && this.match.phase === 'finished') {
+      this.onMatchOver?.(this.match.matchWinner ?? DRAW);
     }
 
     this.flushEvents();
