@@ -1,0 +1,16 @@
+{
+  "name": "tanks-mobile",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Tanks! - a local-multiplayer tank game over Bluetooth",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2"
+  }
+}
