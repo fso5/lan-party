@@ -61,3 +61,24 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      # Pages needs switching on once by hand -- the Actions token can deploy to
+      # an existing site but cannot create one. Say so in plain language rather
+      # than leaving a raw 404 from the deploy action, which reads as a bug
+      # rather than a setting.
+      - name: Explain a failed deploy
+        if: steps.deployment.outcome == 'failure'
+        run: |
+          echo "::warning::GitHub Pages is not enabled for this repository."
+          echo ""
+          echo "  Turn it on once, here:"
+          echo "    https://github.com/${{ github.repository }}/settings/pages"
+          echo "    Source -> GitHub Actions"
+          echo ""
+          echo "  Then re-run this workflow. Every push deploys after that."
+          echo ""
+          echo "  This is the only route that gets the game onto an iPhone:"
+          echo "  release assets are served as attachments, so Safari downloads"
+          echo "  the HTML instead of running it."
+          exit 1

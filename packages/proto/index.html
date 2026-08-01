@@ -240,6 +240,13 @@
     color: var(--ink);
   }
   .hint { display: flex; align-items: center; gap: 0.3rem; }
+  .build-id {
+    margin-left: auto;
+    font-family: var(--font-num);
+    font-size: 0.62rem;
+    opacity: 0.65;
+    letter-spacing: 0.03em;
+  }
 
   #lobby {
     position: fixed;
@@ -369,6 +376,7 @@
   <span class="hint desktop-only"><kbd>T</kbd> trajectory</span>
   <span class="hint desktop-only"><kbd>G</kbd> debug</span>
   <span class="hint desktop-only"><kbd>R</kbd> restart</span>
+  <span class="hint build-id" title="Which build this is. Compare against the release notes.">build __BUILD_ID__</span>
   <span class="hint" style="display:none" id="touch-hint">left thumb drives · right thumb aims and fires</span>
   <span class="hint" id="seat-hint" hidden>2 players: left thumb = blue · right thumb = red · drag to steer, tap to fire</span>
   <div class="touch-buttons">

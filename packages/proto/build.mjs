@@ -28,6 +28,27 @@ const bundle = execFileSync(
 );
 
 const game = readFileSync(join(here, 'game.js'), 'utf8');
+
+/**
+ * Stamp the build into the page.
+ *
+ * Without this there is no way to tell which build a phone is actually running
+ * -- a cached page, a stale download and the current release all look
+ * identical. Reads the commit from CI, falling back to git locally.
+ */
+function buildId() {
+  const sha = process.env.GITHUB_SHA;
+  if (sha) return sha.slice(0, 7);
+  try {
+    return execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], {
+      cwd: here,
+      encoding: 'utf8',
+    }).trim();
+  } catch {
+    return 'local';
+  }
+}
+const BUILD = buildId();
 const template = readFileSync(join(here, 'index.html'), 'utf8');
 
 if (!template.includes('/*__CORE_BUNDLE__*/') || !template.includes('/*__GAME__*/')) {
@@ -41,7 +62,8 @@ const guard = (s) => s.replace(/<\/script>/gi, '<\\/script>');
 
 const html = template
   .replace('/*__CORE_BUNDLE__*/', guard(bundle))
-  .replace('/*__GAME__*/', guard(game));
+  .replace('/*__GAME__*/', guard(game))
+  .replace('__BUILD_ID__', BUILD);
 
 writeFileSync(outFile, html);
-console.log(`${outFile}  ${(html.length / 1024).toFixed(1)} KB`);
+console.log(`${outFile}  ${(html.length / 1024).toFixed(1)} KB  build ${BUILD}`);
