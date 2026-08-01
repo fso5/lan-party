@@ -203,6 +203,43 @@
   /* The player's own row, so a glance finds it without counting colours. */
   #scoreboard li[data-you="true"] { outline: 2px solid currentColor; font-weight: 700; }
 
+  #match-lobby {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 20;
+  }
+  #match-lobby .panel {
+    background: var(--ply);
+    color: var(--ink);
+    padding: 1.2rem 1.4rem;
+    border-radius: 0.6rem;
+    min-width: min(22rem, 88vw);
+    max-height: 86vh;
+    overflow-y: auto;
+  }
+  #match-lobby h2 { margin: 0 0 0.8rem; font-size: 1.2rem; }
+  #lobby-slots { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; gap: 0.35rem; }
+  #lobby-slots li {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-num);
+    font-size: 0.85rem;
+  }
+  #lobby-slots .dot { width: 0.7rem; height: 0.7rem; border-radius: 50%; flex: none; }
+  #lobby-slots .who { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #lobby-slots .tag { color: var(--ink-soft); font-size: 0.75rem; }
+  #lobby-slots li[data-you="true"] .who { font-weight: 700; }
+  .lobby-label { color: var(--ink-soft); font-size: 0.8rem; display: block; margin-bottom: 0.35rem; }
+  #lobby-team-buttons { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 1rem; }
+  #lobby-team-buttons button { min-width: 2.4rem; }
+  #lobby-team-buttons button[aria-pressed="true"] { outline: 2px solid var(--aim); }
+  #btn-ready[aria-pressed="true"] { background: #4F8A3D; color: white; }
+  .lobby-note { color: var(--ink-soft); font-size: 0.78rem; margin: 0.8rem 0 0; }
+
   #banner {
     position: absolute;
     inset: 0;
@@ -382,6 +419,21 @@
     <ul id="host-list" hidden><li class="empty">searching for a host nearby…</li></ul>
     <p id="radio-error" hidden></p>
     <button id="btn-lobby-close" class="lobby-close">Back to single player</button>
+  </div>
+</div>
+
+<!-- The match lobby. Only appears once a host actually sends a roster, so a
+     host that starts a match immediately is unaffected. -->
+<div id="match-lobby" hidden>
+  <div class="panel">
+    <h2>Lobby</h2>
+    <ul id="lobby-slots"></ul>
+    <div class="lobby-teams">
+      <span class="lobby-label">Your team</span>
+      <div id="lobby-team-buttons"></div>
+    </div>
+    <button id="btn-ready" aria-pressed="false">Ready</button>
+    <p class="lobby-note">Waiting for the host to start&hellip;</p>
   </div>
 </div>
 

@@ -13,7 +13,8 @@
 
 /* global createWorld, step, loadArena, MISSIONS, VERSUS_MAPS, emptyInput,
    isMatchOver, stepShell, dcos, dsin, datan2, TANK_RADIUS, TANK_SPECS,
-   TICK_HZ, EventKind, Tile, TankKind, livingTeams, DRAW */
+   TICK_HZ, EventKind, Tile, TankKind, livingTeams, DRAW, MsgType, LobbyOp,
+   readRoster, writeLobbyJoin, writeLobbySetTeam, writeLobbySetReady, Writer */
 
 const ALL_MAPS = [...MISSIONS, ...VERSUS_MAPS];
 
@@ -90,7 +91,37 @@ const net = {
   scores: [],
   matchOver: false,
   banner: null,
+  /**
+   * Lobby state, or null when the host never sends a roster.
+   *
+   * Null is the normal case for a host that starts a match immediately, so the
+   * lobby is strictly additive: the panel only appears once a roster actually
+   * arrives, and every existing flow is untouched.
+   */
+  roster: null,
+  mySlotId: -1,
+  ready: false,
 };
+
+/**
+ * A name for this phone, kept between visits.
+ *
+ * The alternative is asking for one before anybody can play, which is a form to
+ * fill in while four people wait. A recognisable default that can be changed
+ * later beats a mandatory prompt.
+ */
+function localPlayerName() {
+  try {
+    const saved = localStorage.getItem('tanks.name');
+    if (saved) return saved;
+    const name = `Player ${1 + Math.floor(Math.random() * 99)}`;
+    localStorage.setItem('tanks.name', name);
+    return name;
+  } catch {
+    // Private browsing can refuse storage; a name is not worth failing over.
+    return 'Player';
+  }
+}
 
 /** Bluetooth match state. Only meaningful inside the native app. */
 const ble = {
@@ -132,13 +163,32 @@ function connectMultiplayer() {
   // hold a temporary handler. MatchClient replaces these events on construction.
   transport.setEvents({ onPacket: (from, data) => net.dispatch?.(from, data) });
 
+  // Announce ourselves. A host running a lobby seats us from this; a host that
+  // starts immediately ignores it, because MatchHost drops anything that is not
+  // an Input packet. So this is safe to send either way.
+  sock.addEventListener('open', () => {
+    const w = new Writer();
+    writeLobbyJoin(w, localPlayerName());
+    transport.send('host', w.finish(), true);
+  });
+
   sock.onmessage = (ev) => transport.receive('host', new Uint8Array(ev.data));
   net.dispatch = (from, data) => {
     // The server restarts the match whenever someone joins or leaves, so
     // MatchStart can arrive at any time -- including long after MatchClient has
     // taken over. Keep dispatch here and forward the rest.
     const r = new Reader(data);
-    if (r.u8() === MsgType.MatchStart) {
+    const type = r.u8();
+    if (type === MsgType.Lobby) {
+      try {
+        handleLobbyMessage(r);
+      } catch (err) {
+        // A malformed roster must not take the screen down mid-lobby.
+        console.warn('[lobby]', err);
+      }
+      return;
+    }
+    if (type === MsgType.MatchStart) {
       try {
         beginNetworkedMatch(readMatchStart(r));
       } catch (err) {
@@ -157,6 +207,98 @@ function connectMultiplayer() {
     net.client = null;
   };
 }
+
+/* --- lobby ---------------------------------------------------------------
+ *
+ * The host is authoritative: tapping a team sends a request and changes
+ * nothing locally, then the roster comes back and the UI follows it. Two people
+ * tapping the same team at once is ordinary, and an optimistic local change
+ * leaves two phones disagreeing about who is on which side until the match
+ * starts -- the worst moment to find out.
+ */
+
+function handleLobbyMessage(r) {
+  const op = r.u8();
+  if (op === LobbyOp.Roster) {
+    net.roster = readRoster(r);
+    const mine = net.roster.slots.find((x) => x.slotId === net.mySlotId);
+    // Follow the host's view of our own ready flag rather than our last tap.
+    if (mine) net.ready = mine.ready;
+    renderLobby();
+  } else if (op === LobbyOp.Welcome) {
+    // A broadcast roster cannot say which row is us; this is the only thing
+    // that can.
+    net.mySlotId = r.u8();
+    renderLobby();
+  }
+}
+
+function sendLobby(build) {
+  if (!net.transport) return;
+  const w = new Writer();
+  build(w);
+  net.transport.send('host', w.finish(), true);
+}
+
+function renderLobby() {
+  const el = document.getElementById('match-lobby');
+  if (!net.roster) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+
+  const slots = net.roster.slots;
+  const list = document.getElementById('lobby-slots');
+  list.innerHTML = '';
+  for (const slot of slots) {
+    const li = document.createElement('li');
+    if (slot.slotId === net.mySlotId) li.dataset.you = 'true';
+
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    dot.style.background = TEAM_COLORS[slot.team % TEAM_COLORS.length];
+    li.appendChild(dot);
+
+    const who = document.createElement('span');
+    who.className = 'who';
+    who.textContent = slot.name || 'Player';
+    li.appendChild(who);
+
+    const tag = document.createElement('span');
+    tag.className = 'tag';
+    tag.textContent = [slot.isHost ? 'host' : '', slot.ready ? 'ready' : '']
+      .filter(Boolean)
+      .join(' · ');
+    li.appendChild(tag);
+
+    list.appendChild(li);
+  }
+
+  // Offer one team per seat, so free-for-all is reachable with a full lobby and
+  // 2v2 is reachable by everyone picking from the first two.
+  const teamCount = Math.max(2, Math.min(slots.length, TEAM_COLORS.length * 2));
+  const mine = slots.find((x) => x.slotId === net.mySlotId);
+  const buttons = document.getElementById('lobby-team-buttons');
+  buttons.innerHTML = '';
+  for (let team = 0; team < teamCount; team++) {
+    const b = document.createElement('button');
+    b.textContent = `T${team + 1}`;
+    b.style.color = TEAM_COLORS[team % TEAM_COLORS.length];
+    b.setAttribute('aria-pressed', String(mine ? mine.team === team : false));
+    b.addEventListener('click', () => sendLobby((w) => writeLobbySetTeam(w, team)));
+    buttons.appendChild(b);
+  }
+
+  const ready = document.getElementById('btn-ready');
+  ready.setAttribute('aria-pressed', String(net.ready));
+  ready.textContent = net.ready ? 'Ready' : 'Not ready';
+}
+
+document.getElementById('btn-ready').addEventListener('click', () => {
+  const next = !net.ready;
+  sendLobby((w) => writeLobbySetReady(w, next));
+});
 
 function beginNetworkedMatch(start) {
   const map = missionById(start.mapId);
@@ -184,6 +326,9 @@ function beginNetworkedMatch(start) {
     net.matchOver = false;
     net.banner = null;
   }
+
+  // The match is starting, so the lobby has done its job.
+  document.getElementById('match-lobby').hidden = true;
 
   state.world = world;
   state.outcome = null;

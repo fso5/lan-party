@@ -10,7 +10,8 @@
     "mp": "node server.mjs",
     "pwa": "node build-pwa.mjs",
     "pwa:check": "node build-pwa.mjs && node pwa-check.mjs",
-    "mp:smoke": "node build.mjs && node mp-smoke.mjs"
+    "mp:smoke": "node build.mjs && node mp-smoke.mjs",
+    "lobby:smoke": "node build.mjs && node lobby-smoke.mjs"
   },
   "dependencies": {
     "@tanks/core": "*",
