@@ -1754,6 +1754,173 @@ function estimateDownstreamBps(tankCount, snapshotHz) {
   return snapshotBytes * snapshotHz;
 }
 
+// ../core/src/net/ble.ts
+var BLE_SERVICE_UUID = "6b1e4a30-9d2c-4f11-b8a7-2c5e19d4f0a1";
+var BLE_TX_CHARACTERISTIC = "6b1e4a31-9d2c-4f11-b8a7-2c5e19d4f0a1";
+var BLE_RX_CHARACTERISTIC = "6b1e4a32-9d2c-4f11-b8a7-2c5e19d4f0a1";
+var FRAME_HEADER_BYTES = 2;
+var BLE_SAFE_MTU = 180;
+var BleFramer = class {
+  constructor(payloadSize = BLE_SAFE_MTU - FRAME_HEADER_BYTES) {
+    __publicField(this, "payloadSize", payloadSize);
+    __publicField(this, "nextMessageId", 0);
+    /** peerId -> messageId -> fragments received so far. */
+    __publicField(this, "pending", /* @__PURE__ */ new Map());
+    if (this.payloadSize < 8) throw new Error(`BLE payload size ${this.payloadSize} is unusably small`);
+  }
+  /** Split a message into wire frames. */
+  fragment(data) {
+    const id = this.nextMessageId;
+    this.nextMessageId = this.nextMessageId + 1 & 255;
+    const count = Math.max(1, Math.ceil(data.length / this.payloadSize));
+    if (count > 128) throw new Error(`message of ${data.length}B needs ${count} fragments, max 128`);
+    const frames = [];
+    for (let i = 0; i < count; i++) {
+      const slice = data.subarray(i * this.payloadSize, (i + 1) * this.payloadSize);
+      const frame = new Uint8Array(FRAME_HEADER_BYTES + slice.length);
+      frame[0] = id;
+      frame[1] = i & 127 | (i === count - 1 ? 128 : 0);
+      frame.set(slice, FRAME_HEADER_BYTES);
+      frames.push(frame);
+    }
+    return frames;
+  }
+  /**
+   * Feed a received frame. Returns the complete message once the last fragment
+   * of a group has arrived, otherwise null.
+   *
+   * Single-fragment messages -- which is nearly all of them -- bypass the
+   * reassembly buffers entirely.
+   */
+  reassemble(from, frame) {
+    if (frame.length < FRAME_HEADER_BYTES) return null;
+    const id = frame[0];
+    const index = frame[1] & 127;
+    const last = (frame[1] & 128) !== 0;
+    const payload = frame.subarray(FRAME_HEADER_BYTES);
+    if (last && index === 0) return payload.slice();
+    let byPeer = this.pending.get(from);
+    if (!byPeer) {
+      byPeer = /* @__PURE__ */ new Map();
+      this.pending.set(from, byPeer);
+    }
+    let parts = byPeer.get(id);
+    if (!parts) {
+      parts = [];
+      byPeer.set(id, parts);
+      if (byPeer.size > 8) {
+        const oldest = byPeer.keys().next().value;
+        if (oldest !== void 0) byPeer.delete(oldest);
+      }
+    }
+    parts[index] = payload.slice();
+    if (!last) return null;
+    const total = index + 1;
+    let size = 0;
+    for (let i = 0; i < total; i++) {
+      const p = parts[i];
+      if (!p) return null;
+      size += p.length;
+    }
+    const out = new Uint8Array(size);
+    let offset = 0;
+    for (let i = 0; i < total; i++) {
+      out.set(parts[i], offset);
+      offset += parts[i].length;
+    }
+    byPeer.delete(id);
+    return out;
+  }
+  forgetPeer(peerId) {
+    this.pending.delete(peerId);
+  }
+};
+var BleTransport = class {
+  constructor(adapter) {
+    __publicField(this, "adapter", adapter);
+    __publicField(this, "kind", "ble" /* Ble */);
+    __publicField(this, "framer");
+    __publicField(this, "events", {});
+    __publicField(this, "peers", /* @__PURE__ */ new Map());
+    this.framer = new BleFramer(adapter.payloadSize);
+    adapter.onFrame((from, frame) => {
+      const message = this.framer.reassemble(from, frame);
+      if (message) this.events.onPacket?.(from, message);
+    });
+    adapter.onPeerConnected((peer) => {
+      this.peers.set(peer.id, peer);
+      this.events.onPeerJoin?.(peer);
+    });
+    adapter.onPeerDisconnected((peerId, reason) => {
+      this.peers.delete(peerId);
+      this.framer.forgetPeer(peerId);
+      this.events.onPeerLeave?.(peerId, reason);
+    });
+  }
+  /**
+   * Largest message callers may send.
+   *
+   * Reported as the fragmentable maximum rather than the per-write MTU, so
+   * callers are not forced to think about fragments. The host still checks its
+   * snapshots against the single-write size, because a snapshot that needs two
+   * writes can tear across a frame boundary.
+   */
+  get maxPayload() {
+    return this.adapter.payloadSize * 128;
+  }
+  /** Payload that fits one BLE write, with no fragmentation. */
+  get singleWritePayload() {
+    return this.adapter.payloadSize;
+  }
+  setEvents(events) {
+    this.events = events;
+  }
+  async host(matchName) {
+    await this.adapter.startAdvertising(matchName);
+  }
+  async discover() {
+    await this.adapter.startScanning((peer) => {
+      this.events.onPeerJoin?.(peer);
+    });
+  }
+  async join(peerId) {
+    await this.adapter.stopScanning();
+    await this.adapter.connect(peerId);
+  }
+  send(to, data, reliable) {
+    try {
+      for (const frame of this.framer.fragment(data)) {
+        this.adapter.sendFrame(to, frame, reliable);
+      }
+    } catch (err) {
+      this.events.onError?.(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+  broadcast(data, reliable) {
+    let frames;
+    try {
+      frames = this.framer.fragment(data);
+    } catch (err) {
+      this.events.onError?.(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
+    for (const peerId of this.peers.keys()) {
+      for (const frame of frames) this.adapter.sendFrame(peerId, frame, reliable);
+    }
+  }
+  async close() {
+    await this.adapter.stopScanning().catch(() => {
+    });
+    await this.adapter.stopAdvertising().catch(() => {
+    });
+    for (const peerId of this.peers.keys()) {
+      await this.adapter.disconnect(peerId).catch(() => {
+      });
+    }
+    this.peers.clear();
+  }
+};
+
 // ../core/src/net/bridge.ts
 var BridgeTransport = class {
   constructor(sendFn, options = {}) {
@@ -2277,10 +2444,17 @@ function angleLerp(a, b, t) {
 export {
   Arena,
   BLE_PROFILE,
+  BLE_RX_CHARACTERISTIC,
+  BLE_SAFE_MTU,
+  BLE_SERVICE_UUID,
+  BLE_TX_CHARACTERISTIC,
+  BleFramer,
+  BleTransport,
   BridgeTransport,
   CLIENT_LEAD_TICKS,
   DT,
   EventKind,
+  FRAME_HEADER_BYTES,
   HALF_PI,
   LAN_PROFILE,
   LoopbackNetwork,
@@ -3308,6 +3482,41 @@ function frame(now) {
   render();
   updateHud();
   requestAnimationFrame(frame);
+}
+
+/**
+ * Bridge to the native shell, when running inside the app's WebView.
+ *
+ * The page owns the simulation and the renderer; native owns the radio. This is
+ * the seam -- BleAdapter's sendFrame goes out through here and frames come back
+ * in through receive(). Absent on the web, where window.ReactNativeWebView is
+ * undefined and everything below is simply never used.
+ */
+const nativeBridge = window.ReactNativeWebView
+  ? {
+      post(msg) {
+        window.ReactNativeWebView.postMessage(JSON.stringify(msg));
+      },
+      handlers: new Set(),
+    }
+  : null;
+
+if (nativeBridge) {
+  window.__tanksNative = {
+    receive(json) {
+      let msg;
+      try {
+        msg = JSON.parse(json);
+      } catch {
+        return;
+      }
+      for (const h of nativeBridge.handlers) h(msg);
+    },
+  };
+  nativeBridge.handlers.add((msg) => {
+    if (msg.type === 'ble.unavailable') setNetStatus('no radio');
+  });
+  nativeBridge.post({ type: 'ready' });
 }
 
 // Exposed for the automated multiplayer smoke test, which needs to compare
