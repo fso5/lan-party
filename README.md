@@ -2,6 +2,26 @@
 
 A mobile clone of *Tanks!* from Wii Play, with local multiplayer over Bluetooth.
 
+## The goal
+
+Phones in a room, playing each other with **no internet and no WiFi**. One phone
+hosts and the others find it over Bluetooth. Free-for-all or teams — several
+teams, not just two. A choice of maps. Nobody signs into anything.
+
+Where that stands:
+
+| | |
+|---|---|
+| The game — ricochets, mines, destructible terrain, enemy AI, 8 maps | done |
+| On a phone — iPhone via the web app, Android via the APK | done |
+| Match rules — rounds, scoring, free-for-all and teams | done in core, no UI |
+| Bluetooth — transport, framing, native GATT on both platforms | written, **never run on a radio** |
+| Lobby — host, discover, pick teams and a map, start | **not built** |
+
+The honest summary: everything under the multiplayer is built and tested against
+a simulated link, and none of it has moved a byte between two real phones. The
+lobby is the missing piece that would let it.
+
 Phone held sideways. Left stick drives, right stick aims the turret independently,
 buttons fire shells and lay mines. Shells ricochet off walls and kill in one hit —
 including your own shell, including you.

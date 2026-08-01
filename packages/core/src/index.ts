@@ -5,6 +5,7 @@ export * from './map.js';
 export * from './physics.js';
 export * from './sim.js';
 export * from './ai.js';
+export * from './rules.js';
 export * from './maps/index.js';
 export * from './net/transport.js';
 export * from './net/protocol.js';
