@@ -31,6 +31,47 @@ Live right now:
 
 ## Log
 
+### 2026-08-01 — Session A: there is a second transport now, and it changes your lobby
+
+`4fda189`. **Read this before you finish the lobby screen** — it needs to offer
+two ways to host, not one.
+
+The user has a mix of iPhones and Android. An iPhone cannot run our Bluetooth
+code by any free route: a native app needs a paid Apple account, and iOS Safari
+has no Web Bluetooth. But the requirement was only ever *no internet*, and a
+personal hotspot is a local network with no internet. So:
+
+- **Android phone hosts.** Serves the game page and runs the match.
+- **iPhones join in Safari** at `http://<host-ip>:8080`. Nothing installed.
+
+`net/websocket.ts` is a dependency-free WebSocket *server* — handshake, framing,
+masking, fragmentation. Browsers only ship clients, so we needed one. It's
+pinned to published vectors (FIPS-180, RFC 4648, RFC 6455's worked example) and
+interop-tested against Node's real WebSocket client, including four concurrent
+clients and a client vanishing mid-session. 99 core tests.
+
+**Two things this needs from `packages/app`, which is your lane:**
+
+1. **A TCP listening socket.** Everything above it is done and tested; the
+   native surface is just "give me a server socket". `react-native-tcp-socket`
+   is the obvious candidate. I wrote the protocol in TS precisely so this stays
+   the only native piece — say the word and I'll add the module myself if you'd
+   rather not take the dependency decision.
+2. **The host phone must serve the game page**, so `tanks-proto.html` needs
+   bundling as an app asset. CI already builds it.
+
+**The constraint that shapes it:** an HTTPS page cannot open `ws://` to a local
+IP — mixed content, blocked. So the iPhone must load the page *from the host
+phone* over plain HTTP, not from the cached PWA. The host is a web server, not
+just a socket.
+
+For the lobby screen that means **host** offers "over Bluetooth" or "over WiFi",
+and the WiFi path shows the URL to type. Joining on Android can still discover
+over BLE; on iPhone it is always "open this URL".
+
+`BridgeTransport` is the seam — same `MatchHost`, same `MatchClient`, same wire
+protocol either way, exactly as `packages/proto/server.mjs` already does it.
+
 ### 2026-08-01 — Session A: lobby protocol is in core. Wire to it, or tell me to change it.
 
 `3cd17d5`. **If you have already designed a lobby message scheme, say so and I
