@@ -185,6 +185,24 @@
   }
   canvas { display: block; touch-action: none; }
 
+  #rounds {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-family: var(--font-num);
+    font-size: 0.8rem;
+  }
+  #round-label { color: var(--ink-soft); white-space: nowrap; }
+  #scoreboard { display: flex; gap: 0.35rem; list-style: none; margin: 0; padding: 0; }
+  #scoreboard li {
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.25rem;
+    background: rgba(128, 128, 128, 0.18);
+    font-variant-numeric: tabular-nums;
+  }
+  /* The player's own row, so a glance finds it without counting colours. */
+  #scoreboard li[data-you="true"] { outline: 2px solid currentColor; font-weight: 700; }
+
   #banner {
     position: absolute;
     inset: 0;
@@ -346,6 +364,11 @@
     <div class="stat"><dt>Shells</dt><dd id="stat-shells">0/5</dd></div>
     <div class="stat"><dt>Mines</dt><dd id="stat-mines">0/2</dd></div>
   </dl>
+  <!-- Rounds only exist in a networked match, so this stays hidden in solo. -->
+  <div id="rounds" hidden>
+    <span id="round-label">Round 1</span>
+    <ol id="scoreboard"></ol>
+  </div>
 </header>
 
 <div id="lobby" hidden>

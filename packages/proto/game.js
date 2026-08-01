@@ -13,7 +13,7 @@
 
 /* global createWorld, step, loadArena, MISSIONS, VERSUS_MAPS, emptyInput,
    isMatchOver, stepShell, dcos, dsin, datan2, TANK_RADIUS, TANK_SPECS,
-   TICK_HZ, EventKind, Tile, TankKind, livingTeams */
+   TICK_HZ, EventKind, Tile, TankKind, livingTeams, DRAW */
 
 const ALL_MAPS = [...MISSIONS, ...VERSUS_MAPS];
 
@@ -78,6 +78,18 @@ const net = {
   client: null,
   dispatch: null,
   status: 'offline',
+  /**
+   * Round and score state, kept here rather than read off MatchClient.
+   *
+   * The host sends MatchStart at the start of every round, so a fresh
+   * MatchClient is built each time and its `lastRound` goes back to null.
+   * Reading the scoreboard from it would blank the score the instant a new
+   * round began -- exactly when people look at it.
+   */
+  round: 1,
+  scores: [],
+  matchOver: false,
+  banner: null,
 };
 
 /** Bluetooth match state. Only meaningful inside the native app. */
@@ -163,6 +175,15 @@ function beginNetworkedMatch(start) {
   // Start our clock ahead of the host. A client running behind can never apply
   // a snapshot, because the tick it describes is one we have not simulated yet.
   world.tick = start.hostTick + CLIENT_LEAD_TICKS;
+
+  // MatchStart also arrives at the start of every later round, so the counter
+  // is only reset when this is the first one of a match.
+  if (!net.client) {
+    net.round = 1;
+    net.scores = [];
+    net.matchOver = false;
+    net.banner = null;
+  }
 
   state.world = world;
   state.outcome = null;
@@ -1036,6 +1057,79 @@ function drawSticks() {
 
 // --- HUD -----------------------------------------------------------------
 
+/** Which team the local player is on, or -2 when there isn't one. */
+function myTeam() {
+  const id = net.client?.localTankId;
+  const tank = state.world.tanks.find((t) => t.id === id);
+  return tank ? tank.team : -2;
+}
+
+function teamLabel(team) {
+  return `T${team + 1}`;
+}
+
+/** The last round result we reacted to, by identity. */
+let seenRound = null;
+
+/**
+ * Rounds and the scoreboard.
+ *
+ * Without this the whole match is invisible: rounds end, the score changes and
+ * somebody eventually wins, and every player sees only tanks appearing and
+ * disappearing with no idea why.
+ */
+function updateRoundsHud() {
+  const el = document.getElementById('rounds');
+  // Rounds are a networked concept; solo play has none.
+  if (!net.client) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+
+  const result = net.client.lastRound;
+  if (result !== seenRound) {
+    seenRound = result;
+    if (result) {
+      net.scores = result.scores;
+      net.matchOver = result.matchOver;
+      if (!result.matchOver) net.round += 1;
+
+      const drew = result.winner === DRAW;
+      const won = !drew && result.winner === myTeam();
+      net.banner = {
+        text: drew
+          ? 'Draw'
+          : `${teamLabel(result.winner)} wins the ${result.matchOver ? 'match' : 'round'}`,
+        tone: won ? 'win' : 'lose',
+        // A match result stays up. A round result has to get out of the way
+        // before the next round starts, or it covers its opening seconds --
+        // which is when a shell is already in the air.
+        until: result.matchOver ? Infinity : performance.now() + 2200,
+      };
+    }
+  }
+
+  document.getElementById('round-label').textContent = net.matchOver
+    ? 'Final'
+    : `Round ${net.round}`;
+
+  const scores = new Map(net.scores.map((s) => [s.team, s.score]));
+  const teams = [
+    ...new Set(state.world.tanks.filter((t) => t.kind === TankKind.Player).map((t) => t.team)),
+  ].sort((a, b) => a - b);
+
+  const board = document.getElementById('scoreboard');
+  board.innerHTML = '';
+  for (const team of teams) {
+    const li = document.createElement('li');
+    li.textContent = `${teamLabel(team)} ${scores.get(team) ?? 0}`;
+    li.style.color = TEAM_COLORS[team % TEAM_COLORS.length];
+    if (team === myTeam()) li.dataset.you = 'true';
+    board.appendChild(li);
+  }
+}
+
 function updateHud() {
   const w = state.world;
   const player = playerTank();
@@ -1046,8 +1140,15 @@ function updateHud() {
   document.getElementById('stat-shells').textContent = player ? `${player.shellsOut}/5` : '-';
   document.getElementById('stat-mines').textContent = player ? `${player.minesOut}/2` : '-';
 
+  updateRoundsHud();
+
   const banner = document.getElementById('banner');
-  if (state.outcome) {
+  const netBanner = net.banner && performance.now() < net.banner.until ? net.banner : null;
+  if (netBanner) {
+    banner.textContent = netBanner.text;
+    banner.dataset.show = 'true';
+    banner.dataset.tone = netBanner.tone;
+  } else if (state.outcome) {
     banner.textContent = state.outcome;
     banner.dataset.show = 'true';
     banner.dataset.tone = state.outcome === 'Cleared' ? 'win' : 'lose';

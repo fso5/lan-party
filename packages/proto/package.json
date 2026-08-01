@@ -9,7 +9,8 @@
     "smoke": "node build.mjs && node smoke.mjs",
     "mp": "node server.mjs",
     "pwa": "node build-pwa.mjs",
-    "pwa:check": "node build-pwa.mjs && node pwa-check.mjs"
+    "pwa:check": "node build-pwa.mjs && node pwa-check.mjs",
+    "mp:smoke": "node build.mjs && node mp-smoke.mjs"
   },
   "dependencies": {
     "@tanks/core": "*",

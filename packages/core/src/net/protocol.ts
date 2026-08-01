@@ -601,9 +601,17 @@ export function writeLobbyWelcome(w: Writer, slotId: number): void {
 export interface WireRoundOver {
   /** Winning team, or DRAW. */
   winner: number;
-  /** Host tick the next round begins. */
+  /** Host tick the next round begins. Meaningless once `matchOver` is set. */
   resumeAtTick: number;
   scores: { team: number; score: number }[];
+  /**
+   * This was the last round.
+   *
+   * Sent rather than derived: a client would need `roundsToWin` to work it out,
+   * and a client that guesses wrong either announces a winner mid-match or
+   * leaves everyone waiting for a round that is never coming.
+   */
+  matchOver: boolean;
 }
 
 /** DRAW is -1 in memory; it travels as 0xff because the field is a byte. */
@@ -613,6 +621,7 @@ export function writeRoundOver(w: Writer, r: WireRoundOver): void {
   w.u8(MsgType.Event).u8(NetEvent.RoundOver);
   w.u8(r.winner < 0 ? WIRE_DRAW : r.winner);
   w.u16(r.resumeAtTick & 0xffff);
+  w.u8(r.matchOver ? 1 : 0);
   w.u8(r.scores.length);
   for (const s of r.scores) w.u8(s.team).u8(s.score);
 }
@@ -621,10 +630,11 @@ export function readRoundOver(r: Reader): WireRoundOver {
   const raw = r.u8();
   const winner = raw === WIRE_DRAW ? -1 : raw;
   const resumeAtTick = r.u16();
+  const matchOver = r.u8() !== 0;
   const count = r.u8();
   const scores: { team: number; score: number }[] = [];
   for (let i = 0; i < count; i++) scores.push({ team: r.u8(), score: r.u8() });
-  return { winner, resumeAtTick, scores };
+  return { winner, resumeAtTick, scores, matchOver };
 }
 
 /** Estimated bytes/sec downstream to one client, for budget checks in tests. */

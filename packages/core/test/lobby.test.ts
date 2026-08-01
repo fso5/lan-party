@@ -158,7 +158,12 @@ test('client requests are small enough to be free', () => {
 
 test('a round result round-trips, including a draw', () => {
   const w = new Writer(32);
-  writeRoundOver(w, { winner: DRAW, resumeAtTick: 500, scores: [{ team: 0, score: 1 }] });
+  writeRoundOver(w, {
+    winner: DRAW,
+    resumeAtTick: 500,
+    scores: [{ team: 0, score: 1 }],
+    matchOver: false,
+  });
   const r = new Reader(w.finish());
   assert.equal(r.u8(), MsgType.Event);
   assert.equal(r.u8(), NetEvent.RoundOver);
@@ -168,6 +173,53 @@ test('a round result round-trips, including a draw', () => {
   assert.equal(back.winner, DRAW);
   assert.equal(back.resumeAtTick, 500);
   assert.deepEqual(back.scores, [{ team: 0, score: 1 }]);
+  assert.equal(back.matchOver, false);
+});
+
+test('the client is told when a round was the last one', () => {
+  // Derived rather than sent, a client would need roundsToWin to work this out
+  // -- and one that guesses wrong either announces a winner mid-match or leaves
+  // everyone waiting for a round that is never coming.
+  const w = new Writer(32);
+  writeRoundOver(w, {
+    winner: 2,
+    resumeAtTick: 0,
+    scores: [{ team: 2, score: 3 }],
+    matchOver: true,
+  });
+  const r = new Reader(w.finish());
+  r.u8();
+  r.u8();
+  assert.equal(readRoundOver(r).matchOver, true);
+});
+
+test('a match ending sets matchOver on the wire, a mid-match round does not', () => {
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 5);
+  const hostT = new LoopbackTransport('host', 'Host', net);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+
+  const world = ffaWorld();
+  const host = new MatchHost(world, hostT, { mode: 'ffa', roundsToWin: 2, intermissionTicks: 30 });
+  const client = new MatchClient(cloneWorld(world), clientT, 'host', 1);
+  net.connect('host', 'client');
+  host.addClient('client', 1);
+  host.roundBuilder = () => ffaWorld();
+
+  // Round one to team 0: not the end.
+  for (const t of host.world.tanks) if (t.team !== 0) t.alive = false;
+  host.update(1000 / 60);
+  net.advance(50);
+  assert.equal(client.lastRound?.matchOver, false, 'one round in, the match continues');
+
+  // Let the next round begin, then decide it for team 0 again -- that is two,
+  // which takes the match.
+  for (let i = 0; i < 40; i++) host.update(1000 / 60);
+  for (const t of host.world.tanks) if (t.team !== 0) t.alive = false;
+  for (let i = 0; i < 5; i++) host.update(1000 / 60);
+  net.advance(50);
+
+  assert.equal(host.match.matchWinner, 0);
+  assert.equal(client.lastRound?.matchOver, true, 'the client must be told the match ended');
 });
 
 /** Four players, each on their own team -- free-for-all. */

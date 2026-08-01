@@ -257,6 +257,7 @@ export class MatchHost {
         winner: this.match.lastRoundWinner ?? -1,
         resumeAtTick: this.match.resumeAtTick,
         scores: standings(this.match),
+        matchOver: this.match.phase === 'finished',
       });
       this.pendingEvents.push(w.finish());
     }
