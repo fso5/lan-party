@@ -80,7 +80,10 @@ jobs:
       - name: Build the standalone single-file version
         run: |
           node packages/proto/build.mjs
-          cp packages/proto/dist/tanks-proto.html out-tanks.html
+          # Name the file what the download should be called. gh's "path#label"
+          # syntax sets a display label but leaves the asset -- and its download
+          # URL -- named after the file on disk.
+          cp packages/proto/dist/tanks-proto.html tanks.html
 
       - name: Name the APK after the commit
         id: apk
@@ -107,7 +110,7 @@ jobs:
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
           gh release create latest \
             "${{ steps.apk.outputs.path }}" \
-            "out-tanks.html#tanks.html" \
+            "tanks.html" \
             --title "Latest build" \
             --notes "$(cat <<NOTES
           Built from \`${GITHUB_SHA::7}\`.
@@ -115,7 +118,7 @@ jobs:
           | File | Size | What it is |
           |---|---|---|
           | \`${{ steps.apk.outputs.name }}\` | $(du -h "${{ steps.apk.outputs.path }}" | cut -f1) | Android app, arm64. Tap to install. |
-          | \`tanks.html\` | $(du -h out-tanks.html | cut -f1) | Single file, opens in any browser. Works offline. |
+          | \`tanks.html\` | $(du -h tanks.html | cut -f1) | Single file, opens in any browser. Works offline. |
 
           Both run with no internet. Tap **2P** for two players on one phone.
           NOTES
