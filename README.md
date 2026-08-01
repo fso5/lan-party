@@ -4,9 +4,14 @@ A mobile clone of *Tanks!* from Wii Play, with local multiplayer over Bluetooth.
 
 ## The goal
 
-Phones in a room, playing each other with **no internet and no WiFi**. One phone
-hosts and the others find it over Bluetooth. Free-for-all or teams — several
-teams, not just two. A choice of maps. Nobody signs into anything.
+Phones in a room, playing each other with **no internet**. One phone hosts and
+the others join it — over Bluetooth, or over a hotspot with no internet behind
+it. Free-for-all or teams — several teams, not just two. A choice of maps.
+Nobody signs into anything.
+
+Two routes because iPhones are the constraint: Bluetooth needs a native app,
+and a native app on an iPhone needs a paid Apple account. A hotspot needs
+neither — an iPhone joins in Safari.
 
 Where that stands:
 
@@ -16,12 +21,13 @@ Where that stands:
 | On a phone — iPhone via the web app, Android via the APK | done |
 | Match rules — rounds, scoring, free-for-all and several teams | done, live in the host |
 | Bluetooth — transport, framing, native GATT on both platforms | written, **never run on a radio** |
+| WiFi hotspot — WebSocket server, so an iPhone can join with no Apple account | protocol done, **no TCP socket in the app yet** |
 | Lobby — the wire protocol for rosters, teams and round results | done |
 | Lobby — the screen you tap to host, join and pick a side | **not built** |
 
 The honest summary: everything under the multiplayer is built and tested against
-a simulated link, and none of it has moved a byte between two real phones. The
-lobby is the missing piece that would let it.
+simulated links, and none of it has moved a byte between two real phones. Two
+things would change that — a lobby screen, and a listening socket in the app.
 
 Phone held sideways. Left stick drives, right stick aims the turret independently,
 buttons fire shells and lay mines. Shells ricochet off walls and kill in one hit —
@@ -55,7 +61,7 @@ are generated from source by CI, so neither can go stale.
 Tap **Bluetooth** in the app to host or join a match with nearby phones — no
 internet, no WiFi, no pairing. The native module compiles and ships in the APK,
 but it has **not been verified on hardware**: that needs two devices in hand.
-Everything above the radio is tested (76 tests, including a full match over the
+Everything above the radio is tested (99 tests, including a full match over the
 BLE code path against a simulated link).
 
 One caveat, because "the module ships in the APK" reads as more than it is:
@@ -63,16 +69,29 @@ nothing in the JavaScript currently imports the adapter, so Metro drops it and
 the radio is present but unreachable in the build on the release right now. The
 lobby is what connects them.
 
-### iPhone
+### iPhone, and why WiFi beats Bluetooth here
 
 There is no way to put a native iOS app on an iPhone without either a paid
-Apple Developer account or a Mac — that is Apple's constraint, not ours. So:
+Apple Developer account or a Mac — Apple's constraint, not ours. iOS Safari
+also has no Web Bluetooth, and never has. So an iPhone cannot run our
+Bluetooth code by any free route.
 
-- **Today, free:** open `tanks.html` in Safari. Single-player and 2P work.
-  No Bluetooth — iOS Safari has no Web Bluetooth at all, and never has.
-- **Bluetooth on iPhone:** needs an Apple Developer account ($99/yr). With one,
-  `eas build --platform ios --profile preview` builds in the cloud and installs
-  via TestFlight, with no laptop involved. `eas.json` is configured for it.
+It doesn't need to. **The requirement was never internet — it was no internet.**
+A personal hotspot is a local network with no internet, and that is all this
+game wants:
+
+- One **Android** phone hosts. It serves the game page and runs the match.
+- Everyone else — iPhones included — opens `http://<host-ip>:8080` in Safari.
+  Nothing installed, no account, no App Store, no pairing.
+
+The catch that shapes the design: an HTTPS page **cannot** open a `ws://`
+connection to a local IP — browsers block it as mixed content. So the cached
+PWA can't be the client, and the host phone has to serve the page as well as
+host the match. That's why `net/websocket.ts` is an HTTP server and not just a
+socket.
+
+Bluetooth stays worth having — it needs no hotspot at all, and works
+Android-to-Android today. It's the better answer when no iPhone is involved.
 
 ## Playing it with no laptop and no internet
 
@@ -91,15 +110,16 @@ aims — two thumbs can't work four sticks. That does cost the thing that makes
 the real game feel right, driving one way while shooting another, so couch play
 is the compromise mode, not the scheme the phone app should ship.
 
-Two *separate* phones can't play each other in a browser with no laptop: there's
-nothing to run the host on, and Web Bluetooth doesn't exist on iOS at all. That
-needs the native app, which is what `BleTransport` is for.
+Two *separate* phones playing each other needs something to host the match, and
+a browser cannot be that — it can only be a WebSocket client, never a server.
+The Android app is the answer: it listens, so the iPhones can join it. That is
+what `net/websocket.ts` is for, and it is why Bluetooth is not the only route.
 
 ## Build it
 
 ```
 npm install
-npm test  --workspace @tanks/core      # 76 tests, headless
+npm test  --workspace @tanks/core      # 99 tests, headless
 npm test  --workspace @tanks/app       # 28 tests
 npm run build --workspace @tanks/proto # -> packages/proto/dist/tanks-proto.html
 npm run smoke --workspace @tanks/proto # drives the built page in a real browser
@@ -201,6 +221,7 @@ packages/core/src/
   net/
     transport.ts  BLE / LAN / loopback interface
     protocol.ts   binary wire format
+    websocket.ts  a WebSocket server, so a phone can host over WiFi
 ```
 
 Maps are authored as ASCII so a level reads as a picture in source:
@@ -225,13 +246,16 @@ Maps are authored as ASCII so a level reads as a picture in source:
 8. ~~Match rules — rounds, scoring, free-for-all and multi-team~~ — done, and
    the host scores live rounds over the wire
 9. ~~Lobby protocol — rosters, team changes, round results~~ — done
-10. **Lobby screen** — host, discover, pick a team and a map, start. The one
-   thing standing between the tested stack and two phones actually playing:
-   nothing in JS imports the radio until this exists.
-11. Host migration
-12. Mods: more maps, map editor
+10. ~~WebSocket server — so a phone can host over a hotspot and an iPhone can
+    join in Safari with no Apple account~~ — done, dependency-free and
+    interop-tested against a real client
+11. **Lobby screen, and a TCP socket in the app.** The two things standing
+    between the tested stack and phones actually playing. Nothing in JS
+    imports the radio or opens a listening socket until these exist.
+12. Host migration
+13. Mods: more maps, map editor
 
-76 tests passing. Steps 5 and 6 are deliberately ordered: debugging prediction
+99 tests passing. Steps 5 and 6 are deliberately ordered: debugging prediction
 and reconciliation over UDP is tractable; debugging it *simultaneously* with
 debugging BLE is not.
 
