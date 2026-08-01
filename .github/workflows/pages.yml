@@ -27,13 +27,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # enablement: true turns Pages on via the API if it is not already, so
-      # deploying does not depend on someone having flipped a settings toggle by
-      # hand. Requires the pages: write permission granted above.
-      - uses: actions/configure-pages@v5
-        with:
-          enablement: true
-
+      # Note: enablement: true does not work here. The Actions token can deploy
+      # to an existing Pages site but cannot create one -- it comes back with
+      # "Resource not accessible by integration". Pages has to be switched on
+      # once by hand at Settings > Pages > Source: GitHub Actions. After that
+      # this workflow deploys on every push with no further intervention.
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
