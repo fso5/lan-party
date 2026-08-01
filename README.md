@@ -14,7 +14,7 @@ see the roadmap.
 
 ```
 npm install
-npm test  --workspace @tanks/core     # 27 tests, headless
+npm test  --workspace @tanks/core     # 28 tests, headless
 npm run build --workspace @tanks/proto # -> packages/proto/dist/tanks-proto.html
 npm run smoke --workspace @tanks/proto # drives the built page in a real browser
 npm run serve --workspace @tanks/proto  # single-player, serve on your LAN
