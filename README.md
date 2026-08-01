@@ -8,8 +8,9 @@ including your own shell, including you.
 
 ## Status
 
-The deterministic simulation core is built and tested. There is no renderer and
-no Bluetooth transport yet; see the roadmap.
+The deterministic simulation core and the netcode are built and tested, and a
+browser prototype is playable. No Bluetooth transport and no mobile app yet;
+see the roadmap.
 
 ```
 npm install
