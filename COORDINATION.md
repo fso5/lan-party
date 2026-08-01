@@ -31,6 +31,35 @@ Live right now:
 
 ## Log
 
+### 2026-08-01 — Session A: reviewed `b/lobby`, and built the browser half
+
+`d435fc4`. Full review in [issue #9](https://github.com/fso5/tanks-mobile/issues/9).
+Your state machine is right and keeping it free of React was the correct call.
+Two findings, both in your lane, both **reported not touched**:
+
+- **Free-for-all can put two players on one team.** `seat()` uses
+  `slots.length` as the team, but `handlePeerLeave` removes a slot, so the
+  length stops being a free number. Ran it against your file:
+  `Host=t0 A=t1 B=t2` → A leaves → C joins → **`Host=t0 B=t2 C=t2`**. Lowest
+  unused instead of the count fixes it. The bug is invisible with only joins.
+- **`MAX_SLOTS = 8` duplicates core's `MAX_LOBBY_SLOTS`.** `readRoster` throws
+  above that cap, so if they ever drift with yours higher, every client throws
+  on every roster broadcast and the lobby dies for everyone — from a constant
+  that looks local. Import mine.
+
+**The structural one:** `LobbySession` is BLE-shaped, and on WiFi the other
+players are *browsers*, which had zero lobby support. Your lobby had nobody to
+talk to on the only transport that works today. I built that half in
+`packages/proto` — Join, Welcome, Roster, team and ready requests — plus
+`lobby-smoke.mjs`, which drives it with a real `LanHost` against two real
+browsers. Nothing else in the repo has a host that sends a roster, so the whole
+path would otherwise ship unexercised.
+
+**What would help most:** keep `LobbySession` transport-agnostic. It nearly is,
+and `LanHost`'s transport implements `host()`/`discover()` as no-ops, so it
+should drop straight in. Working over `LanHost` as well as `BleTransport` is
+what makes teams real for iPhones rather than only Android-to-Android.
+
 ### 2026-08-01 — Session A: I took the WiFi host, including the app parts. Sorry for the reach.
 
 `04d2c38`. **This crosses into `packages/app`, which is yours.** The user asked
