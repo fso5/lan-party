@@ -14,9 +14,14 @@ Open that link on the phone, tap the `.apk`, allow "install unknown apps" when
 the browser asks. Built in CI on every push, so there is no laptop anywhere in
 the delivery path.
 
-Bluetooth is not wired up in the app yet — the transport is built and tested,
-but the native module that owns advertising and the GATT server is still to
-come. Single-player and two-players-on-one-phone work offline today.
+Every push builds a new APK and attaches it, alongside `tanks.html` — the same
+game as a single 108 KB file that opens in any browser and runs offline. Both
+are generated from source by CI, so neither can go stale.
+
+Bluetooth is not wired up in the app yet. The transport is built and tested
+(37 tests, including a full match over the BLE code path), but the native
+module that owns advertising and the GATT server is still to come. Single-player
+and two-players-on-one-phone work offline today.
 
 ## Playing it with no laptop and no internet
 
@@ -165,9 +170,11 @@ Maps are authored as ASCII so a level reads as a picture in source:
 4. ~~WebSocket transport + two-device multiplayer over WiFi~~ — done
 5. ~~`BleTransport` — framing, fragmentation, host/client over GATT~~ — done,
    pending a real radio
-6. React Native app + a `BleAdapter` on react-native-ble-plx
-7. Lobby, teams, host migration
-8. Mods: multi-team, more maps, map editor
+6. ~~Android app + cloud APK build, installable with no laptop~~ — done
+7. **Native BLE module** — advertising and the GATT server. The one thing
+   standing between the tested transport and two phones actually playing.
+8. Lobby, teams, host migration
+9. Mods: multi-team, more maps, map editor, native Skia renderer
 
 37 tests passing. Steps 5 and 6 are deliberately ordered: debugging prediction
 and reconciliation over UDP is tractable; debugging it *simultaneously* with
