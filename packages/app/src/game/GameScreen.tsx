@@ -157,6 +157,11 @@ export function GameScreen({
           // every client is being corrected against.
           session.setLocalInput(input);
           session.update(DT * 1000);
+
+          // A new round replaces the world outright. Holding the old one would
+          // leave the screen showing the finished round for ever while the
+          // real match carried on underneath.
+          if (session.world !== worldRef.current) worldRef.current = session.world;
         } else {
           inputsRef.current.clear();
           const player = world.tanks.find((t) => t.kind === TankKind.Player);

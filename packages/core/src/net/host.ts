@@ -76,6 +76,25 @@ export class MatchHost {
    */
   readonly match: MatchState;
 
+  /**
+   * Builds the world for the next round. Supplied by the embedder, because
+   * loading an arena is a content concern and the netcode has no business
+   * knowing how maps are addressed.
+   *
+   * **The roster must be rebuilt in the same order every time.** Tank ids come
+   * from creation order, so a round that seats players differently hands every
+   * client a tank id belonging to somebody else.
+   *
+   * Without one, a match is a single round -- see `beginRound`.
+   */
+  roundBuilder: ((round: number) => WorldState) | null = null;
+
+  /**
+   * A new round's world is live. The embedder sends `MatchStart` from here so
+   * clients rebuild against it; they cannot derive a new world on their own.
+   */
+  onRoundStart: ((world: WorldState, round: number) => void) | null = null;
+
   constructor(
     public world: WorldState,
     private transport: Transport,
@@ -231,6 +250,7 @@ export class MatchHost {
     }
 
     // Scoring runs after the step, so this tick's deaths count toward it.
+    const phaseBefore = this.match.phase;
     if (updateMatch(this.match, this.world)) {
       const w = new Writer(32);
       writeRoundOver(w, {
@@ -241,9 +261,51 @@ export class MatchHost {
       this.pendingEvents.push(w.finish());
     }
 
+    // The intermission just elapsed, so a new round begins on this tick.
+    if (phaseBefore === 'intermission' && this.match.phase === 'playing') {
+      this.beginRound();
+    }
+
     this.flushEvents();
 
     if (this.world.tick % SNAPSHOT_INTERVAL === 0) this.sendSnapshot();
+  }
+
+  /**
+   * Start the next round on a fresh world.
+   *
+   * Without this the previous round's corpses are still lying there when the
+   * intermission ends, so the very next tick decides the "new" round for
+   * whoever won the last one -- and a best-of-three completes in about six
+   * seconds without anybody playing. Rebuilding is not a nicety; a match is
+   * incoherent without it.
+   *
+   * With no `roundBuilder` there is no way to produce a second world, so the
+   * match is a single round and ends here. That is a truthful outcome rather
+   * than the alternative, which is awarding every remaining round to the same
+   * team for the same corpses.
+   */
+  private beginRound(): void {
+    if (!this.roundBuilder) {
+      this.match.phase = 'finished';
+      this.match.matchWinner = this.match.lastRoundWinner;
+      return;
+    }
+
+    const next = this.roundBuilder(this.match.round);
+
+    // Carry the clock forward rather than restarting at zero. Ticks travel as
+    // 16 bits and clients expand them against their own clock, so a counter
+    // that jumps backwards between rounds makes every snapshot look ancient
+    // until the client happens to resync.
+    next.tick = this.world.tick + 1;
+    this.world = next;
+
+    // Events queued against the old world describe shells and blocks that no
+    // longer exist. Sending them would spawn phantoms in the new round.
+    this.pendingEvents.length = 0;
+
+    this.onRoundStart?.(this.world, this.match.round);
   }
 
   private flushEvents(): void {

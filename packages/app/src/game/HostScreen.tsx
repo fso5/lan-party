@@ -86,18 +86,27 @@ export function HostScreen({ onBack }: { onBack: () => void }) {
     }
   }, []);
 
-  const startMatch = useCallback(() => {
+  /**
+   * Build the roster for a round from whoever is connected right now.
+   *
+   * Recomputed every round rather than fixed at match start, which is what
+   * seats a late joiner. Somebody who opens the URL mid-round is otherwise a
+   * connected peer that nothing ever gives a tank to -- their browser sits on
+   * an open socket showing nothing, for ever.
+   *
+   * Seat 0 is this phone. Everyone else follows in `playerIds` order, and that
+   * order is the wire contract: tank ids come from creation order, so the same
+   * roster has to be rebuilt identically on every device.
+   */
+  const buildRoster = useCallback((round: number) => {
     const lan = lanRef.current;
-    if (!lan) return;
-
     const map = VERSUS_MAPS[0];
     const arena = loadArena(map);
-    const peers = lan.playerIds.slice();
+    const peers = lan ? lan.playerIds.slice() : [];
 
-    // This phone is a player, not a server -- seat 0 is whoever is holding it.
-    // Everyone gets their own team, which is free-for-all; the simulation only
-    // ever keys off team, so seating two players on one team would be 2v2 with
-    // no other change.
+    // Everyone on their own team is free-for-all. The simulation only keys off
+    // team, so seating two players on one team would be 2v2 with nothing else
+    // changing -- that is what the lobby will choose once it exists.
     const seats = 1 + peers.length;
     const players = Array.from({ length: seats }, (_, i) => ({ team: i, spawnIndex: i }));
 
@@ -108,33 +117,80 @@ export function HostScreen({ onBack }: { onBack: () => void }) {
       bots.push({ kind: botKinds[(s - seats) % botKinds.length], team: 90 + s, spawnIndex: s });
     }
 
-    const seed = 0x7a5 + seats * 31;
-    const world = createWorld({ arena, seed, players, bots });
+    // A fresh seed per round, so round two is not a replay of round one with
+    // the same bot decisions from the same positions.
+    const seed = 0x7a5 + round * 7919 + seats * 31;
+    return { map, arena, peers, players, bots, seed };
+  }, []);
 
-    const host = new MatchHost(world, lan.transport);
-    host.localTankId = world.tanks[0].id;
+  /** Seat every connected phone in the current world and tell it which tank. */
+  const seatAll = useCallback(
+    (host: MatchHost, roster: ReturnType<typeof buildRoster>) => {
+      const lan = lanRef.current;
+      if (!lan) return;
 
-    peers.forEach((peerId, i) => {
-      const tankId = i + 1; // Players are created first, in this order.
-      host.addClient(peerId, tankId);
-      const w = new Writer(64);
-      writeMatchStart(w, {
-        mapId: map.id,
-        seed,
-        // The client starts its clock ahead of ours from this. A client level
-        // with the host can never apply a snapshot, and silently never
-        // reconciles.
-        hostTick: world.tick,
-        yourTankId: tankId,
-        players,
-        bots,
+      host.localTankId = host.world.tanks[0].id;
+
+      roster.peers.forEach((peerId, i) => {
+        const tankId = i + 1; // Players are created first, in this order.
+        host.addClient(peerId, tankId);
+        const w = new Writer(64);
+        writeMatchStart(w, {
+          mapId: roster.map.id,
+          seed: roster.seed,
+          // The client starts its clock ahead of ours from this. A client level
+          // with the host can never apply a snapshot, and silently never
+          // reconciles.
+          hostTick: host.world.tick,
+          yourTankId: tankId,
+          players: roster.players,
+          bots: roster.bots,
+        });
+        lan.transport.send(peerId, w.finish(), true);
       });
-      lan.transport.send(peerId, w.finish(), true);
+    },
+    [buildRoster],
+  );
+
+  const startMatch = useCallback(() => {
+    const lan = lanRef.current;
+    if (!lan) return;
+
+    const roster = buildRoster(1);
+    const world = createWorld({
+      arena: roster.arena,
+      seed: roster.seed,
+      players: roster.players,
+      bots: roster.bots,
     });
 
+    const host = new MatchHost(world, lan.transport);
+
+    // Without this a won round takes the whole match: the intermission ends
+    // with the previous round's corpses still lying there, so the next tick
+    // decides the "new" round for the same team, and a best-of-three finishes
+    // in seconds with nobody playing.
+    const pending = { roster };
+    host.roundBuilder = (round) => {
+      pending.roster = buildRoster(round);
+      return createWorld({
+        arena: pending.roster.arena,
+        seed: pending.roster.seed,
+        players: pending.roster.players,
+        bots: pending.roster.bots,
+      });
+    };
+    host.onRoundStart = () => {
+      // Reseat from scratch: the roster is rebuilt each round, so a phone that
+      // joined mid-round now has a tank, and everyone's tank id may have moved.
+      for (const peerId of lan.playerIds) host.removeClient(peerId);
+      seatAll(host, pending.roster);
+    };
+
+    seatAll(host, roster);
     matchRef.current = host;
     setPhase('playing');
-  }, []);
+  }, [buildRoster, seatAll]);
 
   if (phase === 'playing' && matchRef.current) {
     return <GameScreen session={matchRef.current} />;

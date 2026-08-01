@@ -273,3 +273,80 @@ test('the host does not re-score the same round every tick', () => {
 
   assert.equal(host.match.score.get(0), 1, 'exactly one point for one round');
 });
+
+/* ---------------------------------------------------------------------------
+ * Rounds have to start on a fresh world.
+ * ------------------------------------------------------------------------ */
+
+test('a won round does not sweep the whole match', () => {
+  // Measured before the fix: one round win took a best-of-three in about six
+  // seconds of game time. Nothing revived the tanks, so when the intermission
+  // ended the same corpses were still there and the next tick decided the
+  // "new" round for the same team, over and over.
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 1);
+  const host = new MatchHost(ffaWorld(), new LoopbackTransport('h', 'H', net));
+
+  let rebuilds = 0;
+  host.roundBuilder = () => {
+    rebuilds++;
+    return ffaWorld();
+  };
+
+  for (const t of host.world.tanks) if (t.team !== 2) t.alive = false;
+  for (let i = 0; i < 60 * 12; i++) host.update(1000 / 60);
+
+  assert.equal(host.match.score.get(2), 1, 'exactly one round was actually played');
+  assert.equal(host.match.matchWinner, null, 'the match must still be running');
+  assert.ok(rebuilds >= 1, 'the next round must be built on a fresh world');
+  assert.ok(
+    host.world.tanks.every((t) => t.alive),
+    'a new round starts with everyone alive',
+  );
+});
+
+test('the next round is announced so clients can rebuild', () => {
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 1);
+  const host = new MatchHost(ffaWorld(), new LoopbackTransport('h', 'H', net));
+
+  const announced: number[] = [];
+  host.roundBuilder = () => ffaWorld();
+  host.onRoundStart = (_w, round) => announced.push(round);
+
+  for (const t of host.world.tanks) if (t.team !== 0) t.alive = false;
+  for (let i = 0; i < 60 * 5; i++) host.update(1000 / 60);
+
+  // A client cannot derive a new world by itself -- it is told, or it sits
+  // watching a match that no longer exists.
+  assert.deepEqual(announced, [2]);
+});
+
+test('the tick keeps moving forward across a round boundary', () => {
+  // Ticks travel as 16 bits and clients expand them against their own clock.
+  // A counter that restarts at zero makes every snapshot look ancient.
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 1);
+  const host = new MatchHost(ffaWorld(), new LoopbackTransport('h', 'H', net));
+  host.roundBuilder = () => ffaWorld();
+
+  for (const t of host.world.tanks) if (t.team !== 1) t.alive = false;
+  for (let i = 0; i < 60 * 2; i++) host.update(1000 / 60);
+  const atRoundOneEnd = host.world.tick;
+
+  for (let i = 0; i < 60 * 3; i++) host.update(1000 / 60);
+  assert.ok(host.world.tick > atRoundOneEnd, `${host.world.tick} must exceed ${atRoundOneEnd}`);
+  assert.equal(host.match.round, 2);
+});
+
+test('with no way to build a round, the match ends honestly', () => {
+  // An embedder that supplied no roundBuilder cannot have a second round. That
+  // has to finish the match, not award every remaining round to whoever won
+  // the first one for the same corpses.
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 1);
+  const host = new MatchHost(ffaWorld(), new LoopbackTransport('h', 'H', net));
+
+  for (const t of host.world.tanks) if (t.team !== 3) t.alive = false;
+  for (let i = 0; i < 60 * 12; i++) host.update(1000 / 60);
+
+  assert.equal(host.match.phase, 'finished');
+  assert.equal(host.match.matchWinner, 3);
+  assert.equal(host.match.score.get(3), 1, 'one round played, one round scored');
+});
