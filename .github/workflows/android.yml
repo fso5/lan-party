@@ -46,9 +46,14 @@ jobs:
 
       - run: npm ci
 
-      # The app embeds the built game, which is built from the core.
+      # The app resolves @tanks/core through Metro to its TypeScript source, so
+      # no dist build is needed for the APK. Build it anyway: the core tests run
+      # against dist, and a compile error should fail here rather than surface
+      # later as a broken published package.
       - run: npm run build --workspace @tanks/core
-      - run: node packages/app/scripts/embed-game.mjs
+
+      - name: Test both workspaces
+        run: npm test --workspaces --if-present
 
       # Expo generates the native android/ project from app.json. It is not
       # committed, so that config stays the single source of truth rather than

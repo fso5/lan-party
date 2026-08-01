@@ -1,51 +1,41 @@
 {
   "expo": {
     "name": "Tanks!",
-    "slug": "tanks-mobile",
+    "slug": "tanks",
     "version": "0.1.0",
     "orientation": "landscape",
-    "icon": "./assets/icon-512.png",
-    "userInterfaceStyle": "automatic",
-    "backgroundColor": "#16140F",
-    "splash": {
-      "image": "./assets/icon-512.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#16140F"
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0d1117",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.fso5.tanks",
+      "requireFullScreen": true,
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "Tanks! uses Bluetooth to find and play with people nearby, with no internet connection.",
+        "NSLocalNetworkUsageDescription": "Tanks! uses the local network to play with people on the same Wi-Fi or hotspot, with no internet connection.",
+        "UIRequiresPersistentWiFi": false
+      }
     },
     "android": {
       "package": "com.fso5.tanks",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/icon-512.png",
-        "backgroundColor": "#16140F"
+        "backgroundColor": "#0d1117",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
       },
+      "predictiveBackGestureEnabled": false,
       "permissions": [
-        "android.permission.BLUETOOTH_SCAN",
         "android.permission.BLUETOOTH_ADVERTISE",
         "android.permission.BLUETOOTH_CONNECT",
-        "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.ACCESS_COARSE_LOCATION"
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
-    "ios": {
-      "bundleIdentifier": "com.fso5.tanks",
-      "supportsTablet": true,
-      "infoPlist": {
-        "NSBluetoothAlwaysUsageDescription": "Tanks! uses Bluetooth to connect to nearby players with no internet.",
-        "UIBackgroundModes": [
-          "bluetooth-central",
-          "bluetooth-peripheral"
-        ]
-      }
+    "web": {
+      "favicon": "./assets/favicon.png"
     },
-    "plugins": [
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "kotlinVersion": "1.9.25"
-          }
-        }
-      ]
-    ]
+    "plugins": ["expo-dev-client"]
   }
 }

@@ -1,14 +1,12 @@
 /**
  * JS surface for the native Bluetooth module.
  *
- * Thin on purpose: this file only converts between the native event shape and
- * the BleAdapter interface that @tanks/core expects. All the protocol logic --
- * framing, fragmentation, reliability choices -- lives in core, where it is
- * testable without a radio.
+ * Thin on purpose: this only names what the native side exposes and types its
+ * events. All the protocol logic -- framing, fragmentation, reliability
+ * choices -- lives in @tanks/core, where it is testable without a radio.
  */
 
-import { requireNativeModule } from 'expo-modules-core';
-import { EventEmitter, type EventSubscription } from 'expo-modules-core';
+import { NativeModule, requireNativeModule, type EventSubscription } from 'expo-modules-core';
 
 export interface NativePeer {
   peerId: string;
@@ -16,7 +14,25 @@ export interface NativePeer {
   rssi?: number;
 }
 
-interface TanksBleNative {
+/**
+ * Events the native side emits.
+ *
+ * Declared as a map on NativeModule rather than wired through a standalone
+ * EventEmitter, so listener names and payloads are checked at compile time. A
+ * renamed event would otherwise fail silently at runtime -- and on a radio path
+ * "no events arriving" is very hard to tell apart from "the other phone isn't
+ * there", which is the worst kind of bug to go looking for.
+ */
+type TanksBleEvents = {
+  onFrame: (event: { peerId: string; frame: string }) => void;
+  onPeerFound: (event: NativePeer) => void;
+  onPeerConnected: (event: NativePeer) => void;
+  onPeerDisconnected: (event: { peerId: string; reason: string }) => void;
+  onError: (event: { where: string; message: string }) => void;
+  onStateChange: (event: { state: string; payload?: number; name?: string }) => void;
+};
+
+declare class TanksBleNativeModule extends NativeModule<TanksBleEvents> {
   isSupported(): boolean;
   /** Bytes that fit one BLE write, excluding ATT overhead. */
   payloadSize(): number;
@@ -26,12 +42,11 @@ interface TanksBleNative {
   stopScanning(): Promise<void>;
   connect(peerId: string): Promise<void>;
   disconnect(peerId: string): Promise<void>;
-  /** `frame` is base64; postMessage and the native bridge both carry strings. */
+  /** `frame` is base64 -- the native bridge carries strings, not byte arrays. */
   sendFrame(to: string, frame: string, ack: boolean): void;
 }
 
-const native = requireNativeModule<TanksBleNative>('TanksBle');
-const emitter = new EventEmitter(native as never);
+const native = requireNativeModule<TanksBleNativeModule>('TanksBle');
 
 export const TanksBle = {
   isSupported: () => native.isSupported(),
@@ -45,16 +60,14 @@ export const TanksBle = {
   sendFrame: (to: string, frameBase64: string, ack: boolean) =>
     native.sendFrame(to, frameBase64, ack),
 
-  onFrame: (cb: (e: { peerId: string; frame: string }) => void): EventSubscription =>
-    emitter.addListener('onFrame', cb),
-  onPeerFound: (cb: (e: NativePeer) => void): EventSubscription =>
-    emitter.addListener('onPeerFound', cb),
-  onPeerConnected: (cb: (e: NativePeer) => void): EventSubscription =>
-    emitter.addListener('onPeerConnected', cb),
-  onPeerDisconnected: (cb: (e: { peerId: string; reason: string }) => void): EventSubscription =>
-    emitter.addListener('onPeerDisconnected', cb),
-  onError: (cb: (e: { where: string; message: string }) => void): EventSubscription =>
-    emitter.addListener('onError', cb),
-  onStateChange: (cb: (e: { state: string; payload?: number; name?: string }) => void): EventSubscription =>
-    emitter.addListener('onStateChange', cb),
+  onFrame: (cb: TanksBleEvents['onFrame']): EventSubscription => native.addListener('onFrame', cb),
+  onPeerFound: (cb: TanksBleEvents['onPeerFound']): EventSubscription =>
+    native.addListener('onPeerFound', cb),
+  onPeerConnected: (cb: TanksBleEvents['onPeerConnected']): EventSubscription =>
+    native.addListener('onPeerConnected', cb),
+  onPeerDisconnected: (cb: TanksBleEvents['onPeerDisconnected']): EventSubscription =>
+    native.addListener('onPeerDisconnected', cb),
+  onError: (cb: TanksBleEvents['onError']): EventSubscription => native.addListener('onError', cb),
+  onStateChange: (cb: TanksBleEvents['onStateChange']): EventSubscription =>
+    native.addListener('onStateChange', cb),
 };
