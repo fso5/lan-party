@@ -17,7 +17,13 @@ npm install
 npm test  --workspace @tanks/core     # 27 tests, headless
 npm run build --workspace @tanks/proto # -> packages/proto/dist/tanks-proto.html
 npm run smoke --workspace @tanks/proto # drives the built page in a real browser
+npm run serve --workspace @tanks/proto  # serve on your LAN -> open on a phone
 ```
+
+`serve` prints a `http://192.168.x.x:8080` URL. Put your phone on the same WiFi,
+open it, and you get the touch build: left thumb drives, right thumb drags to
+aim and taps to fire. It rebuilds on every request, so changing code and pulling
+to refresh is the whole loop.
 
 `packages/proto` is a throwaway browser harness, not the shipping app. It exists
 to answer the one question the test suite cannot: *do the ricochets feel right?*

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
+    "serve": "node serve.mjs",
     "smoke": "node build.mjs && node smoke.mjs"
   }
 }

@@ -4,7 +4,7 @@
     "module": "ES2022",
     "moduleResolution": "bundler",
     "rootDir": ".",
-    "outDir": "dist",
+    "outDir": "dist-test",
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
