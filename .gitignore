@@ -4,3 +4,7 @@ dist/
 .DS_Store
 dist-test/
 packages/proto/pwa/
+
+# Build output. Regenerate with: node packages/proto/build.mjs
+# Published to the release by CI, so it cannot go stale.
+tanks.html

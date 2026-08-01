@@ -73,6 +73,15 @@ jobs:
         working-directory: packages/app/android
         run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
 
+      # Ship the single-file web build next to the APK. It is 105 KB against the
+      # APK's 55 MB, which matters when the whole point is getting this onto a
+      # phone over a link that may not last. Generated here rather than tracked
+      # in git, where it silently drifted 209 lines behind the real build.
+      - name: Build the standalone single-file version
+        run: |
+          node packages/proto/build.mjs
+          cp packages/proto/dist/tanks-proto.html out-tanks.html
+
       - name: Name the APK after the commit
         id: apk
         run: |
@@ -96,7 +105,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
-          gh release create latest "${{ steps.apk.outputs.path }}" \
+          gh release create latest \
+            "${{ steps.apk.outputs.path }}" \
+            "out-tanks.html#tanks.html" \
             --title "Latest build" \
-            --notes "Android APK built from ${GITHUB_SHA::7} ($(du -h "${{ steps.apk.outputs.path }}" | cut -f1), arm64-v8a). Download on your phone and install." \
+            --notes "$(cat <<NOTES
+          Built from \`${GITHUB_SHA::7}\`.
+
+          | File | Size | What it is |
+          |---|---|---|
+          | \`${{ steps.apk.outputs.name }}\` | $(du -h "${{ steps.apk.outputs.path }}" | cut -f1) | Android app, arm64. Tap to install. |
+          | \`tanks.html\` | $(du -h out-tanks.html | cut -f1) | Single file, opens in any browser. Works offline. |
+
+          Both run with no internet. Tap **2P** for two players on one phone.
+          NOTES
+          )" \
             --latest
