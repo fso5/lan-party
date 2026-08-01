@@ -58,6 +58,10 @@ jobs:
       # Expo generates the native android/ project from app.json. It is not
       # committed, so that config stays the single source of truth rather than
       # drifting from generated Gradle files nobody remembers editing.
+      - name: Embed the game page the host phone serves
+        working-directory: packages/app
+        run: npm run embed-page
+
       - name: Generate the native project
         working-directory: packages/app
         run: npx expo prebuild --platform android --no-install

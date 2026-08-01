@@ -8,3 +8,6 @@ packages/proto/pwa/
 # Build output. Regenerate with: node packages/proto/build.mjs
 # Published to the release by CI, so it cannot go stale.
 tanks.html
+
+# Generated from packages/proto by scripts/embed-page.mjs
+packages/app/src/net/gamePage.ts

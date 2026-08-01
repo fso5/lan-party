@@ -24,7 +24,10 @@
     "ios": "expo run:ios",
     "android": "expo run:android",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "embed-page": "node scripts/embed-page.mjs",
+    "pretypecheck": "npm run embed-page",
+    "pretest": "npm run embed-page"
   },
   "private": true
 }

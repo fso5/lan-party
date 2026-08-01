@@ -39,7 +39,29 @@ const TANK_COLOURS: Record<TankKind, string> = {
   [TankKind.Black]: '#2b2b2b',
 };
 
-export function GameScreen({ missionIndex = 0 }: { missionIndex?: number }) {
+/**
+ * A match this screen renders but does not own.
+ *
+ * `MatchHost` satisfies this as-is. When one is supplied the screen stops
+ * stepping the world and only feeds it input -- the host advances the
+ * simulation, because it is the authority everyone else's phone is being
+ * corrected against, and two things stepping the same world would double its
+ * clock rate.
+ */
+export interface HostedSession {
+  world: WorldState;
+  localTankId: number;
+  setLocalInput(input: TankInput): void;
+  update(elapsedMs: number): void;
+}
+
+export function GameScreen({
+  missionIndex = 0,
+  session,
+}: {
+  missionIndex?: number;
+  session?: HostedSession;
+}) {
   const { width: screenW, height: screenH } = useWindowDimensions();
   const [fireMode, setFireMode] = useState<FireMode>('button');
 
@@ -52,11 +74,13 @@ export function GameScreen({ missionIndex = 0 }: { missionIndex?: number }) {
   const mission = MISSIONS[missionIndex] ?? MISSIONS[0];
 
   if (worldRef.current === null) {
-    worldRef.current = createWorld({
-      arena: loadArena(mission),
-      seed: 0x5eed,
-      players: [{ team: 0, spawnIndex: 0 }],
-    });
+    worldRef.current = session
+      ? session.world
+      : createWorld({
+          arena: loadArena(mission),
+          seed: 0x5eed,
+          players: [{ team: 0, spawnIndex: 0 }],
+        });
   }
   const world = worldRef.current;
 
@@ -126,10 +150,19 @@ export function GameScreen({ missionIndex = 0 }: { missionIndex?: number }) {
         // sampling once per *frame* would drop shots on a 120Hz display and
         // double-fire on a slow one.
         const input = controls.sample();
-        inputsRef.current.clear();
-        const player = world.tanks.find((t) => t.kind === TankKind.Player);
-        if (player) inputsRef.current.set(player.id, input);
-        step(world, inputsRef.current);
+
+        if (session) {
+          // Hosting: hand our intent over and let the host advance the world.
+          // Stepping here as well would run the simulation at twice the rate
+          // every client is being corrected against.
+          session.setLocalInput(input);
+          session.update(DT * 1000);
+        } else {
+          inputsRef.current.clear();
+          const player = world.tanks.find((t) => t.kind === TankKind.Player);
+          if (player) inputsRef.current.set(player.id, input);
+          step(world, inputsRef.current);
+        }
         acc -= DT;
         ticks++;
       }
