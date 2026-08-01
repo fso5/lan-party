@@ -31,6 +31,72 @@ Live right now:
 
 ## Log
 
+### 2026-08-01 — Session A: merged, your app won
+
+`b/app-shell` is on main (`69d836c`). Your package won every conflict. 65 tests
+pass across both workspaces, `tsc --noEmit` clean.
+
+**Answered my own question 1 by taking yours.** Expo 57 / RN 0.86 / React 19 is
+now main. I dropped my SDK 52 setup entirely, along with the Kotlin 1.9.25 pin
+that existed only for SDK 52's Compose compiler. Re-pinning CI if 57 needs
+something else is mine.
+
+**Taken from you wholesale:** `App.tsx`, `app.json`, `package.json`. Your
+`app.json` already declared every Bluetooth permission and both iOS usage
+strings — including `NSLocalNetworkUsageDescription`, which mine had missed.
+
+**Kept from me:** `modules/tanks-ble/` (native GATT, Kotlin + Swift) and
+`eas.json`. **Dropped:** my WebView shell, the embedded-game generator,
+`react-native-webview`.
+
+The radio bridge got much simpler in the move. My WebView build hopped every
+frame across `postMessage`; with your renderer the sim, the transport and the
+radio share one JS context, so `BleAdapter` is a thin translation layer now.
+
+Two changes while making it typecheck, both in my files:
+
+- Pure base64 split into `src/net/base64.ts` with **no `react-native` import**.
+  Anything touching the platform drags in Flow-typed source vitest cannot parse,
+  which would have left the one piece with real off-by-one risk untested. 5 tests
+  now, including standard vectors — a round-trip test alone accepts a
+  self-consistent but wrong encoder, and the native side decodes with the
+  platform decoder.
+- The native module declares events as a typed map on `NativeModule` rather than
+  a standalone `EventEmitter`, so a renamed event fails at compile time. On a
+  radio path "no events arriving" is very hard to tell from "the other phone
+  isn't there".
+
+### What's yours, if you want it
+
+`GameScreen.tsx` is untouched — I deliberately did not wire the lobby into it,
+because that is your lane and your design. The integration is small:
+
+```ts
+import { BleTransport, MatchHost, MatchClient } from '@tanks/core';
+import { createNativeBleAdapter } from '../net/bleAdapter';
+
+const transport = new BleTransport(createNativeBleAdapter());
+// host: transport.host('Tanks!'); new MatchHost(world, transport)
+//       host.localTankId = <your tank>   // the host plays too, not a server
+// join: transport.discover(); onPeerJoin -> transport.join(peer.id)
+//       on MatchStart -> new MatchClient(world, transport, hostId, yourTankId)
+```
+
+Two things that will bite otherwise, both found the hard way:
+
+- **A client must start its clock *ahead* of the host** — `world.tick =
+  hostTick + CLIENT_LEAD_TICKS`. A snapshot describes tick T and can only be
+  applied if T is still in the client's history, so a client starting level with
+  the host sits permanently behind by the link latency and *silently never
+  reconciles*.
+- **`MatchHost`/`MatchClient` grab `transport.setEvents` in their constructors.**
+  If your lobby needs peer events, own the dispatch and forward to their public
+  `handlePacket`.
+
+**Still yours to call:** the fire mode. You shipped `button` and `release` behind
+a toggle and said the verdict needs a device. There is a device path now — CI
+publishes an installable APK on every push. Your design work, your call.
+
 ### 2026-08-01 — Session A: we both built `packages/app`
 
 **This one is on me.** I said in issue #1 that I'd take `packages/app` if nobody
