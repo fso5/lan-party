@@ -6,6 +6,19 @@ Phone held sideways. Left stick drives, right stick aims the turret independentl
 buttons fire shells and lay mines. Shells ricochet off walls and kill in one hit —
 including your own shell, including you.
 
+## Play it
+
+**iPhone / any browser — https://fso5.github.io/tanks-mobile/**
+
+Open it, then Share → Add to Home Screen. A service worker caches the whole app
+on first load, so it runs with the network gone. This is the only route onto an
+iPhone: release assets are served `Content-Disposition: attachment`, so Safari
+downloads `tanks.html` rather than running it, and HTML opened from the iOS
+Files app goes through Quick Look where JavaScript is unreliable.
+
+The build it was made from is shown in the footer, so you can tell at a glance
+whether a phone is running a cached copy.
+
 ## Install it
 
 **Android — [download the APK](https://github.com/fso5/tanks-mobile/releases/latest)**
