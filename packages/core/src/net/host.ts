@@ -72,7 +72,7 @@ export class MatchHost {
   ) {
     transport.setEvents({
       onPacket: (from, data) => this.handlePacket(from, data),
-      onPeerLeave: (peerId) => this.clients.delete(peerId),
+      onPeerLeave: (peerId) => this.removeClient(peerId),
     });
   }
 
@@ -90,6 +90,25 @@ export class MatchHost {
       lastInputTick: 0,
       highestTick: -1,
     });
+  }
+
+  /**
+   * Unseat a client. Called automatically on `onPeerLeave`.
+   *
+   * Public because an embedder that owns dispatch replaces that handler, and
+   * without this it has no way to reproduce the cleanup: the departed peer
+   * keeps a slot, so `stepOnce` keeps feeding its tank stale-then-empty input
+   * and the host keeps addressing snapshots to a phone that walked away.
+   *
+   * Idempotent -- a leave can arrive after an explicit removal.
+   */
+  removeClient(peerId: PeerId): void {
+    this.clients.delete(peerId);
+  }
+
+  /** Peers currently seated, for a lobby roster or a reconnect check. */
+  hasClient(peerId: PeerId): boolean {
+    return this.clients.has(peerId);
   }
 
   /**

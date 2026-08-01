@@ -262,7 +262,9 @@ export class BleTransport implements Transport {
   }
 
   setEvents(events: Partial<TransportEvents>): void {
-    this.events = events;
+    // Merge, not replace -- see the contract on Transport.setEvents. A lobby
+    // patching in onPeerJoin must not unhook MatchHost's onPacket.
+    this.events = { ...this.events, ...events };
   }
 
   async host(matchName: string): Promise<void> {

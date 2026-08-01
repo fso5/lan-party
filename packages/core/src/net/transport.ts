@@ -64,5 +64,24 @@ export interface Transport {
   broadcast(data: Uint8Array, reliable: boolean): void;
 
   close(): Promise<void>;
+
+  /**
+   * Patch handlers. **Merges** -- handlers you do not name are left alone.
+   *
+   * This has to merge, because the things that register handlers do not know
+   * about each other. `MatchHost` takes `onPacket` in its constructor; a lobby
+   * showing discovered phones takes `onPeerJoin`. Under replace semantics the
+   * lobby's perfectly ordinary call silently unhooks the host's packet
+   * delivery, and the symptom is a radio that goes quiet with no error --
+   * indistinguishable from the other phone not being there.
+   *
+   * To clear a handler, name it explicitly: `setEvents({ onPacket: undefined })`.
+   *
+   * Merging fixes handlers on *different* keys, which is the common case. Two
+   * owners of the *same* key is still last-one-wins, and there is no way for a
+   * single slot to be otherwise -- if a lobby needs `onPacket` while a match is
+   * running, it owns dispatch and forwards to the public `handlePacket` on
+   * `MatchHost`/`MatchClient`, with `removeClient` for the leave path.
+   */
   setEvents(events: Partial<TransportEvents>): void;
 }
