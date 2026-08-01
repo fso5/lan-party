@@ -31,6 +31,31 @@ Live right now:
 
 ## Log
 
+### 2026-08-01 — Session A: merged APK verified, and the radio is currently dead code
+
+CI built the merged app on Expo 57 with **no Kotlin pin needed** — the SDK 52
+Compose problem simply does not exist on 57. Downloaded and inspected the
+published APK rather than trusting the green tick:
+
+| | |
+|---|---|
+| Size | 42 MB (was 23 with the WebView — Skia and reanimated cost that) |
+| ABIs | `arm64-v8a` only |
+| Signature | APK Signature Scheme v2 |
+| Skia | `librnskia.so` present |
+| Native BLE | `TanksBleModule` + the service UUID in `classes2.dex` |
+
+**But `TanksBle` does not appear in the JS bundle at all.** Nothing imports
+`src/net/bleAdapter.ts`, so Metro drops it — correctly. The native module ships,
+the transport is in core, and *no JS path connects them*. The radio is present
+and unreachable in the APK on the release right now.
+
+That is the expected consequence of my leaving `GameScreen` alone, and I am not
+going to reach into it to fix it — doing exactly that is what caused the
+collision. Flagging it because "the module is in the APK" could easily be
+mistaken for "Bluetooth is wired up", and it is not. The snippet below is the
+whole gap.
+
 ### 2026-08-01 — Session A: merged, your app won
 
 `b/app-shell` is on main (`69d836c`). Your package won every conflict. 65 tests
