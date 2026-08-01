@@ -1,0 +1,3328 @@
+<title>Tanks! — physics prototype</title>
+
+<style>
+  /* Tabletop diorama. The original reads as toy tanks on a plywood board, and
+     that world gives us the palette: warm ply ground, cool slate walls, cork
+     blocks, saturated enamel tanks. Neutrals are biased warm toward the ply
+     rather than sampled from pure grey. */
+  :root {
+    color-scheme: light dark;
+
+    --ply:        #E3DCCA;
+    --table:      #CFC5AF;
+    --ink:        #2A251C;
+    --ink-soft:   #6B6252;
+    --hairline:   rgba(42, 37, 28, 0.14);
+    --panel:      #EDE7D9;
+
+    --stage-bg:   var(--table);
+    --ground:     var(--ply);
+    --grid:       rgba(90, 78, 58, 0.10);
+    --wall:       #55504A;
+    --wall-top:   #6E6860;
+    --cork:       #B9834A;
+    --cork-top:   #CF9A5E;
+    --void:       #221E18;
+    --shell:      #FFCE6E;
+    --aim:        #C1440E;
+    --shadow:     rgba(60, 48, 30, 0.20);
+    --mine-ring:  rgba(224, 122, 40, 0.55);
+    --stick:      rgba(42, 37, 28, 0.30);
+    --stick-knob: rgba(42, 37, 28, 0.20);
+
+    --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --font-num: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ply:        #26231C;
+      --table:      #16140F;
+      --ink:        #EDE5D3;
+      --ink-soft:   #9A9080;
+      --hairline:   rgba(237, 229, 211, 0.14);
+      --panel:      #1F1C16;
+
+      --grid:       rgba(255, 240, 210, 0.055);
+      --wall:       #3A3630;
+      --wall-top:   #4E4840;
+      --cork:       #7A5730;
+      --cork-top:   #94693A;
+      --void:       #0B0A08;
+      --shell:      #FFD98F;
+      --aim:        #E4753A;
+      --shadow:     rgba(0, 0, 0, 0.45);
+      --stick:      rgba(237, 229, 211, 0.28);
+      --stick-knob: rgba(237, 229, 211, 0.18);
+    }
+  }
+
+  /* The viewer's own toggle must win over the OS preference, both ways. */
+  :root[data-theme="light"] {
+    --ply: #E3DCCA; --table: #CFC5AF; --ink: #2A251C; --ink-soft: #6B6252;
+    --hairline: rgba(42,37,28,0.14); --panel: #EDE7D9;
+    --grid: rgba(90,78,58,0.10); --wall: #55504A; --wall-top: #6E6860;
+    --cork: #B9834A; --cork-top: #CF9A5E; --void: #221E18;
+    --shell: #FFCE6E; --aim: #C1440E; --shadow: rgba(60,48,30,0.20);
+    --stick: rgba(42,37,28,0.30); --stick-knob: rgba(42,37,28,0.20);
+  }
+  :root[data-theme="dark"] {
+    --ply: #26231C; --table: #16140F; --ink: #EDE5D3; --ink-soft: #9A9080;
+    --hairline: rgba(237,229,211,0.14); --panel: #1F1C16;
+    --grid: rgba(255,240,210,0.055); --wall: #3A3630; --wall-top: #4E4840;
+    --cork: #7A5730; --cork-top: #94693A; --void: #0B0A08;
+    --shell: #FFD98F; --aim: #E4753A; --shadow: rgba(0,0,0,0.45);
+    --stick: rgba(237,229,211,0.28); --stick-knob: rgba(237,229,211,0.18);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    background: var(--table);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    -webkit-user-select: none;
+    user-select: none;
+    overflow: hidden;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    padding: 0.6rem 0.9rem;
+    background: var(--panel);
+    border-bottom: 1px solid var(--hairline);
+    flex-wrap: wrap;
+  }
+
+  .title {
+    font-size: 0.95rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    margin: 0;
+    white-space: nowrap;
+  }
+  .title span { color: var(--aim); }
+
+  .mapbar { display: flex; align-items: center; gap: 0.4rem; }
+  #map-name {
+    font-size: 0.82rem;
+    font-weight: 550;
+    min-width: 8.5ch;
+  }
+  #map-index {
+    font-family: var(--font-num);
+    font-size: 0.7rem;
+    color: var(--ink-soft);
+    font-variant-numeric: tabular-nums;
+  }
+
+  #net-status {
+    font-family: var(--font-num);
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    padding: 0.18rem 0.42rem;
+    border-radius: 999px;
+    border: 1px solid var(--hairline);
+    color: var(--ink-soft);
+  }
+  #net-status[data-state="offline"] { opacity: 0.55; }
+  #net-status[data-state="connecting"] { color: var(--ink); }
+  #net-status:not([data-state="offline"]):not([data-state="connecting"]) {
+    background: var(--aim);
+    border-color: var(--aim);
+    color: #FFF6EC;
+  }
+
+  .stats { display: flex; gap: 1rem; margin-left: auto; }
+  .stat { display: flex; flex-direction: column; line-height: 1.15; }
+  .stat dt {
+    font-size: 0.58rem;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--ink-soft);
+    font-weight: 600;
+  }
+  .stat dd {
+    margin: 0;
+    font-family: var(--font-num);
+    font-size: 0.95rem;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+
+  button {
+    font: inherit;
+    font-size: 0.72rem;
+    font-weight: 550;
+    padding: 0.28rem 0.6rem;
+    border-radius: 5px;
+    border: 1px solid var(--hairline);
+    background: transparent;
+    color: var(--ink);
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  button:hover { background: var(--hairline); }
+  button:focus-visible { outline: 2px solid var(--aim); outline-offset: 2px; }
+  button[aria-pressed="true"] {
+    background: var(--aim);
+    border-color: var(--aim);
+    color: #FFF6EC;
+  }
+
+  #stage {
+    flex: 1;
+    position: relative;
+    min-height: 0;
+    touch-action: none;
+  }
+  canvas { display: block; touch-action: none; }
+
+  #banner {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+    font-size: clamp(2rem, 7vw, 4rem);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    opacity: 0;
+    transition: opacity 220ms ease;
+  }
+  #banner[data-show="true"] { opacity: 1; }
+  #banner[data-tone="win"]  { color: #4F8A3D; }
+  #banner[data-tone="lose"] { color: var(--aim); }
+  @media (prefers-reduced-motion: reduce) {
+    #banner { transition: none; }
+  }
+
+  #debug {
+    position: absolute;
+    left: 0.6rem;
+    bottom: 0.6rem;
+    font-family: var(--font-num);
+    font-size: 0.68rem;
+    color: var(--ink-soft);
+    background: var(--panel);
+    border: 1px solid var(--hairline);
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
+  }
+
+  footer {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.9rem;
+    background: var(--panel);
+    border-top: 1px solid var(--hairline);
+    font-size: 0.68rem;
+    color: var(--ink-soft);
+    flex-wrap: wrap;
+  }
+  kbd {
+    font-family: var(--font-num);
+    font-size: 0.66rem;
+    border: 1px solid var(--hairline);
+    border-bottom-width: 2px;
+    border-radius: 3px;
+    padding: 0.05rem 0.3rem;
+    color: var(--ink);
+  }
+  .hint { display: flex; align-items: center; gap: 0.3rem; }
+
+  /* Couch play: split the stage so each seat can see which half is theirs. */
+  body[data-seats="2"] #stage::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    left: 50%;
+    width: 0;
+    border-left: 1px dashed var(--hairline);
+    pointer-events: none;
+  }
+  /* The one-player control legend is wrong in couch play, so hide it rather
+     than show two contradictory hints at once. */
+  body[data-seats="2"] #touch-hint { display: none !important; }
+  body[data-seats="2"] #stage { border-top: 1px solid var(--hairline); }
+  .touch-buttons { display: none; gap: 0.5rem; margin-left: auto; }
+
+  /* Coarse pointer: hide the keyboard legend, show thumb buttons. */
+  @media (pointer: coarse) {
+    .desktop-only { display: none; }
+    .touch-buttons { display: flex; }
+    #touch-hint { display: flex !important; }
+    footer { font-size: 0.62rem; }
+  }
+  @media (pointer: fine) {
+    .touch-buttons { display: none; }
+  }
+
+  /* A phone held sideways is ~390px tall. The arena has to stay legible --
+     seeing every bank shot coming is the whole game -- so the chrome gets out
+     of the way rather than the board shrinking. */
+  @media (max-height: 460px) {
+    header { padding: 0.35rem 0.6rem; gap: 0.7rem; }
+    .title { font-size: 0.8rem; }
+    .stat dt { font-size: 0.5rem; }
+    .stat dd { font-size: 0.8rem; }
+    .stats { gap: 0.7rem; }
+    button { padding: 0.2rem 0.45rem; font-size: 0.66rem; }
+    footer { padding: 0.3rem 0.6rem; }
+    #debug { bottom: 0.3rem; font-size: 0.6rem; }
+  }
+</style>
+
+<header>
+  <h1 class="title">TANKS<span>!</span></h1>
+  <div class="mapbar">
+    <button id="btn-prev" aria-label="Previous map">&larr;</button>
+    <span id="map-name">—</span>
+    <span id="map-index">—</span>
+    <button id="btn-next" aria-label="Next map">&rarr;</button>
+  </div>
+  <button id="btn-restart">Restart</button>
+  <button id="btn-2p" aria-pressed="false" title="Two players on one phone">2P</button>
+  <button id="btn-traj" aria-pressed="false" title="Trace the shot through the real ricochet physics">Trajectory</button>
+  <span id="net-status" data-state="offline">offline</span>
+  <dl class="stats">
+    <div class="stat"><dt id="stat-enemies-label">Enemies</dt><dd id="stat-enemies">0</dd></div>
+    <div class="stat"><dt>Shells</dt><dd id="stat-shells">0/5</dd></div>
+    <div class="stat"><dt>Mines</dt><dd id="stat-mines">0/2</dd></div>
+  </dl>
+</header>
+
+<div id="stage">
+  <canvas id="arena"></canvas>
+  <div id="banner" data-show="false"></div>
+  <div id="debug" hidden></div>
+</div>
+
+<footer>
+  <span class="hint desktop-only"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> drive</span>
+  <span class="hint desktop-only">mouse aims</span>
+  <span class="hint desktop-only">click fires</span>
+  <span class="hint desktop-only"><kbd>Space</kbd> mine</span>
+  <span class="hint desktop-only"><kbd>T</kbd> trajectory</span>
+  <span class="hint desktop-only"><kbd>G</kbd> debug</span>
+  <span class="hint desktop-only"><kbd>R</kbd> restart</span>
+  <span class="hint" style="display:none" id="touch-hint">left thumb drives · right thumb aims and fires</span>
+  <span class="hint" id="seat-hint" hidden>2 players: left thumb = blue · right thumb = red · drag to steer, tap to fire</span>
+  <div class="touch-buttons">
+    <button id="btn-fire">Fire</button>
+    <button id="btn-mine">Mine</button>
+  </div>
+</footer>
+
+<script type="module">
+var __defProp = Object.defineProperty;
+var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
+
+// ../core/src/math.ts
+var PI = 3.141592653589793;
+var TAU = 6.283185307179586;
+var HALF_PI = 1.5707963267948966;
+function wrapAngle(a) {
+  const turns = Math.floor((a + PI) / TAU);
+  return a - turns * TAU;
+}
+function dsin(a) {
+  let x = wrapAngle(a);
+  if (x > HALF_PI) x = PI - x;
+  else if (x < -HALF_PI) x = -PI - x;
+  const x2 = x * x;
+  let r = -7647163731819816e-28;
+  r = r * x2 + 16059043836821613e-26;
+  r = r * x2 + -25052108385441717e-24;
+  r = r * x2 + 27557319223985893e-22;
+  r = r * x2 + -1984126984126984e-19;
+  r = r * x2 + 0.008333333333333333;
+  r = r * x2 + -0.16666666666666666;
+  r = r * x2 + 1;
+  return r * x;
+}
+function dcos(a) {
+  return dsin(a + HALF_PI);
+}
+var SQRT3 = 1.7320508075688772;
+var TAN_PI_12 = 0.2679491924311227;
+var PI_6 = 0.5235987755982988;
+function atanUnit(x) {
+  const neg = x < 0;
+  let u = neg ? -x : x;
+  let offset = 0;
+  if (u > TAN_PI_12) {
+    u = (u * SQRT3 - 1) / (u + SQRT3);
+    offset = PI_6;
+  }
+  const u2 = u * u;
+  let r = -0.06666666666666667;
+  r = r * u2 + 0.07692307692307693;
+  r = r * u2 + -0.09090909090909091;
+  r = r * u2 + 0.1111111111111111;
+  r = r * u2 + -0.14285714285714285;
+  r = r * u2 + 0.2;
+  r = r * u2 + -0.3333333333333333;
+  r = r * u2 + 1;
+  const result = r * u + offset;
+  return neg ? -result : result;
+}
+function datan2(y, x) {
+  if (x === 0) {
+    if (y > 0) return HALF_PI;
+    if (y < 0) return -HALF_PI;
+    return 0;
+  }
+  const ay = y < 0 ? -y : y;
+  const ax = x < 0 ? -x : x;
+  let r;
+  if (ay <= ax) {
+    r = atanUnit(ay / ax);
+  } else {
+    r = HALF_PI - atanUnit(ax / ay);
+  }
+  if (x < 0) r = PI - r;
+  if (y < 0) r = -r;
+  return r;
+}
+function angleDelta(from, to) {
+  return wrapAngle(to - from);
+}
+function rotateToward(from, to, maxStep) {
+  const d = angleDelta(from, to);
+  if (d > maxStep) return wrapAngle(from + maxStep);
+  if (d < -maxStep) return wrapAngle(from - maxStep);
+  return wrapAngle(to);
+}
+function clamp(v, lo, hi) {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+function sign(v) {
+  return v < 0 ? -1 : v > 0 ? 1 : 0;
+}
+var Rng = class {
+  constructor(seed) {
+    __publicField(this, "a");
+    __publicField(this, "b");
+    __publicField(this, "c");
+    __publicField(this, "d");
+    let s = seed >>> 0;
+    this.a = (s = s + 2654435769 >>> 0) >>> 0;
+    this.b = (s = s + 2654435769 >>> 0) ^ 2246822507;
+    this.c = (s = s + 2654435769 >>> 0) ^ 3266489909;
+    this.d = (s = s + 2654435769 >>> 0) ^ 668265263;
+    for (let i = 0; i < 12; i++) this.nextUint();
+  }
+  nextUint() {
+    let t = this.d;
+    const s = this.a;
+    this.d = this.c;
+    this.c = this.b;
+    this.b = s;
+    t ^= t << 11;
+    t ^= t >>> 8;
+    this.a = (t ^ s ^ s >>> 19) >>> 0;
+    return this.a;
+  }
+  /** Uniform in [0, 1). */
+  next() {
+    return this.nextUint() / 4294967296;
+  }
+  /** Uniform in [lo, hi). */
+  range(lo, hi) {
+    return lo + this.next() * (hi - lo);
+  }
+  /** Uniform integer in [lo, hi]. */
+  int(lo, hi) {
+    return lo + Math.floor(this.next() * (hi - lo + 1));
+  }
+  /** Snapshot for state sync / replay. */
+  save() {
+    return [this.a, this.b, this.c, this.d];
+  }
+  restore(s) {
+    this.a = s[0];
+    this.b = s[1];
+    this.c = s[2];
+    this.d = s[3];
+  }
+};
+
+// ../core/src/types.ts
+var Tile = /* @__PURE__ */ ((Tile2) => {
+  Tile2[Tile2["Floor"] = 0] = "Floor";
+  Tile2[Tile2["Wall"] = 1] = "Wall";
+  Tile2[Tile2["Block"] = 2] = "Block";
+  Tile2[Tile2["Hole"] = 3] = "Hole";
+  return Tile2;
+})(Tile || {});
+function blocksTank(t) {
+  return t === 1 /* Wall */ || t === 2 /* Block */ || t === 3 /* Hole */;
+}
+function blocksShell(t) {
+  return t === 1 /* Wall */ || t === 2 /* Block */;
+}
+var TankKind = /* @__PURE__ */ ((TankKind2) => {
+  TankKind2[TankKind2["Player"] = 0] = "Player";
+  TankKind2[TankKind2["Brown"] = 1] = "Brown";
+  TankKind2[TankKind2["Grey"] = 2] = "Grey";
+  TankKind2[TankKind2["Teal"] = 3] = "Teal";
+  TankKind2[TankKind2["Yellow"] = 4] = "Yellow";
+  TankKind2[TankKind2["Green"] = 5] = "Green";
+  TankKind2[TankKind2["Black"] = 6] = "Black";
+  return TankKind2;
+})(TankKind || {});
+var EventKind = /* @__PURE__ */ ((EventKind2) => {
+  EventKind2[EventKind2["ShellFired"] = 0] = "ShellFired";
+  EventKind2[EventKind2["ShellBounced"] = 1] = "ShellBounced";
+  EventKind2[EventKind2["ShellExpired"] = 2] = "ShellExpired";
+  EventKind2[EventKind2["MineLaid"] = 3] = "MineLaid";
+  EventKind2[EventKind2["MineExploded"] = 4] = "MineExploded";
+  EventKind2[EventKind2["BlockDestroyed"] = 5] = "BlockDestroyed";
+  EventKind2[EventKind2["TankDestroyed"] = 6] = "TankDestroyed";
+  return EventKind2;
+})(EventKind || {});
+function emptyInput() {
+  return { moveX: 0, moveY: 0, aimX: 0, aimY: 0, fire: false, layMine: false };
+}
+
+// ../core/src/tuning.ts
+var TICK_HZ = 60;
+var DT = 1 / TICK_HZ;
+var TANK_RADIUS = 0.38;
+var MAX_SHELLS_PER_TANK = 5;
+var MAX_MINES_PER_TANK = 2;
+var MINE_FUSE_TICKS = 300;
+var MINE_ARM_TICKS = 45;
+var MINE_TRIGGER_RADIUS = 0.9;
+var MINE_BLAST_RADIUS = 1.6;
+var SHELL_MAX_LIFETIME_TICKS = 60 * 12;
+var ROCKET = { speed: 9, maxBounces: 0, radius: 0.11, selfArmDelay: 6 };
+var NORMAL = { speed: 5.5, maxBounces: 1, radius: 0.12, selfArmDelay: 8 };
+var RICOCHET = { speed: 5, maxBounces: 2, radius: 0.12, selfArmDelay: 10 };
+var TANK_SPECS = {
+  [0 /* Player */]: {
+    moveSpeed: 3.2,
+    bodyTurnRate: 7,
+    turretTurnRate: 9,
+    shell: NORMAL,
+    fireCooldown: 12,
+    aimError: 0,
+    reactionTicks: 0,
+    mobile: true,
+    laysMines: true,
+    bankShotDepth: 0
+  },
+  [1 /* Brown */]: {
+    moveSpeed: 0,
+    bodyTurnRate: 0,
+    turretTurnRate: 1.1,
+    shell: NORMAL,
+    fireCooldown: 100,
+    aimError: 0.09,
+    reactionTicks: 55,
+    mobile: false,
+    laysMines: false,
+    bankShotDepth: 0
+  },
+  [2 /* Grey */]: {
+    moveSpeed: 1.5,
+    bodyTurnRate: 3,
+    turretTurnRate: 2.2,
+    shell: RICOCHET,
+    fireCooldown: 80,
+    aimError: 0.05,
+    reactionTicks: 40,
+    mobile: true,
+    laysMines: false,
+    bankShotDepth: 2
+  },
+  [3 /* Teal */]: {
+    moveSpeed: 2.6,
+    bodyTurnRate: 5,
+    turretTurnRate: 3.4,
+    shell: ROCKET,
+    fireCooldown: 55,
+    aimError: 0.04,
+    reactionTicks: 26,
+    mobile: true,
+    laysMines: false,
+    bankShotDepth: 0
+  },
+  [4 /* Yellow */]: {
+    moveSpeed: 2,
+    bodyTurnRate: 4,
+    turretTurnRate: 2.6,
+    shell: NORMAL,
+    fireCooldown: 70,
+    aimError: 0.06,
+    reactionTicks: 34,
+    mobile: true,
+    laysMines: true,
+    bankShotDepth: 1
+  },
+  [5 /* Green */]: {
+    moveSpeed: 0,
+    bodyTurnRate: 0,
+    turretTurnRate: 1.8,
+    shell: RICOCHET,
+    fireCooldown: 90,
+    aimError: 0.012,
+    // near-perfect: this is the sniper
+    reactionTicks: 30,
+    mobile: false,
+    laysMines: false,
+    bankShotDepth: 2
+  },
+  [6 /* Black */]: {
+    moveSpeed: 3.4,
+    bodyTurnRate: 6,
+    turretTurnRate: 4.2,
+    shell: ROCKET,
+    fireCooldown: 40,
+    aimError: 0.03,
+    reactionTicks: 18,
+    mobile: true,
+    laysMines: true,
+    bankShotDepth: 1
+  }
+};
+
+// ../core/src/map.ts
+var Arena = class _Arena {
+  constructor(def) {
+    __publicField(this, "name");
+    __publicField(this, "width");
+    __publicField(this, "height");
+    __publicField(this, "tiles");
+    __publicField(this, "spawns");
+    __publicField(this, "enemies");
+    if (def.tiles.length !== def.width * def.height) {
+      throw new Error(
+        `arena "${def.name}": expected ${def.width * def.height} tiles, got ${def.tiles.length}`
+      );
+    }
+    this.name = def.name;
+    this.width = def.width;
+    this.height = def.height;
+    this.tiles = Uint8Array.from(def.tiles);
+    this.spawns = def.spawns.map((s) => ({ ...s }));
+    this.enemies = def.enemies.map((e) => ({ ...e }));
+    this.sealBorder();
+  }
+  /** Force the outer ring to Wall so nothing can ever escape the grid. */
+  sealBorder() {
+    const { width: w, height: h } = this;
+    for (let x = 0; x < w; x++) {
+      this.tiles[x] = 1 /* Wall */;
+      this.tiles[(h - 1) * w + x] = 1 /* Wall */;
+    }
+    for (let y = 0; y < h; y++) {
+      this.tiles[y * w] = 1 /* Wall */;
+      this.tiles[y * w + (w - 1)] = 1 /* Wall */;
+    }
+  }
+  index(cx, cy) {
+    return cy * this.width + cx;
+  }
+  /** Tile at a grid cell. Out-of-bounds reads as Wall. */
+  at(cx, cy) {
+    if (cx < 0 || cy < 0 || cx >= this.width || cy >= this.height) return 1 /* Wall */;
+    return this.tiles[cy * this.width + cx];
+  }
+  /** Tile at a world position. */
+  atWorld(x, y) {
+    return this.at(Math.floor(x), Math.floor(y));
+  }
+  set(cx, cy, t) {
+    if (cx <= 0 || cy <= 0 || cx >= this.width - 1 || cy >= this.height - 1) return;
+    this.tiles[cy * this.width + cx] = t;
+  }
+  blocksTankAt(cx, cy) {
+    return blocksTank(this.at(cx, cy));
+  }
+  blocksShellAt(cx, cy) {
+    return blocksShell(this.at(cx, cy));
+  }
+  /**
+   * Line-of-sight test for shells, ignoring tank bodies.
+   *
+   * Used by the AI to decide whether it has a direct shot. Walks the grid with
+   * a DDA rather than sampling at fixed intervals, so it cannot tunnel through
+   * a one-tile-thick wall the way a naive stepped raycast does.
+   */
+  hasShellLineOfSight(x0, y0, x1, y1) {
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 1e-9) return true;
+    const nx = dx / dist;
+    const ny = dy / dist;
+    let cx = Math.floor(x0);
+    let cy = Math.floor(y0);
+    const stepX = nx > 0 ? 1 : -1;
+    const stepY = ny > 0 ? 1 : -1;
+    const invX = nx === 0 ? Infinity : 1 / (nx > 0 ? nx : -nx);
+    const invY = ny === 0 ? Infinity : 1 / (ny > 0 ? ny : -ny);
+    let tMaxX = nx === 0 ? Infinity : (nx > 0 ? cx + 1 - x0 : x0 - cx) * invX;
+    let tMaxY = ny === 0 ? Infinity : (ny > 0 ? cy + 1 - y0 : y0 - cy) * invY;
+    let travelled = 0;
+    const maxSteps = this.width + this.height + 2;
+    for (let i = 0; i < maxSteps; i++) {
+      if (tMaxX < tMaxY) {
+        travelled = tMaxX;
+        if (travelled >= dist) return true;
+        cx += stepX;
+        tMaxX += invX;
+      } else {
+        travelled = tMaxY;
+        if (travelled >= dist) return true;
+        cy += stepY;
+        tMaxY += invY;
+      }
+      if (this.blocksShellAt(cx, cy)) return false;
+    }
+    return true;
+  }
+  /** True if a tank of the given radius can occupy this world position. */
+  canTankOccupy(x, y, radius) {
+    const minX = Math.floor(x - radius);
+    const maxX = Math.floor(x + radius);
+    const minY = Math.floor(y - radius);
+    const maxY = Math.floor(y + radius);
+    for (let cy = minY; cy <= maxY; cy++) {
+      for (let cx = minX; cx <= maxX; cx++) {
+        if (this.blocksTankAt(cx, cy)) return false;
+      }
+    }
+    return true;
+  }
+  clone() {
+    const a = Object.create(_Arena.prototype);
+    a.name = this.name;
+    a.width = this.width;
+    a.height = this.height;
+    a.tiles = this.tiles.slice();
+    a.spawns = this.spawns.map((s) => ({ ...s }));
+    a.enemies = this.enemies.map((e) => ({ ...e }));
+    return a;
+  }
+};
+function parseArena(name, rows) {
+  const height = rows.length;
+  const width = Math.max(...rows.map((r) => r.length));
+  const tiles = new Array(width * height).fill(0 /* Floor */);
+  const spawns = [];
+  const enemies = [];
+  const enemyChars = { b: 1, g: 2, t: 3, y: 4, n: 5, k: 6 };
+  for (let y = 0; y < height; y++) {
+    const row = rows[y];
+    for (let x = 0; x < width; x++) {
+      const ch = x < row.length ? row[x] : " ";
+      const i = y * width + x;
+      const wx = x + 0.5;
+      const wy = y + 0.5;
+      if (ch === "#") tiles[i] = 1 /* Wall */;
+      else if (ch === "%") tiles[i] = 2 /* Block */;
+      else if (ch === "O") tiles[i] = 3 /* Hole */;
+      else if (ch >= "1" && ch <= "4") {
+        spawns.push({ x: wx, y: wy, angle: 0, team: ch.charCodeAt(0) - 49 });
+      } else if (enemyChars[ch] !== void 0) {
+        enemies.push({ kind: enemyChars[ch], x: wx, y: wy, angle: 0, team: 1 });
+      }
+    }
+  }
+  return { name, width, height, tiles, spawns, enemies };
+}
+
+// ../core/src/physics.ts
+var EPS = 1e-6;
+function moveTank(arena, x, y, dx, dy, radius) {
+  let nx = x;
+  let ny = y;
+  if (dx !== 0 && arena.canTankOccupy(x + dx, ny, radius)) {
+    nx = x + dx;
+  } else if (dx !== 0) {
+    const dir = dx > 0 ? 1 : -1;
+    const edge = dir > 0 ? Math.floor(nx + radius) + 1 : Math.floor(nx - radius);
+    const candidate = edge - dir * radius - dir * EPS;
+    if (dir > 0 ? candidate > nx : candidate < nx) {
+      if (arena.canTankOccupy(candidate, ny, radius)) nx = candidate;
+    }
+  }
+  if (dy !== 0 && arena.canTankOccupy(nx, y + dy, radius)) {
+    ny = y + dy;
+  } else if (dy !== 0) {
+    const dir = dy > 0 ? 1 : -1;
+    const edge = dir > 0 ? Math.floor(ny + radius) + 1 : Math.floor(ny - radius);
+    const candidate = edge - dir * radius - dir * EPS;
+    if (dir > 0 ? candidate > ny : candidate < ny) {
+      if (arena.canTankOccupy(nx, candidate, radius)) ny = candidate;
+    }
+  }
+  return { x: nx, y: ny };
+}
+function stepShell(arena, x, y, vx, vy, radius, bouncesLeft, dist, destroyBlocks) {
+  const bounces = [];
+  const destroyed = [];
+  let remaining = dist;
+  let dead = false;
+  const speed = Math.sqrt(vx * vx + vy * vy);
+  if (speed < 1e-9) {
+    return { x, y, vx, vy, bouncesLeft, dead: true, bounces, destroyed };
+  }
+  for (let guard = 0; guard < 64 && remaining > 1e-9; guard++) {
+    const nx = vx / speed;
+    const ny = vy / speed;
+    const ex = x + (nx > 0 ? radius : nx < 0 ? -radius : 0);
+    const ey = y + (ny > 0 ? radius : ny < 0 ? -radius : 0);
+    let tx = Infinity;
+    if (nx > 0) tx = (Math.floor(ex) + 1 - ex) / nx;
+    else if (nx < 0) tx = (Math.floor(ex) - ex) / nx;
+    let ty = Infinity;
+    if (ny > 0) ty = (Math.floor(ey) + 1 - ey) / ny;
+    else if (ny < 0) ty = (Math.floor(ey) - ey) / ny;
+    if (tx <= 0) tx = nx === 0 ? Infinity : EPS;
+    if (ty <= 0) ty = ny === 0 ? Infinity : EPS;
+    const tHit = tx < ty ? tx : ty;
+    if (tHit >= remaining) {
+      x += nx * remaining;
+      y += ny * remaining;
+      remaining = 0;
+      break;
+    }
+    x += nx * tHit;
+    y += ny * tHit;
+    remaining -= tHit;
+    const hitVertical = tx < ty;
+    const probeX = x + (nx > 0 ? radius + EPS : nx < 0 ? -radius - EPS : 0);
+    const probeY = y + (ny > 0 ? radius + EPS : ny < 0 ? -radius - EPS : 0);
+    const cellX = hitVertical ? Math.floor(probeX) : Math.floor(x);
+    const cellY = hitVertical ? Math.floor(y) : Math.floor(probeY);
+    const tile = arena.at(cellX, cellY);
+    if (tile !== 1 /* Wall */ && tile !== 2 /* Block */) continue;
+    if (tile === 2 /* Block */ && destroyBlocks) {
+      arena.set(cellX, cellY, 0 /* Floor */);
+      destroyed.push(arena.index(cellX, cellY));
+      continue;
+    }
+    if (bouncesLeft <= 0) {
+      dead = true;
+      break;
+    }
+    bouncesLeft--;
+    bounces.push({ x, y });
+    if (hitVertical) {
+      vx = -vx;
+      x -= nx * EPS * 2;
+    } else {
+      vy = -vy;
+      y -= ny * EPS * 2;
+    }
+  }
+  return { x, y, vx, vy, bouncesLeft, dead, bounces, destroyed };
+}
+function circlesOverlap(ax, ay, ar, bx, by, br) {
+  const dx = ax - bx;
+  const dy = ay - by;
+  const r = ar + br;
+  return dx * dx + dy * dy <= r * r;
+}
+function sweepCircleHit(px, py, dx, dy, pr, cx, cy, cr) {
+  const mx = px - cx;
+  const my = py - cy;
+  const r = pr + cr;
+  const c = mx * mx + my * my - r * r;
+  if (c <= 0) return true;
+  const a = dx * dx + dy * dy;
+  if (a < 1e-12) return false;
+  const b = mx * dx + my * dy;
+  if (b >= 0) return false;
+  const disc = b * b - a * c;
+  if (disc < 0) return false;
+  const t = (-b - Math.sqrt(disc)) / a;
+  return t >= 0 && t <= 1;
+}
+
+// ../core/src/ai.ts
+var AIM_SAMPLES = 96;
+var TRACE_DISTANCE = 26;
+var TRACE_STEP = 0.25;
+var HIT_TOLERANCE = TANK_RADIUS * 0.85;
+function traceShot(scratch, fromX, fromY, angle, speed, radius, maxBounces, targetX, targetY, selfX, selfY) {
+  let x = fromX;
+  let y = fromY;
+  let vx = dcos(angle) * speed;
+  let vy = dsin(angle) * speed;
+  let bounces = maxBounces;
+  let travelled = 0;
+  while (travelled < TRACE_DISTANCE) {
+    const r = stepShell(scratch, x, y, vx, vy, radius, bounces, TRACE_STEP, false);
+    const dx = r.x - x;
+    const dy = r.y - y;
+    const segLen = Math.sqrt(dx * dx + dy * dy);
+    if (segLen > 1e-9) {
+      const tx = targetX - x;
+      const ty = targetY - y;
+      let t = (tx * dx + ty * dy) / (segLen * segLen);
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const px = x + dx * t - targetX;
+      const py = y + dy * t - targetY;
+      if (px * px + py * py <= HIT_TOLERANCE * HIT_TOLERANCE) {
+        return travelled + segLen * t;
+      }
+      if (travelled > 0.5) {
+        const sx = selfX - x;
+        const sy = selfY - y;
+        let st = (sx * dx + sy * dy) / (segLen * segLen);
+        st = st < 0 ? 0 : st > 1 ? 1 : st;
+        const qx = x + dx * st - selfX;
+        const qy = y + dy * st - selfY;
+        if (qx * qx + qy * qy <= TANK_RADIUS * TANK_RADIUS) return null;
+      }
+    }
+    x = r.x;
+    y = r.y;
+    vx = r.vx;
+    vy = r.vy;
+    bounces = r.bouncesLeft;
+    travelled += segLen > 1e-9 ? segLen : TRACE_STEP;
+    if (r.dead) return null;
+  }
+  return null;
+}
+function solveShot(w, tank, targetX, targetY) {
+  const spec = TANK_SPECS[tank.kind];
+  const maxBounces = Math.min(spec.shell.maxBounces, spec.bankShotDepth);
+  const scratch = w.arena;
+  const muzzle = TANK_RADIUS + spec.shell.radius + 0.02;
+  let best = null;
+  for (let i = 0; i < AIM_SAMPLES; i++) {
+    const angle = wrapAngle(i / AIM_SAMPLES * Math.PI * 2);
+    const sx = tank.x + dcos(angle) * muzzle;
+    const sy = tank.y + dsin(angle) * muzzle;
+    if (scratch.blocksShellAt(Math.floor(sx), Math.floor(sy))) continue;
+    const travel = traceShot(
+      scratch,
+      sx,
+      sy,
+      angle,
+      spec.shell.speed,
+      spec.shell.radius,
+      maxBounces,
+      targetX,
+      targetY,
+      tank.x,
+      tank.y
+    );
+    if (travel === null) continue;
+    if (best === null || travel < best.travel) best = { angle, travel };
+  }
+  return best;
+}
+function nearestEnemy(w, tank) {
+  let best = null;
+  let bestD = Infinity;
+  for (const t of w.tanks) {
+    if (!t.alive || t.team === tank.team) continue;
+    const dx = t.x - tank.x;
+    const dy = t.y - tank.y;
+    const d = dx * dx + dy * dy;
+    if (d < bestD) {
+      bestD = d;
+      best = t;
+    }
+  }
+  return best;
+}
+function incomingThreat(w, tank) {
+  for (const s of w.shells) {
+    if (s.ownerId === tank.id) continue;
+    const dx = tank.x - s.x;
+    const dy = tank.y - s.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > 6) continue;
+    const speed = Math.sqrt(s.vx * s.vx + s.vy * s.vy);
+    if (speed < 1e-6) continue;
+    const nx = s.vx / speed;
+    const ny = s.vy / speed;
+    const along = dx * nx + dy * ny;
+    if (along <= 0) continue;
+    const perp = Math.abs(dx * -ny + dy * nx);
+    if (perp > TANK_RADIUS * 2.5) continue;
+    const side = dx * -ny + dy * nx >= 0 ? 1 : -1;
+    return { x: -ny * side, y: nx * side };
+  }
+  return null;
+}
+function pickWanderTarget(w, tank) {
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const angle = w.rng.range(-Math.PI, Math.PI);
+    const dist = w.rng.range(2, 7);
+    const x = tank.x + dcos(angle) * dist;
+    const y = tank.y + dsin(angle) * dist;
+    if (w.arena.canTankOccupy(x, y, TANK_RADIUS) && w.arena.hasShellLineOfSight(tank.x, tank.y, x, y)) {
+      return { x, y };
+    }
+  }
+  return { x: tank.x, y: tank.y };
+}
+function stepAi(w, tank) {
+  const ai = tank.ai;
+  if (!ai) return emptyInput();
+  const spec = TANK_SPECS[tank.kind];
+  const input = emptyInput();
+  const target = nearestEnemy(w, tank);
+  ai.focusId = target ? target.id : -1;
+  if (target) {
+    if (w.tick >= ai.thinkTick) {
+      const solution = solveShot(w, tank, target.x, target.y);
+      if (solution) {
+        const err = (w.rng.next() * 2 - 1) * spec.aimError;
+        ai.aimAngle = wrapAngle(solution.angle + err);
+        ai.aimValid = true;
+        ai.thinkTick = w.tick + spec.reactionTicks;
+      } else {
+        ai.aimValid = false;
+        ai.thinkTick = w.tick + 12;
+      }
+    }
+    if (ai.aimValid) {
+      input.aimX = dcos(ai.aimAngle);
+      input.aimY = dsin(ai.aimAngle);
+      const off = Math.abs(wrapAngle(ai.aimAngle - tank.turretAngle));
+      if (off < 0.06) input.fire = true;
+    }
+  }
+  if (spec.mobile) {
+    const threat = incomingThreat(w, tank);
+    if (threat) {
+      input.moveX = threat.x;
+      input.moveY = threat.y;
+      ai.repathTick = w.tick + 20;
+    } else {
+      if (w.tick >= ai.repathTick) {
+        const p = pickWanderTarget(w, tank);
+        ai.targetX = p.x;
+        ai.targetY = p.y;
+        ai.repathTick = w.tick + w.rng.int(45, 120);
+      }
+      const dx = ai.targetX - tank.x;
+      const dy = ai.targetY - tank.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d > 0.4) {
+        input.moveX = dx / d;
+        input.moveY = dy / d;
+      } else {
+        ai.repathTick = 0;
+      }
+    }
+  }
+  if (spec.laysMines && target) {
+    const dx = target.x - tank.x;
+    const dy = target.y - tank.y;
+    if (dx * dx + dy * dy < 36 && w.rng.next() < 0.012) input.layMine = true;
+  }
+  return input;
+}
+function directAngleTo(fromX, fromY, toX, toY) {
+  return datan2(toY - fromY, toX - fromX);
+}
+
+// ../core/src/sim.ts
+var idCounter = 0;
+function makeTank(id, kind, team, x, y, angle) {
+  const t = {
+    id,
+    kind,
+    team,
+    alive: true,
+    x,
+    y,
+    bodyAngle: angle,
+    turretAngle: angle,
+    shellsOut: 0,
+    minesOut: 0,
+    nextFireTick: 0,
+    nextMineTick: 0
+  };
+  if (kind !== 0 /* Player */) {
+    t.ai = {
+      targetX: x,
+      targetY: y,
+      repathTick: 0,
+      thinkTick: 0,
+      focusId: -1,
+      aimAngle: angle,
+      aimValid: false
+    };
+  }
+  return t;
+}
+function createWorld(cfg) {
+  const arena = cfg.arena.clone();
+  const tanks = [];
+  idCounter = 0;
+  for (const p of cfg.players) {
+    const spawn = arena.spawns[p.spawnIndex] ?? arena.spawns.find((s) => s.team === p.team) ?? arena.spawns[0];
+    if (!spawn) throw new Error(`arena "${arena.name}" has no spawn points`);
+    tanks.push(makeTank(idCounter++, 0 /* Player */, p.team, spawn.x, spawn.y, spawn.angle));
+  }
+  for (const e of arena.enemies) {
+    tanks.push(makeTank(idCounter++, e.kind, e.team, e.x, e.y, e.angle));
+  }
+  for (const b of cfg.bots ?? []) {
+    const spawn = arena.spawns[b.spawnIndex] ?? arena.spawns[0];
+    if (!spawn) throw new Error(`arena "${arena.name}" has no spawn points`);
+    tanks.push(makeTank(idCounter++, b.kind, b.team, spawn.x, spawn.y, spawn.angle));
+  }
+  return {
+    tick: 0,
+    arena,
+    tanks,
+    shells: [],
+    mines: [],
+    rng: new Rng(cfg.seed),
+    nextEntityId: idCounter,
+    events: []
+  };
+}
+function emit(w, kind, x, y, a = 0, b = 0) {
+  w.events.push({ kind, x, y, a, b });
+}
+function tankById(w, id) {
+  for (const t of w.tanks) if (t.id === id) return t;
+  return void 0;
+}
+function fireShell(w, tank) {
+  const spec = TANK_SPECS[tank.kind];
+  if (!tank.alive) return false;
+  if (tank.shellsOut >= MAX_SHELLS_PER_TANK) return false;
+  if (w.tick < tank.nextFireTick) return false;
+  const dirX = dcos(tank.turretAngle);
+  const dirY = dsin(tank.turretAngle);
+  const muzzle = TANK_RADIUS + spec.shell.radius + 0.02;
+  const sx = tank.x + dirX * muzzle;
+  const sy = tank.y + dirY * muzzle;
+  if (w.arena.blocksShellAt(Math.floor(sx), Math.floor(sy))) return false;
+  w.shells.push({
+    id: w.nextEntityId++,
+    ownerId: tank.id,
+    team: tank.team,
+    x: sx,
+    y: sy,
+    vx: dirX * spec.shell.speed,
+    vy: dirY * spec.shell.speed,
+    radius: spec.shell.radius,
+    bouncesLeft: spec.shell.maxBounces,
+    bornTick: w.tick,
+    selfArmDelay: spec.shell.selfArmDelay
+  });
+  tank.shellsOut++;
+  tank.nextFireTick = w.tick + spec.fireCooldown;
+  emit(w, 0 /* ShellFired */, sx, sy, tank.id);
+  return true;
+}
+function layMine(w, tank) {
+  const spec = TANK_SPECS[tank.kind];
+  if (!tank.alive || !spec.laysMines) return false;
+  if (tank.minesOut >= MAX_MINES_PER_TANK) return false;
+  if (w.tick < tank.nextMineTick) return false;
+  w.mines.push({
+    id: w.nextEntityId++,
+    ownerId: tank.id,
+    team: tank.team,
+    x: tank.x,
+    y: tank.y,
+    fuseTick: w.tick + MINE_FUSE_TICKS,
+    armTick: w.tick + MINE_ARM_TICKS
+  });
+  tank.minesOut++;
+  tank.nextMineTick = w.tick + 30;
+  emit(w, 3 /* MineLaid */, tank.x, tank.y, tank.id);
+  return true;
+}
+function killTank(w, tank, killerId) {
+  if (!tank.alive) return;
+  tank.alive = false;
+  emit(w, 6 /* TankDestroyed */, tank.x, tank.y, tank.id, killerId);
+}
+function explodeMine(w, mine) {
+  emit(w, 4 /* MineExploded */, mine.x, mine.y, mine.ownerId);
+  for (const t of w.tanks) {
+    if (!t.alive) continue;
+    if (circlesOverlap(mine.x, mine.y, MINE_BLAST_RADIUS, t.x, t.y, TANK_RADIUS)) {
+      killTank(w, t, mine.ownerId);
+    }
+  }
+  const r = Math.ceil(MINE_BLAST_RADIUS);
+  const cx = Math.floor(mine.x);
+  const cy = Math.floor(mine.y);
+  for (let y = cy - r; y <= cy + r; y++) {
+    for (let x = cx - r; x <= cx + r; x++) {
+      if (w.arena.at(x, y) !== 2 /* Block */) continue;
+      const dx = x + 0.5 - mine.x;
+      const dy = y + 0.5 - mine.y;
+      if (dx * dx + dy * dy <= MINE_BLAST_RADIUS * MINE_BLAST_RADIUS) {
+        w.arena.set(x, y, 0 /* Floor */);
+        emit(w, 5 /* BlockDestroyed */, x + 0.5, y + 0.5, w.arena.index(x, y));
+      }
+    }
+  }
+  const owner = tankById(w, mine.ownerId);
+  if (owner && owner.minesOut > 0) owner.minesOut--;
+}
+function step(w, inputs) {
+  w.events.length = 0;
+  for (const tank of w.tanks) {
+    if (!tank.alive) continue;
+    const spec = TANK_SPECS[tank.kind];
+    const input = tank.ai ? stepAi(w, tank) : inputs.get(tank.id) ?? emptyInput();
+    const aimLen = Math.sqrt(input.aimX * input.aimX + input.aimY * input.aimY);
+    if (aimLen > 0.15) {
+      const desired = datan2(input.aimY, input.aimX);
+      tank.turretAngle = rotateToward(tank.turretAngle, desired, spec.turretTurnRate * DT);
+    }
+    const moveLen = Math.sqrt(input.moveX * input.moveX + input.moveY * input.moveY);
+    if (moveLen > 0.15 && spec.mobile) {
+      const desired = datan2(input.moveY, input.moveX);
+      tank.bodyAngle = rotateToward(tank.bodyAngle, desired, spec.bodyTurnRate * DT);
+      const throttle = moveLen > 1 ? 1 : moveLen;
+      const misalign = Math.abs(wrapAngle(desired - tank.bodyAngle));
+      const alignScale = misalign > 1.2 ? 0.35 : 1 - misalign * 0.35;
+      const dist = spec.moveSpeed * throttle * alignScale * DT;
+      const moved = moveTank(
+        w.arena,
+        tank.x,
+        tank.y,
+        dcos(tank.bodyAngle) * dist,
+        dsin(tank.bodyAngle) * dist,
+        TANK_RADIUS
+      );
+      tank.x = moved.x;
+      tank.y = moved.y;
+    }
+    if (input.fire) fireShell(w, tank);
+    if (input.layMine) layMine(w, tank);
+  }
+  for (let i = w.shells.length - 1; i >= 0; i--) {
+    const s = w.shells[i];
+    const startX = s.x;
+    const startY = s.y;
+    const speed = Math.sqrt(s.vx * s.vx + s.vy * s.vy);
+    const r = stepShell(
+      w.arena,
+      s.x,
+      s.y,
+      s.vx,
+      s.vy,
+      s.radius,
+      s.bouncesLeft,
+      speed * DT,
+      true
+    );
+    s.x = r.x;
+    s.y = r.y;
+    s.vx = r.vx;
+    s.vy = r.vy;
+    s.bouncesLeft = r.bouncesLeft;
+    for (const b of r.bounces) emit(w, 1 /* ShellBounced */, b.x, b.y, s.id);
+    for (const idx of r.destroyed) {
+      emit(w, 5 /* BlockDestroyed */, idx % w.arena.width + 0.5, Math.floor(idx / w.arena.width) + 0.5, idx);
+    }
+    let hitSomething = false;
+    const age = w.tick - s.bornTick;
+    for (const t of w.tanks) {
+      if (!t.alive) continue;
+      if (t.id === s.ownerId && age < s.selfArmDelay) continue;
+      if (sweepCircleHit(startX, startY, s.x - startX, s.y - startY, s.radius, t.x, t.y, TANK_RADIUS)) {
+        killTank(w, t, s.ownerId);
+        hitSomething = true;
+        break;
+      }
+    }
+    const expired = w.tick - s.bornTick > SHELL_MAX_LIFETIME_TICKS;
+    if (hitSomething || r.dead || expired) {
+      if (!hitSomething) emit(w, 2 /* ShellExpired */, s.x, s.y, s.id);
+      const owner = tankById(w, s.ownerId);
+      if (owner && owner.shellsOut > 0) owner.shellsOut--;
+      w.shells.splice(i, 1);
+    }
+  }
+  for (let i = w.mines.length - 1; i >= 0; i--) {
+    const m = w.mines[i];
+    let detonate = w.tick >= m.fuseTick;
+    if (!detonate && w.tick >= m.armTick) {
+      for (const t of w.tanks) {
+        if (!t.alive || t.id === m.ownerId) continue;
+        if (circlesOverlap(m.x, m.y, MINE_TRIGGER_RADIUS, t.x, t.y, TANK_RADIUS)) {
+          detonate = true;
+          break;
+        }
+      }
+    }
+    if (detonate) {
+      explodeMine(w, m);
+      w.mines.splice(i, 1);
+    }
+  }
+  w.tick++;
+}
+function cloneWorld(w) {
+  return {
+    tick: w.tick,
+    arena: w.arena.clone(),
+    tanks: w.tanks.map((t) => ({ ...t, ai: t.ai ? { ...t.ai } : void 0 })),
+    shells: w.shells.map((s) => ({ ...s })),
+    mines: w.mines.map((m) => ({ ...m })),
+    rng: (() => {
+      const r = new Rng(0);
+      r.restore(w.rng.save());
+      return r;
+    })(),
+    nextEntityId: w.nextEntityId,
+    events: []
+  };
+}
+function livingTeams(w) {
+  const s = /* @__PURE__ */ new Set();
+  for (const t of w.tanks) if (t.alive) s.add(t.team);
+  return s;
+}
+function isMatchOver(w) {
+  return livingTeams(w).size <= 1;
+}
+
+// ../core/src/maps/index.ts
+var MISSIONS = [
+  {
+    id: 1,
+    name: "First Contact",
+    rows: [
+      "########################",
+      "#......................#",
+      "#......................#",
+      "#....1............b....#",
+      "#......................#",
+      "#.......####...........#",
+      "#.......#..#...........#",
+      "#.......#..#...........#",
+      "#.......####...........#",
+      "#......................#",
+      "#....b............b....#",
+      "#......................#",
+      "#......................#",
+      "########################"
+    ]
+  },
+  {
+    id: 2,
+    name: "Cork Yard",
+    rows: [
+      "########################",
+      "#......................#",
+      "#...%%%%........%%%%...#",
+      "#...%..............%...#",
+      "#.1.%......gg......%...#",
+      "#...%..............%...#",
+      "#...%%%%........%%%%...#",
+      "#......................#",
+      "#....##..........##....#",
+      "#....##..........##....#",
+      "#..........b...........#",
+      "#......................#",
+      "#......................#",
+      "########################"
+    ]
+  },
+  {
+    id: 3,
+    name: "The Gallery",
+    rows: [
+      "########################",
+      "#..........#...........#",
+      "#..1.......#.......n...#",
+      "#..........#...........#",
+      "#....%%%...#...%%%.....#",
+      "#..........#...........#",
+      "#......................#",
+      "#..........#...........#",
+      "#....%%%...#...%%%.....#",
+      "#..........#...........#",
+      "#....t.....#......t....#",
+      "#..........#...........#",
+      "#..........#...........#",
+      "########################"
+    ]
+  },
+  {
+    id: 4,
+    name: "Chasm",
+    rows: [
+      "########################",
+      "#......................#",
+      "#..1...OOOOOOOO....y...#",
+      "#......OOOOOOOO........#",
+      "#......OOOOOOOO........#",
+      "#......................#",
+      "#..%%%..........%%%....#",
+      "#..%%%..........%%%....#",
+      "#......................#",
+      "#......OOOOOOOO........#",
+      "#..g...OOOOOOOO....n...#",
+      "#......OOOOOOOO........#",
+      "#......................#",
+      "########################"
+    ]
+  },
+  {
+    id: 5,
+    name: "Last Stand",
+    rows: [
+      "########################",
+      "#....#............#....#",
+      "#.1..#....%%%%....#..k.#",
+      "#....#....%..%....#....#",
+      "#.........%..%.........#",
+      "#....%....%%%%....%....#",
+      "#....%............%....#",
+      "#....%............%....#",
+      "#....%....%%%%....%....#",
+      "#.........%..%.........#",
+      "#....#....%..%....#....#",
+      "#.n..#....%%%%....#..g.#",
+      "#....#............#....#",
+      "########################"
+    ]
+  }
+];
+var VERSUS_MAPS = [
+  {
+    id: 101,
+    name: "Crossfire",
+    rows: [
+      "########################",
+      "#.1..................2.#",
+      "#......................#",
+      "#....%%%......%%%......#",
+      "#....%..........%......#",
+      "#....%..........%......#",
+      "#..........##..........#",
+      "#..........##..........#",
+      "#......%..........%....#",
+      "#......%..........%....#",
+      "#......%%%......%%%....#",
+      "#......................#",
+      "#.3..................4.#",
+      "########################"
+    ]
+  },
+  {
+    id: 102,
+    name: "Pillars",
+    rows: [
+      "########################",
+      "#.1........##........2.#",
+      "#..........##..........#",
+      "#...##..........##.....#",
+      "#...##..........##.....#",
+      "#.......%%%%%%.........#",
+      "#......................#",
+      "#......................#",
+      "#.......%%%%%%.........#",
+      "#...##..........##.....#",
+      "#...##..........##.....#",
+      "#..........##..........#",
+      "#.3........##........4.#",
+      "########################"
+    ]
+  },
+  {
+    id: 103,
+    name: "The Moat",
+    rows: [
+      "########################",
+      "#.1..................2.#",
+      "#...OOOOOOOOOOOOOOOO...#",
+      "#...O..............O...#",
+      "#...O...%%%%%%%%...O...#",
+      "#...O...%......%...O...#",
+      "#.......%......%.......#",
+      "#.......%......%.......#",
+      "#...O...%%%%%%%%...O...#",
+      "#...O..............O...#",
+      "#...OOOOOOOOOOOOOOOO...#",
+      "#......................#",
+      "#.3..................4.#",
+      "########################"
+    ]
+  }
+];
+var cache = /* @__PURE__ */ new Map();
+function loadArena(m) {
+  const hit = cache.get(m.name);
+  if (hit) return hit;
+  const a = new Arena(parseArena(m.name, m.rows));
+  cache.set(m.name, a);
+  return a;
+}
+function missionById(id) {
+  return MISSIONS.find((m) => m.id === id) ?? VERSUS_MAPS.find((m) => m.id === id);
+}
+
+// ../core/src/net/transport.ts
+var TransportKind = /* @__PURE__ */ ((TransportKind2) => {
+  TransportKind2["Ble"] = "ble";
+  TransportKind2["Lan"] = "lan";
+  TransportKind2["Loopback"] = "loopback";
+  return TransportKind2;
+})(TransportKind || {});
+
+// ../core/src/net/protocol.ts
+var PROTOCOL_VERSION = 1;
+var MsgType = /* @__PURE__ */ ((MsgType2) => {
+  MsgType2[MsgType2["MatchStart"] = 1] = "MatchStart";
+  MsgType2[MsgType2["Input"] = 2] = "Input";
+  MsgType2[MsgType2["Snapshot"] = 3] = "Snapshot";
+  MsgType2[MsgType2["Event"] = 4] = "Event";
+  MsgType2[MsgType2["Lobby"] = 5] = "Lobby";
+  MsgType2[MsgType2["Ping"] = 6] = "Ping";
+  MsgType2[MsgType2["Pong"] = 7] = "Pong";
+  return MsgType2;
+})(MsgType || {});
+var NetEvent = /* @__PURE__ */ ((NetEvent2) => {
+  NetEvent2[NetEvent2["ShellSpawn"] = 1] = "ShellSpawn";
+  NetEvent2[NetEvent2["MineSpawn"] = 2] = "MineSpawn";
+  NetEvent2[NetEvent2["MineExplode"] = 3] = "MineExplode";
+  NetEvent2[NetEvent2["TankKilled"] = 4] = "TankKilled";
+  NetEvent2[NetEvent2["BlockDestroyed"] = 5] = "BlockDestroyed";
+  NetEvent2[NetEvent2["RoundOver"] = 6] = "RoundOver";
+  return NetEvent2;
+})(NetEvent || {});
+var POS_SCALE = 128;
+var ANGLE_SCALE = 256 / (Math.PI * 2);
+function quantPos(v) {
+  return Math.round(v * POS_SCALE) & 4095;
+}
+function dequantPos(q) {
+  return q / POS_SCALE;
+}
+function quantAngle(a) {
+  let n = a % (Math.PI * 2);
+  if (n < 0) n += Math.PI * 2;
+  return Math.round(n * ANGLE_SCALE) & 255;
+}
+function dequantAngle(q) {
+  return q / ANGLE_SCALE;
+}
+var Writer = class {
+  constructor(capacity = 256) {
+    __publicField(this, "buf");
+    __publicField(this, "view");
+    __publicField(this, "pos", 0);
+    this.buf = new Uint8Array(capacity);
+    this.view = new DataView(this.buf.buffer);
+  }
+  ensure(n) {
+    if (this.pos + n <= this.buf.length) return;
+    let cap = this.buf.length * 2;
+    while (cap < this.pos + n) cap *= 2;
+    const next = new Uint8Array(cap);
+    next.set(this.buf);
+    this.buf = next;
+    this.view = new DataView(this.buf.buffer);
+  }
+  u8(v) {
+    this.ensure(1);
+    this.buf[this.pos++] = v & 255;
+    return this;
+  }
+  u16(v) {
+    this.ensure(2);
+    this.view.setUint16(this.pos, v & 65535, true);
+    this.pos += 2;
+    return this;
+  }
+  u32(v) {
+    this.ensure(4);
+    this.view.setUint32(this.pos, v >>> 0, true);
+    this.pos += 4;
+    return this;
+  }
+  i8(v) {
+    this.ensure(1);
+    this.view.setInt8(this.pos, v);
+    this.pos += 1;
+    return this;
+  }
+  bytes(b) {
+    this.ensure(b.length);
+    this.buf.set(b, this.pos);
+    this.pos += b.length;
+    return this;
+  }
+  str(s) {
+    const enc = new TextEncoder().encode(s);
+    this.u8(enc.length);
+    return this.bytes(enc);
+  }
+  finish() {
+    return this.buf.slice(0, this.pos);
+  }
+  get length() {
+    return this.pos;
+  }
+};
+var Reader = class {
+  constructor(buf) {
+    __publicField(this, "buf", buf);
+    __publicField(this, "view");
+    __publicField(this, "pos", 0);
+    this.view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  }
+  u8() {
+    return this.buf[this.pos++];
+  }
+  u16() {
+    const v = this.view.getUint16(this.pos, true);
+    this.pos += 2;
+    return v;
+  }
+  u32() {
+    const v = this.view.getUint32(this.pos, true);
+    this.pos += 4;
+    return v;
+  }
+  i8() {
+    const v = this.view.getInt8(this.pos);
+    this.pos += 1;
+    return v;
+  }
+  bytes(n) {
+    const v = this.buf.slice(this.pos, this.pos + n);
+    this.pos += n;
+    return v;
+  }
+  str() {
+    const n = this.u8();
+    return new TextDecoder().decode(this.bytes(n));
+  }
+  get remaining() {
+    return this.buf.length - this.pos;
+  }
+};
+function writeInput(w, input) {
+  w.u8(2 /* Input */);
+  w.u16(input.tick & 65535);
+  w.i8(Math.round(clampUnit(input.moveX) * 127));
+  w.i8(Math.round(clampUnit(input.moveY) * 127));
+  w.i8(Math.round(clampUnit(input.aimX) * 127));
+  w.i8(Math.round(clampUnit(input.aimY) * 127));
+  w.u8((input.fire ? 1 : 0) | (input.layMine ? 2 : 0));
+}
+function readInput(r) {
+  const tick = r.u16();
+  const moveX = r.i8() / 127;
+  const moveY = r.i8() / 127;
+  const aimX = r.i8() / 127;
+  const aimY = r.i8() / 127;
+  const flags = r.u8();
+  return {
+    tick,
+    moveX,
+    moveY,
+    aimX,
+    aimY,
+    fire: (flags & 1) !== 0,
+    layMine: (flags & 2) !== 0
+  };
+}
+function clampUnit(v) {
+  return v < -1 ? -1 : v > 1 ? 1 : v;
+}
+function writeSnapshot(w, tick, tanks) {
+  w.u8(3 /* Snapshot */);
+  w.u16(tick & 65535);
+  w.u8(tanks.length);
+  for (const t of tanks) {
+    const qx = quantPos(t.x);
+    const qy = quantPos(t.y);
+    w.u8(t.id & 15 | (t.alive ? 16 : 0));
+    w.u8(qx & 255);
+    w.u8(qx >> 8 & 15 | (qy & 15) << 4);
+    w.u8(qy >> 4 & 255);
+    w.u8(quantAngle(t.bodyAngle));
+    w.u8(quantAngle(t.turretAngle));
+  }
+}
+function readSnapshot(r) {
+  const tick = r.u16();
+  const count = r.u8();
+  const tanks = [];
+  for (let i = 0; i < count; i++) {
+    const idByte = r.u8();
+    const b0 = r.u8();
+    const b1 = r.u8();
+    const b2 = r.u8();
+    const qx = b0 | (b1 & 15) << 8;
+    const qy = b1 >> 4 & 15 | b2 << 4;
+    tanks.push({
+      id: idByte & 15,
+      alive: (idByte & 16) !== 0,
+      x: dequantPos(qx),
+      y: dequantPos(qy),
+      bodyAngle: dequantAngle(r.u8()),
+      turretAngle: dequantAngle(r.u8())
+    });
+  }
+  return { tick, tanks };
+}
+function writeShellSpawn(w, s) {
+  w.u8(4 /* Event */);
+  w.u8(1 /* ShellSpawn */);
+  w.u16(s.tick & 65535);
+  w.u8(s.shellId & 255);
+  w.u8(s.ownerId & 15 | (s.bounces & 3) << 4);
+  const qx = quantPos(s.x);
+  const qy = quantPos(s.y);
+  w.u8(qx & 255);
+  w.u8(qx >> 8 & 15 | (qy & 15) << 4);
+  w.u8(qy >> 4 & 255);
+  w.u8(quantAngle(s.angle));
+}
+function readShellSpawn(r) {
+  const tick = r.u16();
+  const shellId = r.u8();
+  const packed = r.u8();
+  const b0 = r.u8();
+  const b1 = r.u8();
+  const b2 = r.u8();
+  const qx = b0 | (b1 & 15) << 8;
+  const qy = b1 >> 4 & 15 | b2 << 4;
+  return {
+    tick,
+    shellId,
+    ownerId: packed & 15,
+    bounces: packed >> 4 & 3,
+    x: dequantPos(qx),
+    y: dequantPos(qy),
+    angle: dequantAngle(r.u8())
+  };
+}
+function writeMatchStart(w, m) {
+  w.u8(1 /* MatchStart */);
+  w.u8(PROTOCOL_VERSION);
+  w.u16(m.mapId);
+  w.u32(m.seed);
+  w.u16(m.hostTick & 65535);
+  w.u8(m.yourTankId);
+  w.u8(m.players.length);
+  for (const p of m.players) w.u8(p.team).u8(p.spawnIndex);
+  w.u8(m.bots.length);
+  for (const b of m.bots) w.u8(b.kind).u8(b.team).u8(b.spawnIndex);
+}
+function readMatchStart(r) {
+  const version = r.u8();
+  if (version !== PROTOCOL_VERSION) {
+    throw new Error(`protocol version mismatch: host speaks ${version}, we speak ${PROTOCOL_VERSION}`);
+  }
+  const mapId = r.u16();
+  const seed = r.u32();
+  const hostTick = r.u16();
+  const yourTankId = r.u8();
+  const players = [];
+  const playerCount = r.u8();
+  for (let i = 0; i < playerCount; i++) players.push({ team: r.u8(), spawnIndex: r.u8() });
+  const bots = [];
+  const botCount = r.u8();
+  for (let i = 0; i < botCount; i++) bots.push({ kind: r.u8(), team: r.u8(), spawnIndex: r.u8() });
+  return { mapId, seed, hostTick, yourTankId, players, bots };
+}
+function estimateDownstreamBps(tankCount, snapshotHz) {
+  const snapshotBytes = 4 + tankCount * 6;
+  return snapshotBytes * snapshotHz;
+}
+
+// ../core/src/net/bridge.ts
+var BridgeTransport = class {
+  constructor(sendFn, options = {}) {
+    __publicField(this, "sendFn", sendFn);
+    __publicField(this, "kind");
+    __publicField(this, "maxPayload");
+    __publicField(this, "events", {});
+    __publicField(this, "peers", /* @__PURE__ */ new Map());
+    this.maxPayload = options.maxPayload ?? 180;
+    this.kind = options.kind ?? "loopback" /* Loopback */;
+  }
+  setEvents(events) {
+    this.events = events;
+  }
+  async host() {
+  }
+  async discover() {
+  }
+  async join(peerId) {
+    this.addPeer({ id: peerId, name: peerId, rtt: -1 });
+  }
+  send(to, data, reliable) {
+    if (data.length > this.maxPayload) {
+      this.events.onError?.(
+        new Error(`payload ${data.length}B exceeds the ${this.maxPayload}B transport limit`)
+      );
+      return;
+    }
+    try {
+      this.sendFn(to, data, reliable);
+    } catch (err) {
+      this.events.onError?.(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+  broadcast(data, reliable) {
+    for (const id of this.peers.keys()) this.send(id, data, reliable);
+  }
+  async close() {
+    this.peers.clear();
+  }
+  // --- Called by the environment glue ------------------------------------
+  addPeer(peer) {
+    this.peers.set(peer.id, peer);
+    this.events.onPeerJoin?.(peer);
+  }
+  removePeer(peerId, reason = "disconnected") {
+    if (!this.peers.delete(peerId)) return;
+    this.events.onPeerLeave?.(peerId, reason);
+  }
+  receive(from, data) {
+    this.events.onPacket?.(from, data);
+  }
+  get peerIds() {
+    return [...this.peers.keys()];
+  }
+};
+
+// ../core/src/net/loopback.ts
+var BLE_PROFILE = {
+  latencyMs: 45,
+  jitterMs: 30,
+  loss: 0.03,
+  bandwidth: 4e3
+};
+var LAN_PROFILE = {
+  latencyMs: 6,
+  jitterMs: 4,
+  loss: 1e-3,
+  bandwidth: 2e5
+};
+var PERFECT_PROFILE = {
+  latencyMs: 0,
+  jitterMs: 0,
+  loss: 0,
+  bandwidth: 0
+};
+var LoopbackNetwork = class {
+  constructor(profile = PERFECT_PROFILE, seed = 1) {
+    __publicField(this, "profile", profile);
+    __publicField(this, "endpoints", /* @__PURE__ */ new Map());
+    __publicField(this, "queue", []);
+    __publicField(this, "rng");
+    __publicField(this, "nowMs", 0);
+    /** Per-link byte budget carried between pumps, for the bandwidth model. */
+    __publicField(this, "sendBudget", /* @__PURE__ */ new Map());
+    __publicField(this, "droppedPackets", 0);
+    __publicField(this, "deliveredPackets", 0);
+    __publicField(this, "deliveredBytes", 0);
+    this.rng = new Rng(seed);
+  }
+  get now() {
+    return this.nowMs;
+  }
+  attach(t) {
+    this.endpoints.set(t.id, t);
+  }
+  connect(a, b) {
+    const ta = this.endpoints.get(a);
+    const tb = this.endpoints.get(b);
+    if (!ta || !tb) throw new Error("connect: unknown endpoint");
+    ta.notifyJoin({ id: b, name: tb.name, rtt: this.profile.latencyMs * 2 });
+    tb.notifyJoin({ id: a, name: ta.name, rtt: this.profile.latencyMs * 2 });
+  }
+  submit(from, to, data, reliable) {
+    const p = this.profile;
+    if (!reliable && p.loss > 0 && this.rng.next() < p.loss) {
+      this.droppedPackets++;
+      return;
+    }
+    let delay = p.latencyMs + (p.jitterMs > 0 ? this.rng.range(0, p.jitterMs) : 0);
+    if (!reliable) {
+    } else if (p.loss > 0 && this.rng.next() < p.loss) {
+      delay += p.latencyMs * 2 + 15;
+    }
+    if (p.bandwidth > 0) {
+      const busyUntil = this.sendBudget.get(from) ?? 0;
+      const airtime = data.length / p.bandwidth * 1e3;
+      const startAt = Math.max(this.nowMs, busyUntil);
+      this.sendBudget.set(from, startAt + airtime);
+      delay += startAt - this.nowMs + airtime;
+    }
+    this.queue.push({ from, to, data, reliable, arriveAt: this.nowMs + delay });
+  }
+  /** Advance virtual time, delivering everything that has come due. */
+  advance(ms) {
+    this.nowMs += ms;
+    if (this.queue.length === 0) return;
+    const due = this.queue.filter((p) => p.arriveAt <= this.nowMs);
+    if (due.length === 0) return;
+    this.queue = this.queue.filter((p) => p.arriveAt > this.nowMs);
+    due.sort((a, b) => a.arriveAt - b.arriveAt);
+    for (const p of due) {
+      const target = this.endpoints.get(p.to);
+      if (!target) continue;
+      this.deliveredPackets++;
+      this.deliveredBytes += p.data.length;
+      target.notifyPacket(p.from, p.data);
+    }
+  }
+};
+var LoopbackTransport = class {
+  constructor(id, name, network) {
+    __publicField(this, "id", id);
+    __publicField(this, "name", name);
+    __publicField(this, "network", network);
+    __publicField(this, "kind", "loopback" /* Loopback */);
+    /** Matches the conservative BLE ceiling so tests catch oversized packets. */
+    __publicField(this, "maxPayload", 180);
+    __publicField(this, "events", {});
+    __publicField(this, "peers", /* @__PURE__ */ new Set());
+    network.attach(this);
+  }
+  setEvents(events) {
+    this.events = events;
+  }
+  async host() {
+  }
+  async discover() {
+  }
+  async join(peerId) {
+    this.peers.add(peerId);
+  }
+  send(to, data, reliable) {
+    if (data.length > this.maxPayload) {
+      this.events.onError?.(
+        new Error(`payload ${data.length}B exceeds the ${this.maxPayload}B transport limit`)
+      );
+      return;
+    }
+    this.network.submit(this.id, to, data, reliable);
+  }
+  broadcast(data, reliable) {
+    for (const p of this.peers) this.send(p, data, reliable);
+  }
+  async close() {
+    this.peers.clear();
+  }
+  notifyJoin(peer) {
+    this.peers.add(peer.id);
+    this.events.onPeerJoin?.(peer);
+  }
+  notifyPacket(from, data) {
+    this.events.onPacket?.(from, data);
+  }
+};
+
+// ../core/src/net/host.ts
+var SNAPSHOT_HZ = 15;
+var SNAPSHOT_INTERVAL = Math.round(TICK_HZ / SNAPSHOT_HZ);
+var INPUT_STALE_TICKS = 20;
+var MatchHost = class {
+  constructor(world, transport) {
+    __publicField(this, "world", world);
+    __publicField(this, "transport", transport);
+    __publicField(this, "clients", /* @__PURE__ */ new Map());
+    __publicField(this, "tickAccumulatorMs", 0);
+    __publicField(this, "pendingEvents", []);
+    transport.setEvents({
+      onPacket: (from, data) => this.onPacket(from, data),
+      onPeerLeave: (peerId) => this.clients.delete(peerId)
+    });
+  }
+  /** Seat a client in a tank. Returns the tank id it now controls. */
+  addClient(peerId, tankId) {
+    this.clients.set(peerId, {
+      peerId,
+      tankId,
+      lastInput: emptyInput(),
+      lastInputTick: 0,
+      highestTick: -1
+    });
+  }
+  onPacket(from, data) {
+    const r = new Reader(data);
+    const type = r.u8();
+    if (type !== 2 /* Input */) return;
+    const slot = this.clients.get(from);
+    if (!slot) return;
+    const input = readInput(r);
+    const delta = input.tick - slot.highestTick & 65535;
+    if (slot.highestTick >= 0 && (delta === 0 || delta > 32768)) return;
+    slot.highestTick = input.tick;
+    slot.lastInput = {
+      moveX: input.moveX,
+      moveY: input.moveY,
+      aimX: input.aimX,
+      aimY: input.aimY,
+      fire: input.fire,
+      layMine: input.layMine
+    };
+    slot.lastInputTick = this.world.tick;
+  }
+  /**
+   * Advance by real elapsed time, stepping in whole fixed ticks.
+   *
+   * Never scale the simulation by a variable dt. Determinism is what lets
+   * clients simulate shells locally, and a variable timestep destroys it.
+   */
+  update(elapsedMs) {
+    this.tickAccumulatorMs += elapsedMs;
+    const tickMs = 1e3 / TICK_HZ;
+    let budget = 8;
+    while (this.tickAccumulatorMs >= tickMs && budget-- > 0) {
+      this.tickAccumulatorMs -= tickMs;
+      this.stepOnce();
+    }
+    if (this.tickAccumulatorMs > tickMs * 8) this.tickAccumulatorMs = 0;
+  }
+  stepOnce() {
+    const inputs = /* @__PURE__ */ new Map();
+    for (const slot of this.clients.values()) {
+      const age = this.world.tick - slot.lastInputTick;
+      inputs.set(slot.tankId, age > INPUT_STALE_TICKS ? emptyInput() : slot.lastInput);
+    }
+    step(this.world, inputs);
+    for (const shell of this.world.shells) {
+      if (shell.bornTick !== this.world.tick - 1) continue;
+      const w = new Writer(16);
+      writeShellSpawn(w, {
+        shellId: shell.id & 255,
+        ownerId: shell.ownerId,
+        x: shell.x,
+        y: shell.y,
+        angle: datan2(shell.vy, shell.vx),
+        bounces: shell.bouncesLeft,
+        tick: this.world.tick
+      });
+      this.pendingEvents.push(w.finish());
+    }
+    for (const ev of this.world.events) {
+      if (ev.kind === 6 /* TankDestroyed */) {
+        const w = new Writer(8);
+        w.u8(4 /* Event */).u8(4 /* TankKilled */).u16(this.world.tick & 65535).u8(ev.a).u8(ev.b);
+        this.pendingEvents.push(w.finish());
+      } else if (ev.kind === 5 /* BlockDestroyed */) {
+        const w = new Writer(8);
+        w.u8(4 /* Event */).u8(5 /* BlockDestroyed */).u16(ev.a & 65535);
+        this.pendingEvents.push(w.finish());
+      }
+    }
+    this.flushEvents();
+    if (this.world.tick % SNAPSHOT_INTERVAL === 0) this.sendSnapshot();
+  }
+  flushEvents() {
+    for (const e of this.pendingEvents) this.transport.broadcast(e, true);
+    this.pendingEvents.length = 0;
+  }
+  sendSnapshot() {
+    const w = new Writer(256);
+    writeSnapshot(
+      w,
+      this.world.tick,
+      this.world.tanks.map((t) => ({
+        id: t.id,
+        x: t.x,
+        y: t.y,
+        bodyAngle: t.bodyAngle,
+        turretAngle: t.turretAngle,
+        alive: t.alive
+      }))
+    );
+    const buf = w.finish();
+    if (buf.length > this.transport.maxPayload) {
+      throw new Error(
+        `snapshot is ${buf.length}B, over the ${this.transport.maxPayload}B transport limit (${this.world.tanks.length} tanks)`
+      );
+    }
+    this.transport.broadcast(buf, false);
+  }
+  /** State a late-joining client needs. */
+  snapshotForJoin() {
+    return cloneWorld(this.world);
+  }
+};
+
+// ../core/src/net/client.ts
+var HISTORY_TICKS = 64;
+var RECONCILE_EPSILON = 1 / 64;
+var CLIENT_LEAD_TICKS = 10;
+var RESYNC_AFTER_STALE = 25;
+var MatchClient = class {
+  constructor(initial, transport, hostId, localTankId) {
+    __publicField(this, "transport", transport);
+    __publicField(this, "hostId", hostId);
+    __publicField(this, "localTankId", localTankId);
+    /** The locally predicted world. This is what the renderer draws. */
+    __publicField(this, "world");
+    __publicField(this, "history", []);
+    __publicField(this, "tickAccumulatorMs", 0);
+    __publicField(this, "pendingInput", emptyInput());
+    /** Diagnostics, surfaced in the debug HUD. */
+    __publicField(this, "reconciles", 0);
+    __publicField(this, "lastError", 0);
+    __publicField(this, "snapshotsApplied", 0);
+    __publicField(this, "snapshotsStale", 0);
+    __publicField(this, "resyncs", 0);
+    __publicField(this, "consecutiveStale", 0);
+    this.world = initial;
+    transport.setEvents({ onPacket: (from, data) => this.handlePacket(from, data) });
+  }
+  setInput(input) {
+    this.pendingInput = input;
+  }
+  update(elapsedMs) {
+    this.tickAccumulatorMs += elapsedMs;
+    const tickMs = 1e3 / TICK_HZ;
+    let budget = 8;
+    while (this.tickAccumulatorMs >= tickMs && budget-- > 0) {
+      this.tickAccumulatorMs -= tickMs;
+      this.stepOnce();
+    }
+    if (this.tickAccumulatorMs > tickMs * 8) this.tickAccumulatorMs = 0;
+  }
+  stepOnce() {
+    const input = { ...this.pendingInput };
+    this.history.push({ tick: this.world.tick, world: cloneWorld(this.world), input });
+    while (this.history.length > HISTORY_TICKS) this.history.shift();
+    const w = new Writer(16);
+    writeInput(w, { tick: this.world.tick, ...input });
+    this.transport.send(this.hostId, w.finish(), false);
+    step(this.world, /* @__PURE__ */ new Map([[this.localTankId, input]]));
+  }
+  /**
+   * Public so an embedder can own the transport's event wiring and forward
+   * here. The host may send messages this class does not handle -- a match
+   * restart, lobby changes -- and if MatchClient monopolised onPacket those
+   * would be silently dropped by whoever is embedding it.
+   */
+  handlePacket(from, data) {
+    if (from !== this.hostId) return;
+    const r = new Reader(data);
+    const type = r.u8();
+    if (type === 3 /* Snapshot */) {
+      this.applySnapshot(r);
+    } else if (type === 4 /* Event */) {
+      this.applyEvent(r);
+    }
+  }
+  applySnapshot(r) {
+    const snap = readSnapshot(r);
+    const tick = this.expandTick(snap.tick);
+    const idx = this.history.findIndex((h) => h.tick === tick);
+    const base = idx === -1 ? tick === this.world.tick ? this.world : null : this.history[idx].world;
+    if (!base) {
+      this.snapshotsStale++;
+      this.consecutiveStale++;
+      if (this.consecutiveStale >= RESYNC_AFTER_STALE) this.resyncTo(snap, tick);
+      return;
+    }
+    this.consecutiveStale = 0;
+    this.snapshotsApplied++;
+    const predicted = base.tanks.find((t) => t.id === this.localTankId);
+    const authoritative = snap.tanks.find((t) => t.id === this.localTankId);
+    let error = 0;
+    if (predicted && authoritative) {
+      const dx = predicted.x - authoritative.x;
+      const dy = predicted.y - authoritative.y;
+      error = Math.sqrt(dx * dx + dy * dy);
+    }
+    this.lastError = error;
+    const needsRewind = error > RECONCILE_EPSILON;
+    const rewound = cloneWorld(base);
+    for (const wire of snap.tanks) {
+      const tank = rewound.tanks.find((t) => t.id === wire.id);
+      if (!tank) continue;
+      if (tank.id === this.localTankId && !needsRewind) continue;
+      tank.x = wire.x;
+      tank.y = wire.y;
+      tank.bodyAngle = wire.bodyAngle;
+      tank.turretAngle = wire.turretAngle;
+      tank.alive = wire.alive;
+    }
+    if (needsRewind) this.reconciles++;
+    this.world = rewound;
+    if (idx === -1) return;
+    for (let i = idx; i < this.history.length; i++) {
+      const h = this.history[i];
+      h.world = cloneWorld(this.world);
+      step(this.world, /* @__PURE__ */ new Map([[this.localTankId, h.input]]));
+    }
+  }
+  /**
+   * Adopt a snapshot wholesale and restart our clock ahead of it.
+   *
+   * Used only when we have gone deaf to corrections for long enough that
+   * predicting further is worse than a visible jump. History is discarded --
+   * it describes a timeline the host never agreed with.
+   */
+  resyncTo(snap, tick) {
+    for (const wire of snap.tanks) {
+      const tank = this.world.tanks.find((t) => t.id === wire.id);
+      if (!tank) continue;
+      tank.x = wire.x;
+      tank.y = wire.y;
+      tank.bodyAngle = wire.bodyAngle;
+      tank.turretAngle = wire.turretAngle;
+      tank.alive = wire.alive;
+    }
+    this.world.shells.length = 0;
+    this.world.tick = tick + CLIENT_LEAD_TICKS;
+    this.history.length = 0;
+    this.consecutiveStale = 0;
+    this.resyncs++;
+  }
+  applyEvent(r) {
+    const kind = r.u8();
+    if (kind === 1 /* ShellSpawn */) {
+      const s = readShellSpawn(r);
+      if (this.world.shells.some((x) => (x.id & 255) === s.shellId)) return;
+      const owner = this.world.tanks.find((t) => t.id === s.ownerId);
+      const speed = this.shellSpeedFor(owner?.kind ?? 0);
+      this.world.shells.push({
+        id: s.shellId,
+        ownerId: s.ownerId,
+        team: owner?.team ?? 1,
+        x: s.x,
+        y: s.y,
+        vx: dcos(s.angle) * speed,
+        vy: dsin(s.angle) * speed,
+        radius: 0.12,
+        bouncesLeft: s.bounces,
+        bornTick: this.expandTick(s.tick),
+        selfArmDelay: 8
+      });
+    } else if (kind === 4 /* TankKilled */) {
+      r.u16();
+      const victim = r.u8();
+      const tank = this.world.tanks.find((t) => t.id === victim);
+      if (tank) tank.alive = false;
+    } else if (kind === 5 /* BlockDestroyed */) {
+      const idx = r.u16();
+      const cx = idx % this.world.arena.width;
+      const cy = Math.floor(idx / this.world.arena.width);
+      this.world.arena.set(cx, cy, 0);
+    }
+  }
+  shellSpeedFor(kind) {
+    switch (kind) {
+      case 3:
+      case 6:
+        return 9;
+      // rockets
+      case 2:
+      case 5:
+        return 5;
+      // ricochet
+      default:
+        return 5.5;
+    }
+  }
+  /**
+   * Rebuild a full tick from the 16 bits we transmit.
+   *
+   * The wire carries the low 16 bits, which wraps every ~18 minutes of play.
+   * We assume the true value is the one nearest our own clock, which is correct
+   * as long as we are within ~32000 ticks (9 minutes) of the host -- vastly
+   * more slack than any real desync.
+   */
+  expandTick(wireTick) {
+    const base = this.world.tick & ~65535;
+    const candidates = [base + wireTick, base + wireTick - 65536, base + wireTick + 65536];
+    let best = candidates[0];
+    let bestDist = Infinity;
+    for (const c of candidates) {
+      const d = Math.abs(c - this.world.tick);
+      if (d < bestDist) {
+        bestDist = d;
+        best = c;
+      }
+    }
+    return best;
+  }
+  /** Interpolation factor for smooth rendering between fixed ticks. */
+  get frameAlpha() {
+    return this.tickAccumulatorMs / (1e3 / TICK_HZ);
+  }
+};
+function angleLerp(a, b, t) {
+  return wrapAngle(a + wrapAngle(b - a) * t);
+}
+export {
+  Arena,
+  BLE_PROFILE,
+  BridgeTransport,
+  CLIENT_LEAD_TICKS,
+  DT,
+  EventKind,
+  HALF_PI,
+  LAN_PROFILE,
+  LoopbackNetwork,
+  LoopbackTransport,
+  MAX_MINES_PER_TANK,
+  MAX_SHELLS_PER_TANK,
+  MINE_ARM_TICKS,
+  MINE_BLAST_RADIUS,
+  MINE_FUSE_TICKS,
+  MINE_TRIGGER_RADIUS,
+  MISSIONS,
+  MatchClient,
+  MatchHost,
+  MsgType,
+  NetEvent,
+  PERFECT_PROFILE,
+  PI,
+  PROTOCOL_VERSION,
+  Reader,
+  Rng,
+  SHELL_MAX_LIFETIME_TICKS,
+  SNAPSHOT_HZ,
+  TANK_RADIUS,
+  TANK_SPECS,
+  TAU,
+  TICK_HZ,
+  TankKind,
+  Tile,
+  TransportKind,
+  VERSUS_MAPS,
+  Writer,
+  angleDelta,
+  angleLerp,
+  blocksShell,
+  blocksTank,
+  circlesOverlap,
+  clamp,
+  cloneWorld,
+  createWorld,
+  datan2,
+  dcos,
+  dequantAngle,
+  dequantPos,
+  directAngleTo,
+  dsin,
+  emptyInput,
+  estimateDownstreamBps,
+  fireShell,
+  isMatchOver,
+  layMine,
+  livingTeams,
+  loadArena,
+  missionById,
+  moveTank,
+  parseArena,
+  quantAngle,
+  quantPos,
+  readInput,
+  readMatchStart,
+  readShellSpawn,
+  readSnapshot,
+  rotateToward,
+  sign,
+  solveShot,
+  step,
+  stepAi,
+  stepShell,
+  sweepCircleHit,
+  tankById,
+  wrapAngle,
+  writeInput,
+  writeMatchStart,
+  writeShellSpawn,
+  writeSnapshot
+};
+
+/**
+ * Browser prototype front-end.
+ *
+ * This is a throwaway harness, not the shipping app. It exists to answer the
+ * one question the test suite cannot: do the ricochets feel right? Everything
+ * here talks to @tanks/core through the same interface the React Native app
+ * will, so anything we learn about tuning transfers directly.
+ *
+ * Bundled into a single self-contained HTML file by build.mjs -- the core
+ * bundle is spliced in above this code, so its exports are in scope as plain
+ * module-level bindings.
+ */
+
+/* global createWorld, step, loadArena, MISSIONS, VERSUS_MAPS, emptyInput,
+   isMatchOver, stepShell, dcos, dsin, datan2, TANK_RADIUS, TANK_SPECS,
+   TICK_HZ, EventKind, Tile, TankKind, livingTeams */
+
+const ALL_MAPS = [...MISSIONS, ...VERSUS_MAPS];
+
+const TEAM_COLORS = ['#2E6DA4', '#B33A3A', '#3E8E5A', '#8A5CB8'];
+const KIND_COLORS = {
+  0: '#2E6DA4', // player  - blue
+  1: '#8A6A45', // brown
+  2: '#7A7D82', // grey
+  3: '#2F8C8C', // teal
+  4: '#C9A227', // yellow
+  5: '#4F8A3D', // green
+  6: '#33302C', // black
+};
+
+const state = {
+  world: null,
+  mapIndex: 0,
+  /**
+   * Humans sharing this screen. Two phones with no laptop and no internet have
+   * nothing to run a host on, so couch play on a single device is the only
+   * offline multiplayer available to the web build.
+   */
+  localPlayers: 1,
+  running: true,
+  showTrajectory: false,
+  showDebug: false,
+  outcome: null,
+  outcomeTimer: 0,
+  particles: [],
+  shake: 0,
+  tickTimes: [],
+};
+
+const input = {
+  keys: new Set(),
+  pointer: { x: 0, y: 0, active: false, down: false },
+  // Touch sticks: { id, ox, oy, x, y } while dragging.
+  driveStick: null,
+  aimStick: null,
+  aimHold: { x: 1, y: 0 },
+  fireLatch: false,
+  mineLatch: false,
+  // Per-seat state for couch play: seat 0 owns the left half, seat 1 the right.
+  seatHold: [{ x: 1, y: 0 }, { x: -1, y: 0 }],
+  seatFire: [false, false],
+};
+
+const canvas = document.getElementById('arena');
+const ctx = canvas.getContext('2d');
+
+/**
+ * Multiplayer.
+ *
+ * When the page is served by server.mjs there is a WebSocket endpoint on the
+ * same origin. We try it; if nothing answers we stay in single-player. Above
+ * the transport this is the same MatchClient that will run over Bluetooth --
+ * the point of testing this way is that only the transport differs.
+ */
+const net = {
+  socket: null,
+  transport: null,
+  client: null,
+  dispatch: null,
+  status: 'offline',
+};
+
+function setNetStatus(s) {
+  net.status = s;
+  const el = document.getElementById('net-status');
+  el.textContent = s;
+  el.dataset.state = s;
+}
+
+function connectMultiplayer() {
+  if (net.socket) return;
+  const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+  let sock;
+  try {
+    sock = new WebSocket(url);
+  } catch {
+    setNetStatus('offline');
+    return;
+  }
+  sock.binaryType = 'arraybuffer';
+  net.socket = sock;
+  setNetStatus('connecting');
+
+  const transport = new BridgeTransport((_to, data) => {
+    if (sock.readyState === WebSocket.OPEN) sock.send(data);
+  });
+  transport.addPeer({ id: 'host', name: 'host', rtt: -1 });
+  net.transport = transport;
+
+  // Until MatchStart arrives there is no world to attach a MatchClient to, so
+  // hold a temporary handler. MatchClient replaces these events on construction.
+  transport.setEvents({ onPacket: (from, data) => net.dispatch?.(from, data) });
+
+  sock.onmessage = (ev) => transport.receive('host', new Uint8Array(ev.data));
+  net.dispatch = (from, data) => {
+    // The server restarts the match whenever someone joins or leaves, so
+    // MatchStart can arrive at any time -- including long after MatchClient has
+    // taken over. Keep dispatch here and forward the rest.
+    const r = new Reader(data);
+    if (r.u8() === MsgType.MatchStart) {
+      try {
+        beginNetworkedMatch(readMatchStart(r));
+      } catch (err) {
+        setNetStatus('version mismatch');
+        console.error(err);
+        sock.close();
+      }
+      return;
+    }
+    net.client?.handlePacket(from, data);
+  };
+  sock.onerror = () => setNetStatus('offline');
+  sock.onclose = () => {
+    setNetStatus('offline');
+    net.socket = null;
+    net.client = null;
+  };
+}
+
+function beginNetworkedMatch(start) {
+  const map = missionById(start.mapId);
+  if (!map) {
+    setNetStatus('unknown map');
+    return;
+  }
+  // Rebuild the host's world exactly: same arena, same seed, same roster order.
+  const world = createWorld({
+    arena: loadArena(map),
+    seed: start.seed,
+    players: start.players,
+    bots: start.bots,
+  });
+
+  // Start our clock ahead of the host. A client running behind can never apply
+  // a snapshot, because the tick it describes is one we have not simulated yet.
+  world.tick = start.hostTick + CLIENT_LEAD_TICKS;
+
+  state.world = world;
+  state.outcome = null;
+  state.particles.length = 0;
+  net.client = new MatchClient(world, net.transport, 'host', start.yourTankId);
+  // MatchClient grabs the transport events in its constructor; take them back
+  // so MatchStart keeps reaching us.
+  net.transport.setEvents({ onPacket: (from, data) => net.dispatch?.(from, data) });
+  setNetStatus(`player ${start.yourTankId + 1}`);
+
+  document.getElementById('map-name').textContent = map.name;
+  document.getElementById('map-index').textContent = `${start.players.length}P`;
+  resize();
+}
+
+/** Maps world units to canvas pixels; recomputed on resize. */
+let view = { scale: 1, ox: 0, oy: 0 };
+
+function loadMap(i) {
+  state.mapIndex = ((i % ALL_MAPS.length) + ALL_MAPS.length) % ALL_MAPS.length;
+  let map = ALL_MAPS[state.mapIndex];
+
+  // Campaign missions have a single spawn and scripted enemies, so they cannot
+  // seat a second player. Slide to the first versus arena instead of silently
+  // dropping player two onto player one's spawn.
+  if (state.localPlayers > 1 && loadArena(map).spawns.length < state.localPlayers) {
+    state.mapIndex = ALL_MAPS.indexOf(VERSUS_MAPS[0]);
+    map = ALL_MAPS[state.mapIndex];
+  }
+  const arena = loadArena(map);
+
+  // Versus maps ship with no scripted enemies so the same map can serve
+  // free-for-all or teams, so fill the spare spawns with bots -- otherwise the
+  // map loads empty and there is nothing to test the feel against. Uses the
+  // same bots config the host sends over the wire, so single-player and
+  // networked matches build their rosters through one code path.
+  const seats = state.localPlayers;
+  const players = [];
+  for (let p = 0; p < seats; p++) players.push({ team: p, spawnIndex: p });
+
+  const bots = [];
+  const kinds = [TankKind.Grey, TankKind.Teal, TankKind.Green];
+  if (arena.enemies.length === 0) {
+    for (let s = seats; s < arena.spawns.length; s++) {
+      bots.push({ kind: kinds[(s - seats) % kinds.length], team: 90 + s, spawnIndex: s });
+    }
+  }
+  state.world = createWorld({ arena, seed: 1000 + state.mapIndex, players, bots });
+
+  state.outcome = null;
+  state.outcomeTimer = 0;
+  state.particles.length = 0;
+  document.getElementById('map-name').textContent = map.name;
+  document.getElementById('map-index').textContent = `${state.mapIndex + 1}/${ALL_MAPS.length}`;
+  resize();
+}
+
+function playerTank() {
+  // In a networked match every human is a Player-kind tank, so identity comes
+  // from the id the host assigned us, not from the kind.
+  if (net.client) return state.world.tanks.find((t) => t.id === net.client.localTankId);
+  return state.world.tanks.find((t) => t.kind === TankKind.Player);
+}
+
+function setLocalPlayers(n) {
+  state.localPlayers = n;
+  document.getElementById('btn-2p').setAttribute('aria-pressed', String(n > 1));
+  document.getElementById('seat-hint').hidden = n < 2;
+  document.getElementById('stat-enemies-label').textContent = n > 1 ? 'Alive' : 'Enemies';
+  document.body.dataset.seats = String(n);
+  loadMap(state.mapIndex);
+}
+
+function resize() {
+  const wrap = document.getElementById('stage');
+  const rect = wrap.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.floor(rect.width * dpr);
+  canvas.height = Math.floor(rect.height * dpr);
+  canvas.style.width = rect.width + 'px';
+  canvas.style.height = rect.height + 'px';
+
+  const a = state.world.arena;
+  // Letterbox: the whole arena must always be visible. Being able to see every
+  // bank shot coming is load-bearing for this game -- never crop or scroll.
+  const scale = Math.min(canvas.width / a.width, canvas.height / a.height);
+  view = {
+    scale,
+    ox: (canvas.width - a.width * scale) / 2,
+    oy: (canvas.height - a.height * scale) / 2,
+  };
+}
+
+function toWorld(clientX, clientY) {
+  const r = canvas.getBoundingClientRect();
+  const dpr = canvas.width / r.width;
+  return {
+    x: ((clientX - r.left) * dpr - view.ox) / view.scale,
+    y: ((clientY - r.top) * dpr - view.oy) / view.scale,
+  };
+}
+
+// --- Input ---------------------------------------------------------------
+
+window.addEventListener('keydown', (e) => {
+  if (e.repeat) return;
+  const k = e.key.toLowerCase();
+  input.keys.add(k);
+  // Latch fire on the keydown itself. A quick tap can go down and up entirely
+  // between two frames, and polling the held-keys set would miss it.
+  if (k === 'f') input.seatFire[0] = true;
+  if (k === 'enter') {
+    input.seatFire[1] = true;
+    input.fireLatch = true;
+  }
+  if (k === 't') state.showTrajectory = !state.showTrajectory;
+  if (k === 'g') state.showDebug = !state.showDebug;
+  if (!net.client) {
+    if (k === 'r') loadMap(state.mapIndex);
+    if (k === '[') loadMap(state.mapIndex - 1);
+    if (k === ']') loadMap(state.mapIndex + 1);
+  }
+  if (k === 'p') state.running = !state.running;
+  if ([' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) e.preventDefault();
+});
+window.addEventListener('keyup', (e) => input.keys.delete(e.key.toLowerCase()));
+
+canvas.addEventListener('pointermove', (e) => {
+  if (e.pointerType === 'touch') return;
+  const p = toWorld(e.clientX, e.clientY);
+  input.pointer.x = p.x;
+  input.pointer.y = p.y;
+  input.pointer.active = true;
+});
+canvas.addEventListener('pointerdown', (e) => {
+  if (e.pointerType === 'touch') {
+    handleTouchStart(e);
+    return;
+  }
+  input.pointer.down = true;
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointerup', (e) => {
+  if (e.pointerType === 'touch') {
+    handleTouchEnd(e);
+    return;
+  }
+  input.pointer.down = false;
+});
+
+/**
+ * Touch: left half of the screen drives, right half aims. Both are relative
+ * sticks -- they anchor wherever the thumb lands rather than at a fixed spot,
+ * which is what makes a virtual stick usable without looking at it.
+ */
+function handleTouchStart(e) {
+  const left = e.clientX < window.innerWidth / 2;
+  const stick = {
+    id: e.pointerId,
+    ox: e.clientX,
+    oy: e.clientY,
+    x: e.clientX,
+    y: e.clientY,
+    startedAt: performance.now(),
+  };
+  if (left) input.driveStick = stick;
+  else input.aimStick = stick;
+  canvas.setPointerCapture(e.pointerId);
+}
+
+/**
+ * Right thumb: drag to aim, tap to fire.
+ *
+ * Firing continuously while the aim stick is held would mean you can never
+ * line up a shot without taking it, which is exactly wrong for a game whose
+ * skill ceiling is patient bank shots. So a short, near-stationary press is
+ * read as a tap and fires; anything longer or further is aiming only.
+ */
+function handleTouchEnd(e) {
+  let releasedLeft = false;
+  if (input.driveStick?.id === e.pointerId) {
+    const s = input.driveStick;
+    const moved = Math.hypot(s.x - s.ox, s.y - s.oy);
+    // In couch play the left half is a seat too, so it needs its own tap-fire.
+    releasedLeft = performance.now() - s.startedAt < 250 && moved < 12;
+    input.driveStick = null;
+  }
+  if (input.aimStick?.id === e.pointerId) {
+    const s = input.aimStick;
+    const moved = Math.hypot(s.x - s.ox, s.y - s.oy);
+    if (performance.now() - s.startedAt < 250 && moved < 12) {
+      input.fireLatch = true;
+      input.seatFire[1] = true;
+    }
+    input.aimStick = null;
+  }
+  if (releasedLeft && state.localPlayers > 1) input.seatFire[0] = true;
+}
+canvas.addEventListener('pointermove', (e) => {
+  if (e.pointerType !== 'touch') return;
+  if (input.driveStick?.id === e.pointerId) {
+    input.driveStick.x = e.clientX;
+    input.driveStick.y = e.clientY;
+  }
+  if (input.aimStick?.id === e.pointerId) {
+    input.aimStick.x = e.clientX;
+    input.aimStick.y = e.clientY;
+  }
+});
+canvas.addEventListener('pointercancel', handleTouchEnd);
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+document.getElementById('btn-fire').addEventListener('pointerdown', () => (input.fireLatch = true));
+document.getElementById('btn-mine').addEventListener('pointerdown', () => (input.mineLatch = true));
+document.getElementById('btn-prev').addEventListener('click', () => loadMap(state.mapIndex - 1));
+document.getElementById('btn-next').addEventListener('click', () => loadMap(state.mapIndex + 1));
+document.getElementById('btn-restart').addEventListener('click', () => loadMap(state.mapIndex));
+document.getElementById('btn-2p').addEventListener('click', () => {
+  setLocalPlayers(state.localPlayers > 1 ? 1 : 2);
+});
+document.getElementById('btn-traj').addEventListener('click', (e) => {
+  state.showTrajectory = !state.showTrajectory;
+  e.currentTarget.setAttribute('aria-pressed', String(state.showTrajectory));
+});
+
+/**
+ * Buttons keep keyboard focus after a pointer click, so a later Enter or Space
+ * re-activates whichever button was last touched -- pressing Enter to fire
+ * would toggle 2P back off. Drop focus after pointer-driven clicks, but keep it
+ * for real keyboard activation (detail === 0) so tabbing still works.
+ */
+for (const btn of document.querySelectorAll('header button, footer button')) {
+  btn.addEventListener('click', (e) => {
+    if (e.detail > 0) e.currentTarget.blur();
+  });
+}
+
+const STICK_RANGE = 55;
+
+function gatherInput() {
+  const inp = emptyInput();
+  const tank = playerTank();
+  if (!tank || !tank.alive) return inp;
+
+  // Keyboard drive.
+  let mx = 0;
+  let my = 0;
+  if (input.keys.has('a') || input.keys.has('arrowleft')) mx -= 1;
+  if (input.keys.has('d') || input.keys.has('arrowright')) mx += 1;
+  if (input.keys.has('w') || input.keys.has('arrowup')) my -= 1;
+  if (input.keys.has('s') || input.keys.has('arrowdown')) my += 1;
+
+  // Touch drive stick overrides.
+  if (input.driveStick) {
+    const dx = input.driveStick.x - input.driveStick.ox;
+    const dy = input.driveStick.y - input.driveStick.oy;
+    const len = Math.hypot(dx, dy);
+    if (len > 6) {
+      const f = Math.min(len, STICK_RANGE) / STICK_RANGE / len;
+      mx = dx * f;
+      my = dy * f;
+    }
+  }
+  inp.moveX = mx;
+  inp.moveY = my;
+
+  // Aim: mouse position is the closest desktop analogue to the Wii pointer,
+  // and it is what makes the original feel the way it does -- the turret goes
+  // where you point, independent of where the tank is driving.
+  if (input.aimStick) {
+    const dx = input.aimStick.x - input.aimStick.ox;
+    const dy = input.aimStick.y - input.aimStick.oy;
+    if (Math.hypot(dx, dy) > 8) {
+      input.aimHold = { x: dx, y: dy };
+    }
+    inp.aimX = input.aimHold.x;
+    inp.aimY = input.aimHold.y;
+  } else if (input.aimHold && !input.pointer.active) {
+    // Hold the last touch-aimed direction after the thumb lifts.
+    inp.aimX = input.aimHold.x;
+    inp.aimY = input.aimHold.y;
+  }
+  if (input.pointer.active) {
+    inp.aimX = input.pointer.x - tank.x;
+    inp.aimY = input.pointer.y - tank.y;
+  }
+
+  inp.fire = inp.fire || input.pointer.down || input.keys.has('enter') || input.fireLatch;
+  inp.layMine = input.keys.has(' ') || input.mineLatch;
+  input.fireLatch = false;
+  input.mineLatch = false;
+  return inp;
+}
+
+/**
+ * Input for one seat in couch play.
+ *
+ * Two thumbs cannot drive four sticks, so each seat collapses to a single
+ * stick: the tank drives where it points and the turret points the same way.
+ * That does cost the thing that makes the real game feel the way it does --
+ * driving one direction while shooting another -- so this is the compromise
+ * mode, not the control scheme the phone app should ship.
+ */
+function gatherSeatInput(seat) {
+  const inp = emptyInput();
+  const tank = state.world.tanks.find((t) => t.id === seat);
+  if (!tank || !tank.alive) return inp;
+
+  const stick = seat === 0 ? input.driveStick : input.aimStick;
+  const hold = input.seatHold[seat];
+
+  if (stick) {
+    const dx = stick.x - stick.ox;
+    const dy = stick.y - stick.oy;
+    const len = Math.hypot(dx, dy);
+    if (len > 8) {
+      hold.x = dx;
+      hold.y = dy;
+      const f = Math.min(len, STICK_RANGE) / STICK_RANGE / len;
+      inp.moveX = dx * f;
+      inp.moveY = dy * f;
+    }
+  }
+
+  // Keyboard seats, so couch play is testable without a touchscreen.
+  let kx = 0;
+  let ky = 0;
+  if (seat === 0) {
+    if (input.keys.has('a')) kx -= 1;
+    if (input.keys.has('d')) kx += 1;
+    if (input.keys.has('w')) ky -= 1;
+    if (input.keys.has('s')) ky += 1;
+  } else {
+    if (input.keys.has('arrowleft')) kx -= 1;
+    if (input.keys.has('arrowright')) kx += 1;
+    if (input.keys.has('arrowup')) ky -= 1;
+    if (input.keys.has('arrowdown')) ky += 1;
+  }
+  if (kx || ky) {
+    inp.moveX = kx;
+    inp.moveY = ky;
+    hold.x = kx;
+    hold.y = ky;
+  }
+
+  // Turret follows the stick, so aiming and driving are the same gesture.
+  inp.aimX = hold.x;
+  inp.aimY = hold.y;
+
+  inp.fire = input.seatFire[seat] || input.keys.has(seat === 0 ? 'f' : 'enter');
+  input.seatFire[seat] = false;
+  return inp;
+}
+
+function gatherAllInputs() {
+  if (state.localPlayers < 2) {
+    const tank = playerTank();
+    return new Map([[tank?.id ?? 0, gatherInput()]]);
+  }
+  const m = new Map();
+  for (let seat = 0; seat < state.localPlayers; seat++) m.set(seat, gatherSeatInput(seat));
+  return m;
+}
+
+// --- Effects -------------------------------------------------------------
+
+function spawnParticles(x, y, count, color, speed, life) {
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const s = speed * (0.4 + Math.random() * 0.6);
+    state.particles.push({
+      x, y,
+      vx: Math.cos(a) * s,
+      vy: Math.sin(a) * s,
+      life,
+      maxLife: life,
+      color,
+    });
+  }
+}
+
+function consumeEvents() {
+  for (const ev of state.world.events) {
+    switch (ev.kind) {
+      case EventKind.ShellBounced:
+        spawnParticles(ev.x, ev.y, 4, '#E8C87A', 2.2, 0.22);
+        break;
+      case EventKind.ShellFired:
+        spawnParticles(ev.x, ev.y, 3, '#F0DCA8', 1.4, 0.12);
+        break;
+      case EventKind.BlockDestroyed:
+        spawnParticles(ev.x, ev.y, 10, '#C08A4E', 3.0, 0.5);
+        break;
+      case EventKind.MineExploded:
+        spawnParticles(ev.x, ev.y, 26, '#E07A28', 5.5, 0.6);
+        state.shake = Math.max(state.shake, 0.5);
+        break;
+      case EventKind.TankDestroyed:
+        spawnParticles(ev.x, ev.y, 30, '#D9542B', 4.5, 0.7);
+        state.shake = Math.max(state.shake, 0.6);
+        break;
+    }
+  }
+}
+
+function updateParticles(dt) {
+  for (let i = state.particles.length - 1; i >= 0; i--) {
+    const p = state.particles[i];
+    p.life -= dt;
+    if (p.life <= 0) {
+      state.particles.splice(i, 1);
+      continue;
+    }
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vx *= 0.92;
+    p.vy *= 0.92;
+  }
+  if (state.shake > 0) state.shake = Math.max(0, state.shake - dt * 2.2);
+}
+
+// --- Rendering -----------------------------------------------------------
+
+/**
+ * Theme token lookup, cached.
+ *
+ * getComputedStyle forces a style recalc, and the draw code asks for a dozen
+ * tokens per frame. Cache them and invalidate only when the theme actually
+ * changes -- the viewer's toggle stamps data-theme on the root element, and
+ * the OS preference arrives through matchMedia.
+ */
+let palCache = Object.create(null);
+function css(name) {
+  let v = palCache[name];
+  if (v === undefined) {
+    v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    palCache[name] = v;
+  }
+  return v;
+}
+function invalidatePalette() {
+  palCache = Object.create(null);
+}
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', invalidatePalette);
+new MutationObserver(invalidatePalette).observe(document.documentElement, {
+  attributes: true,
+  attributeFilter: ['data-theme'],
+});
+
+function drawArena() {
+  const a = state.world.arena;
+  const s = view.scale;
+
+  ctx.fillStyle = css('--ground');
+  ctx.fillRect(0, 0, a.width * s, a.height * s);
+
+  // Faint grid. The whole game is geometry, so showing the lattice the shells
+  // reflect off makes bank shots legible rather than magic.
+  ctx.strokeStyle = css('--grid');
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let x = 1; x < a.width; x++) {
+    ctx.moveTo(x * s, 0);
+    ctx.lineTo(x * s, a.height * s);
+  }
+  for (let y = 1; y < a.height; y++) {
+    ctx.moveTo(0, y * s);
+    ctx.lineTo(a.width * s, y * s);
+  }
+  ctx.stroke();
+
+  const wall = css('--wall');
+  const wallTop = css('--wall-top');
+  const cork = css('--cork');
+  const corkTop = css('--cork-top');
+  const voidC = css('--void');
+
+  for (let y = 0; y < a.height; y++) {
+    for (let x = 0; x < a.width; x++) {
+      const t = a.at(x, y);
+      if (t === Tile.Floor) continue;
+      const px = x * s;
+      const py = y * s;
+
+      if (t === Tile.Hole) {
+        ctx.fillStyle = voidC;
+        ctx.fillRect(px, py, s, s);
+        continue;
+      }
+
+      // Fake a little height: a darker body plus a lighter top face reads as a
+      // block sitting on a table rather than a flat coloured square.
+      const lift = s * 0.13;
+      ctx.fillStyle = t === Tile.Wall ? wall : cork;
+      ctx.fillRect(px, py, s, s);
+      ctx.fillStyle = t === Tile.Wall ? wallTop : corkTop;
+      ctx.fillRect(px, py - lift, s, s - lift);
+    }
+  }
+}
+
+function drawTank(t, s) {
+  const color = t.kind === TankKind.Player ? TEAM_COLORS[t.team] : KIND_COLORS[t.kind];
+  const r = TANK_RADIUS * s;
+
+  ctx.save();
+  ctx.translate(t.x * s, t.y * s);
+
+  // Shadow, offset toward the table.
+  ctx.fillStyle = css('--shadow');
+  ctx.beginPath();
+  ctx.ellipse(r * 0.15, r * 0.28, r * 1.02, r * 0.9, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Hull, oriented along the body angle.
+  ctx.save();
+  ctx.rotate(t.bodyAngle);
+  ctx.fillStyle = color;
+  roundRect(-r * 0.95, -r * 0.8, r * 1.9, r * 1.6, r * 0.28);
+  ctx.fill();
+  // Treads
+  ctx.fillStyle = 'rgba(0,0,0,0.28)';
+  ctx.fillRect(-r * 0.95, -r * 0.92, r * 1.9, r * 0.3);
+  ctx.fillRect(-r * 0.95, r * 0.62, r * 1.9, r * 0.3);
+  ctx.restore();
+
+  // Turret, independent of the hull. This separation is the core of the
+  // control scheme and it should read instantly.
+  ctx.save();
+  ctx.rotate(t.turretAngle);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fillRect(0, -r * 0.17, r * 1.75, r * 0.34);
+  ctx.fillStyle = color;
+  ctx.fillRect(0, -r * 0.13, r * 1.7, r * 0.26);
+  ctx.restore();
+
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.52, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = Math.max(1, s * 0.02);
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+/**
+ * Trajectory preview.
+ *
+ * Traces the player's current aim through the real shell physics, including
+ * bounces. This is a debug aid rather than a shipping feature -- it would
+ * trivialise the game -- but it is the fastest way to confirm by eye that the
+ * ricochet code does what the tests say it does.
+ */
+function drawTrajectory(tank, s) {
+  const spec = TANK_SPECS[tank.kind];
+  const muzzle = TANK_RADIUS + spec.shell.radius + 0.02;
+  let x = tank.x + dcos(tank.turretAngle) * muzzle;
+  let y = tank.y + dsin(tank.turretAngle) * muzzle;
+  let vx = dcos(tank.turretAngle) * spec.shell.speed;
+  let vy = dsin(tank.turretAngle) * spec.shell.speed;
+  let bounces = spec.shell.maxBounces;
+
+  ctx.save();
+  ctx.setLineDash([s * 0.12, s * 0.12]);
+  ctx.lineWidth = Math.max(1.5, s * 0.035);
+  ctx.strokeStyle = css('--aim');
+  ctx.beginPath();
+  ctx.moveTo(x * s, y * s);
+
+  let travelled = 0;
+  const hits = [];
+  while (travelled < 24) {
+    const r = stepShell(state.world.arena, x, y, vx, vy, spec.shell.radius, bounces, 0.2, false);
+    ctx.lineTo(r.x * s, r.y * s);
+    for (const b of r.bounces) hits.push(b);
+    travelled += Math.hypot(r.x - x, r.y - y) || 0.2;
+    x = r.x;
+    y = r.y;
+    vx = r.vx;
+    vy = r.vy;
+    bounces = r.bouncesLeft;
+    if (r.dead) break;
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  for (const h of hits) {
+    ctx.beginPath();
+    ctx.arc(h.x * s, h.y * s, s * 0.11, 0, Math.PI * 2);
+    ctx.fillStyle = css('--aim');
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function render() {
+  const s = view.scale;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = css('--stage-bg');
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const shakeX = state.shake > 0 ? (Math.random() - 0.5) * state.shake * s * 0.25 : 0;
+  const shakeY = state.shake > 0 ? (Math.random() - 0.5) * state.shake * s * 0.25 : 0;
+  ctx.translate(view.ox + shakeX, view.oy + shakeY);
+
+  drawArena();
+
+  const w = state.world;
+
+  // Mines under everything else.
+  for (const m of w.mines) {
+    const armed = w.tick >= m.armTick;
+    const pulse = 0.5 + 0.5 * Math.sin(w.tick * 0.18);
+    ctx.fillStyle = armed ? `rgba(224,122,40,${0.45 + pulse * 0.45})` : 'rgba(140,140,140,0.5)';
+    ctx.beginPath();
+    ctx.arc(m.x * s, m.y * s, s * 0.22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = css('--mine-ring');
+    ctx.lineWidth = Math.max(1, s * 0.03);
+    ctx.beginPath();
+    ctx.arc(m.x * s, m.y * s, s * 0.34 * (0.85 + pulse * 0.15), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  const player = playerTank();
+  if (state.showTrajectory && player && player.alive) drawTrajectory(player, s);
+
+  for (const t of w.tanks) {
+    if (t.alive) drawTank(t, s);
+  }
+
+  // Shells last so they read on top of everything they might hit.
+  for (const sh of w.shells) {
+    const len = Math.hypot(sh.vx, sh.vy);
+    const tx = len > 0 ? sh.vx / len : 0;
+    const ty = len > 0 ? sh.vy / len : 0;
+    // Motion trail: a plain dot at these speeds reads as a stutter.
+    const grad = ctx.createLinearGradient(
+      (sh.x - tx * 0.55) * s, (sh.y - ty * 0.55) * s,
+      sh.x * s, sh.y * s,
+    );
+    grad.addColorStop(0, 'rgba(255,214,140,0)');
+    grad.addColorStop(1, css('--shell'));
+    ctx.strokeStyle = grad;
+    ctx.lineCap = 'round';
+    ctx.lineWidth = sh.radius * 2 * s;
+    ctx.beginPath();
+    ctx.moveTo((sh.x - tx * 0.55) * s, (sh.y - ty * 0.55) * s);
+    ctx.lineTo(sh.x * s, sh.y * s);
+    ctx.stroke();
+
+    ctx.fillStyle = css('--shell');
+    ctx.beginPath();
+    ctx.arc(sh.x * s, sh.y * s, sh.radius * s * 1.1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  for (const p of state.particles) {
+    const k = p.life / p.maxLife;
+    ctx.globalAlpha = k;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x * s - s * 0.04, p.y * s - s * 0.04, s * 0.08, s * 0.08);
+  }
+  ctx.globalAlpha = 1;
+
+  drawSticks();
+}
+
+function drawSticks() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const dpr = canvas.width / canvas.getBoundingClientRect().width;
+  for (const stick of [input.driveStick, input.aimStick]) {
+    if (!stick) continue;
+    const ox = stick.ox * dpr;
+    const oy = stick.oy * dpr;
+    const dx = (stick.x - stick.ox) * dpr;
+    const dy = (stick.y - stick.oy) * dpr;
+    const len = Math.hypot(dx, dy);
+    const cap = STICK_RANGE * dpr;
+    const f = len > cap ? cap / len : 1;
+
+    ctx.strokeStyle = css('--stick');
+    ctx.lineWidth = 2 * dpr;
+    ctx.beginPath();
+    ctx.arc(ox, oy, cap, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = css('--stick-knob');
+    ctx.beginPath();
+    ctx.arc(ox + dx * f, oy + dy * f, cap * 0.42, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.translate(view.ox, view.oy);
+}
+
+// --- HUD -----------------------------------------------------------------
+
+function updateHud() {
+  const w = state.world;
+  const player = playerTank();
+  const enemies = w.tanks.filter((t) => t.team !== 0 && t.alive).length;
+
+  document.getElementById('stat-enemies').textContent =
+    state.localPlayers > 1 ? w.tanks.filter((t) => t.alive).length : enemies;
+  document.getElementById('stat-shells').textContent = player ? `${player.shellsOut}/5` : '-';
+  document.getElementById('stat-mines').textContent = player ? `${player.minesOut}/2` : '-';
+
+  const banner = document.getElementById('banner');
+  if (state.outcome) {
+    banner.textContent = state.outcome;
+    banner.dataset.show = 'true';
+    banner.dataset.tone = state.outcome === 'Cleared' ? 'win' : 'lose';
+  } else {
+    banner.dataset.show = 'false';
+  }
+
+  const dbg = document.getElementById('debug');
+  dbg.hidden = !state.showDebug;
+  if (state.showDebug) {
+    const avg = state.tickTimes.length
+      ? state.tickTimes.reduce((a, b) => a + b, 0) / state.tickTimes.length
+      : 0;
+    const c = net.client;
+    dbg.textContent =
+      `tick ${w.tick}  shells ${w.shells.length}  mines ${w.mines.length}  ` +
+      `sim ${(avg * 1000).toFixed(0)}µs/tick` +
+      (c
+        ? `  |  snap ${c.snapshotsApplied} stale ${c.snapshotsStale} ` +
+          `reconcile ${c.reconciles} resync ${c.resyncs} err ${c.lastError.toFixed(3)}`
+        : '');
+  }
+}
+
+// --- Loop ----------------------------------------------------------------
+
+const TICK_MS = 1000 / TICK_HZ;
+let accumulator = 0;
+let last = performance.now();
+
+function frame(now) {
+  const elapsed = Math.min(now - last, 250);
+  last = now;
+
+  if (state.running && net.client) {
+    // MatchClient reassigns .world when it rewinds to reconcile, so re-read it
+    // every frame rather than holding a reference that goes stale mid-match.
+    net.client.setInput(gatherInput());
+    net.client.update(elapsed);
+    state.world = net.client.world;
+    consumeEvents();
+    updateParticles(elapsed / 1000);
+  } else if (state.running) {
+    accumulator += elapsed;
+    let budget = 8;
+    while (accumulator >= TICK_MS && budget-- > 0) {
+      accumulator -= TICK_MS;
+      const t0 = performance.now();
+      step(state.world, gatherAllInputs());
+      const dur = performance.now() - t0;
+      state.tickTimes.push(dur);
+      if (state.tickTimes.length > 120) state.tickTimes.shift();
+      consumeEvents();
+
+      if (!state.outcome && isMatchOver(state.world)) {
+        const teams = livingTeams(state.world);
+        state.outcome = teams.has(0) ? 'Cleared' : 'Destroyed';
+        state.outcomeTimer = 0;
+      }
+    }
+    updateParticles(elapsed / 1000);
+  }
+
+  if (state.outcome && !net.client) {
+    state.outcomeTimer += elapsed;
+    // Give the explosion a moment to land before resetting.
+    if (state.outcomeTimer > 2200) {
+      loadMap(state.outcome === 'Cleared' ? state.mapIndex + 1 : state.mapIndex);
+    }
+  }
+
+  render();
+  updateHud();
+  requestAnimationFrame(frame);
+}
+
+// Exposed for the automated multiplayer smoke test, which needs to compare
+// two clients' worlds against each other.
+window.__state = state;
+window.__net = net;
+
+window.addEventListener('resize', resize);
+loadMap(0);
+
+// Only look for a host when served over plain HTTP -- that is the LAN test
+// server. Opened from a file or a static host there is nothing to connect to,
+// and attempting it would just flash a failed connection at the player.
+if (location.protocol === 'http:') connectMultiplayer();
+
+requestAnimationFrame(frame);
+
+</script>

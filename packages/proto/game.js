@@ -31,6 +31,12 @@ const KIND_COLORS = {
 const state = {
   world: null,
   mapIndex: 0,
+  /**
+   * Humans sharing this screen. Two phones with no laptop and no internet have
+   * nothing to run a host on, so couch play on a single device is the only
+   * offline multiplayer available to the web build.
+   */
+  localPlayers: 1,
   running: true,
   showTrajectory: false,
   showDebug: false,
@@ -50,6 +56,9 @@ const input = {
   aimHold: { x: 1, y: 0 },
   fireLatch: false,
   mineLatch: false,
+  // Per-seat state for couch play: seat 0 owns the left half, seat 1 the right.
+  seatHold: [{ x: 1, y: 0 }, { x: -1, y: 0 }],
+  seatFire: [false, false],
 };
 
 const canvas = document.getElementById('arena');
@@ -165,7 +174,15 @@ let view = { scale: 1, ox: 0, oy: 0 };
 
 function loadMap(i) {
   state.mapIndex = ((i % ALL_MAPS.length) + ALL_MAPS.length) % ALL_MAPS.length;
-  const map = ALL_MAPS[state.mapIndex];
+  let map = ALL_MAPS[state.mapIndex];
+
+  // Campaign missions have a single spawn and scripted enemies, so they cannot
+  // seat a second player. Slide to the first versus arena instead of silently
+  // dropping player two onto player one's spawn.
+  if (state.localPlayers > 1 && loadArena(map).spawns.length < state.localPlayers) {
+    state.mapIndex = ALL_MAPS.indexOf(VERSUS_MAPS[0]);
+    map = ALL_MAPS[state.mapIndex];
+  }
   const arena = loadArena(map);
 
   // Versus maps ship with no scripted enemies so the same map can serve
@@ -173,19 +190,18 @@ function loadMap(i) {
   // map loads empty and there is nothing to test the feel against. Uses the
   // same bots config the host sends over the wire, so single-player and
   // networked matches build their rosters through one code path.
+  const seats = state.localPlayers;
+  const players = [];
+  for (let p = 0; p < seats; p++) players.push({ team: p, spawnIndex: p });
+
   const bots = [];
   const kinds = [TankKind.Grey, TankKind.Teal, TankKind.Green];
   if (arena.enemies.length === 0) {
-    for (let s = 1; s < arena.spawns.length; s++) {
-      bots.push({ kind: kinds[(s - 1) % kinds.length], team: 1, spawnIndex: s });
+    for (let s = seats; s < arena.spawns.length; s++) {
+      bots.push({ kind: kinds[(s - seats) % kinds.length], team: 90 + s, spawnIndex: s });
     }
   }
-  state.world = createWorld({
-    arena,
-    seed: 1000 + state.mapIndex,
-    players: [{ team: 0, spawnIndex: 0 }],
-    bots,
-  });
+  state.world = createWorld({ arena, seed: 1000 + state.mapIndex, players, bots });
 
   state.outcome = null;
   state.outcomeTimer = 0;
@@ -200,6 +216,15 @@ function playerTank() {
   // from the id the host assigned us, not from the kind.
   if (net.client) return state.world.tanks.find((t) => t.id === net.client.localTankId);
   return state.world.tanks.find((t) => t.kind === TankKind.Player);
+}
+
+function setLocalPlayers(n) {
+  state.localPlayers = n;
+  document.getElementById('btn-2p').setAttribute('aria-pressed', String(n > 1));
+  document.getElementById('seat-hint').hidden = n < 2;
+  document.getElementById('stat-enemies-label').textContent = n > 1 ? 'Alive' : 'Enemies';
+  document.body.dataset.seats = String(n);
+  loadMap(state.mapIndex);
 }
 
 function resize() {
@@ -237,6 +262,13 @@ window.addEventListener('keydown', (e) => {
   if (e.repeat) return;
   const k = e.key.toLowerCase();
   input.keys.add(k);
+  // Latch fire on the keydown itself. A quick tap can go down and up entirely
+  // between two frames, and polling the held-keys set would miss it.
+  if (k === 'f') input.seatFire[0] = true;
+  if (k === 'enter') {
+    input.seatFire[1] = true;
+    input.fireLatch = true;
+  }
   if (k === 't') state.showTrajectory = !state.showTrajectory;
   if (k === 'g') state.showDebug = !state.showDebug;
   if (!net.client) {
@@ -301,13 +333,24 @@ function handleTouchStart(e) {
  * read as a tap and fires; anything longer or further is aiming only.
  */
 function handleTouchEnd(e) {
-  if (input.driveStick?.id === e.pointerId) input.driveStick = null;
+  let releasedLeft = false;
+  if (input.driveStick?.id === e.pointerId) {
+    const s = input.driveStick;
+    const moved = Math.hypot(s.x - s.ox, s.y - s.oy);
+    // In couch play the left half is a seat too, so it needs its own tap-fire.
+    releasedLeft = performance.now() - s.startedAt < 250 && moved < 12;
+    input.driveStick = null;
+  }
   if (input.aimStick?.id === e.pointerId) {
     const s = input.aimStick;
     const moved = Math.hypot(s.x - s.ox, s.y - s.oy);
-    if (performance.now() - s.startedAt < 250 && moved < 12) input.fireLatch = true;
+    if (performance.now() - s.startedAt < 250 && moved < 12) {
+      input.fireLatch = true;
+      input.seatFire[1] = true;
+    }
     input.aimStick = null;
   }
+  if (releasedLeft && state.localPlayers > 1) input.seatFire[0] = true;
 }
 canvas.addEventListener('pointermove', (e) => {
   if (e.pointerType !== 'touch') return;
@@ -328,10 +371,25 @@ document.getElementById('btn-mine').addEventListener('pointerdown', () => (input
 document.getElementById('btn-prev').addEventListener('click', () => loadMap(state.mapIndex - 1));
 document.getElementById('btn-next').addEventListener('click', () => loadMap(state.mapIndex + 1));
 document.getElementById('btn-restart').addEventListener('click', () => loadMap(state.mapIndex));
+document.getElementById('btn-2p').addEventListener('click', () => {
+  setLocalPlayers(state.localPlayers > 1 ? 1 : 2);
+});
 document.getElementById('btn-traj').addEventListener('click', (e) => {
   state.showTrajectory = !state.showTrajectory;
   e.currentTarget.setAttribute('aria-pressed', String(state.showTrajectory));
 });
+
+/**
+ * Buttons keep keyboard focus after a pointer click, so a later Enter or Space
+ * re-activates whichever button was last touched -- pressing Enter to fire
+ * would toggle 2P back off. Drop focus after pointer-driven clicks, but keep it
+ * for real keyboard activation (detail === 0) so tabbing still works.
+ */
+for (const btn of document.querySelectorAll('header button, footer button')) {
+  btn.addEventListener('click', (e) => {
+    if (e.detail > 0) e.currentTarget.blur();
+  });
+}
 
 const STICK_RANGE = 55;
 
@@ -388,6 +446,76 @@ function gatherInput() {
   input.fireLatch = false;
   input.mineLatch = false;
   return inp;
+}
+
+/**
+ * Input for one seat in couch play.
+ *
+ * Two thumbs cannot drive four sticks, so each seat collapses to a single
+ * stick: the tank drives where it points and the turret points the same way.
+ * That does cost the thing that makes the real game feel the way it does --
+ * driving one direction while shooting another -- so this is the compromise
+ * mode, not the control scheme the phone app should ship.
+ */
+function gatherSeatInput(seat) {
+  const inp = emptyInput();
+  const tank = state.world.tanks.find((t) => t.id === seat);
+  if (!tank || !tank.alive) return inp;
+
+  const stick = seat === 0 ? input.driveStick : input.aimStick;
+  const hold = input.seatHold[seat];
+
+  if (stick) {
+    const dx = stick.x - stick.ox;
+    const dy = stick.y - stick.oy;
+    const len = Math.hypot(dx, dy);
+    if (len > 8) {
+      hold.x = dx;
+      hold.y = dy;
+      const f = Math.min(len, STICK_RANGE) / STICK_RANGE / len;
+      inp.moveX = dx * f;
+      inp.moveY = dy * f;
+    }
+  }
+
+  // Keyboard seats, so couch play is testable without a touchscreen.
+  let kx = 0;
+  let ky = 0;
+  if (seat === 0) {
+    if (input.keys.has('a')) kx -= 1;
+    if (input.keys.has('d')) kx += 1;
+    if (input.keys.has('w')) ky -= 1;
+    if (input.keys.has('s')) ky += 1;
+  } else {
+    if (input.keys.has('arrowleft')) kx -= 1;
+    if (input.keys.has('arrowright')) kx += 1;
+    if (input.keys.has('arrowup')) ky -= 1;
+    if (input.keys.has('arrowdown')) ky += 1;
+  }
+  if (kx || ky) {
+    inp.moveX = kx;
+    inp.moveY = ky;
+    hold.x = kx;
+    hold.y = ky;
+  }
+
+  // Turret follows the stick, so aiming and driving are the same gesture.
+  inp.aimX = hold.x;
+  inp.aimY = hold.y;
+
+  inp.fire = input.seatFire[seat] || input.keys.has(seat === 0 ? 'f' : 'enter');
+  input.seatFire[seat] = false;
+  return inp;
+}
+
+function gatherAllInputs() {
+  if (state.localPlayers < 2) {
+    const tank = playerTank();
+    return new Map([[tank?.id ?? 0, gatherInput()]]);
+  }
+  const m = new Map();
+  for (let seat = 0; seat < state.localPlayers; seat++) m.set(seat, gatherSeatInput(seat));
+  return m;
 }
 
 // --- Effects -------------------------------------------------------------
@@ -740,7 +868,8 @@ function updateHud() {
   const player = playerTank();
   const enemies = w.tanks.filter((t) => t.team !== 0 && t.alive).length;
 
-  document.getElementById('stat-enemies').textContent = enemies;
+  document.getElementById('stat-enemies').textContent =
+    state.localPlayers > 1 ? w.tanks.filter((t) => t.alive).length : enemies;
   document.getElementById('stat-shells').textContent = player ? `${player.shellsOut}/5` : '-';
   document.getElementById('stat-mines').textContent = player ? `${player.minesOut}/2` : '-';
 
@@ -794,7 +923,7 @@ function frame(now) {
     while (accumulator >= TICK_MS && budget-- > 0) {
       accumulator -= TICK_MS;
       const t0 = performance.now();
-      step(state.world, new Map([[playerTank()?.id ?? 0, gatherInput()]]));
+      step(state.world, gatherAllInputs());
       const dur = performance.now() - t0;
       state.tickTimes.push(dur);
       if (state.tickTimes.length > 120) state.tickTimes.shift();

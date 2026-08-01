@@ -6,6 +6,27 @@ Phone held sideways. Left stick drives, right stick aims the turret independentl
 buttons fire shells and lay mines. Shells ricochet off walls and kill in one hit —
 including your own shell, including you.
 
+## Playing it with no laptop and no internet
+
+`packages/proto/dist/tanks-proto.html` is one self-contained file with zero
+external references — no CDN, no fonts, no server. Put it on a phone once and it
+works offline forever.
+
+- **Android** — save it, open Chrome, go to `file:///sdcard/Download/tanks.html`
+  (or tap it in Files and choose Chrome).
+- **iOS** — save to Files, tap to open. If JavaScript doesn't run in the Quick
+  Look preview, share it into a browser app that reads local files.
+
+Tap **2P** for two people on one phone: left thumb is blue, right thumb is red,
+drag to steer and tap to fire. Each seat gets one stick that both drives and
+aims — two thumbs can't work four sticks. That does cost the thing that makes
+the real game feel right, driving one way while shooting another, so couch play
+is the compromise mode, not the scheme the phone app should ship.
+
+Two *separate* phones can't play each other in a browser with no laptop: there's
+nothing to run the host on, and Web Bluetooth doesn't exist on iOS at all. That
+needs the native app, which is what `BleTransport` is for.
+
 ## Status
 
 The deterministic simulation core and the netcode are built and tested, and a

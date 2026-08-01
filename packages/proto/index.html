@@ -240,6 +240,21 @@
     color: var(--ink);
   }
   .hint { display: flex; align-items: center; gap: 0.3rem; }
+
+  /* Couch play: split the stage so each seat can see which half is theirs. */
+  body[data-seats="2"] #stage::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    left: 50%;
+    width: 0;
+    border-left: 1px dashed var(--hairline);
+    pointer-events: none;
+  }
+  /* The one-player control legend is wrong in couch play, so hide it rather
+     than show two contradictory hints at once. */
+  body[data-seats="2"] #touch-hint { display: none !important; }
+  body[data-seats="2"] #stage { border-top: 1px solid var(--hairline); }
   .touch-buttons { display: none; gap: 0.5rem; margin-left: auto; }
 
   /* Coarse pointer: hide the keyboard legend, show thumb buttons. */
@@ -277,10 +292,11 @@
     <button id="btn-next" aria-label="Next map">&rarr;</button>
   </div>
   <button id="btn-restart">Restart</button>
+  <button id="btn-2p" aria-pressed="false" title="Two players on one phone">2P</button>
   <button id="btn-traj" aria-pressed="false" title="Trace the shot through the real ricochet physics">Trajectory</button>
   <span id="net-status" data-state="offline">offline</span>
   <dl class="stats">
-    <div class="stat"><dt>Enemies</dt><dd id="stat-enemies">0</dd></div>
+    <div class="stat"><dt id="stat-enemies-label">Enemies</dt><dd id="stat-enemies">0</dd></div>
     <div class="stat"><dt>Shells</dt><dd id="stat-shells">0/5</dd></div>
     <div class="stat"><dt>Mines</dt><dd id="stat-mines">0/2</dd></div>
   </dl>
@@ -301,6 +317,7 @@
   <span class="hint desktop-only"><kbd>G</kbd> debug</span>
   <span class="hint desktop-only"><kbd>R</kbd> restart</span>
   <span class="hint" style="display:none" id="touch-hint">left thumb drives · right thumb aims and fires</span>
+  <span class="hint" id="seat-hint" hidden>2 players: left thumb = blue · right thumb = red · drag to steer, tap to fire</span>
   <div class="touch-buttons">
     <button id="btn-fire">Fire</button>
     <button id="btn-mine">Mine</button>
