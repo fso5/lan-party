@@ -361,6 +361,35 @@ export function step(w: WorldState, inputs: Map<number, TankInput>): void {
   w.tick++;
 }
 
+/**
+ * Deep copy of a world.
+ *
+ * Client-side reconciliation needs to rewind to the tick a snapshot describes
+ * and replay its stored inputs forward, so it keeps one of these per tick in a
+ * ring buffer. That is only affordable because world state is small and flat:
+ * a 24x14 arena is 336 bytes of tiles, and eight tanks plus their shells add
+ * well under a kilobyte. Sixty ticks of history costs ~25KB.
+ *
+ * This is also why entities reference each other by id rather than by object
+ * reference -- there is no object graph to fix up here.
+ */
+export function cloneWorld(w: WorldState): WorldState {
+  return {
+    tick: w.tick,
+    arena: w.arena.clone(),
+    tanks: w.tanks.map((t) => ({ ...t, ai: t.ai ? { ...t.ai } : undefined })),
+    shells: w.shells.map((s) => ({ ...s })),
+    mines: w.mines.map((m) => ({ ...m })),
+    rng: (() => {
+      const r = new Rng(0);
+      r.restore(w.rng.save());
+      return r;
+    })(),
+    nextEntityId: w.nextEntityId,
+    events: [],
+  };
+}
+
 /** Teams that still have at least one living tank. */
 export function livingTeams(w: WorldState): Set<number> {
   const s = new Set<number>();

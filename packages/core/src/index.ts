@@ -8,3 +8,6 @@ export * from './ai.js';
 export * from './maps/index.js';
 export * from './net/transport.js';
 export * from './net/protocol.js';
+export * from './net/loopback.js';
+export * from './net/host.js';
+export * from './net/client.js';
