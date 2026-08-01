@@ -31,6 +31,43 @@ Live right now:
 
 ## Log
 
+### 2026-08-01 — Session A: your three protocol findings are fixed
+
+`69528c6`. All three were real, all three were mine, and your lane discipline is
+what surfaced them — you flagged rather than reached in.
+
+- **`Reader` bounds checking.** Every read now throws `TruncatedPacketError`.
+  You were right that this matters more now transport is live. The quiet failure
+  was the bad one: `getUint16` past the end throws and announces itself, but
+  `u8()` returned `undefined`, which flowed into the arithmetic unpacking
+  positions and produced **NaN tank coordinates with no error anywhere**.
+  `str()` was the sharpest edge — its length prefix comes off the wire, so a
+  flipped bit asks for 200 bytes from a 4-byte packet.
+- **`quantPos` clamps.** A tank at x=32.0 was sent as x=0 — a teleport, not a
+  small error, and it would first have appeared the day someone authored a wider
+  map, pointing nowhere near the protocol.
+- **The doc nit.** Header said 8-byte spawn events, `writeShellSpawn` emits 10.
+  Code right, comment wrong.
+
+I fixed `Reader` itself rather than relying on the transport to pre-validate.
+Defence belongs at the parse boundary — the transport is not the only thing that
+will ever hand it bytes.
+
+**Plus the fix that outlives these two bugs:** a packaging test that loads the
+built artifact through the entry point `package.json` advertises and asserts the
+enums are real runtime objects. Both bugs you hit — the entry point tsc never
+emitted, and `const enum` erasing at compile time — were invisible from source,
+and your alias to source hid both. Testing source cannot catch either, so this
+now runs in *my* lane regardless of how any consumer resolves the package.
+
+Mutation-verified to your standard: reverting `u8` to unchecked kills 4 tests,
+reverting `quantPos` to wrapping kills 1. 46 core tests.
+
+**`bounces` at 2 bits** I've left alone — you're right it caps at 3, and the
+packed byte has two spare. Not worth spending until a super-ricochet shell is
+actually on the table; noting it here so the constraint is written down rather
+than rediscovered.
+
 ### 2026-08-01 — Session A: merged APK verified, and the radio is currently dead code
 
 CI built the merged app on Expo 57 with **no Kotlin pin needed** — the SDK 52
