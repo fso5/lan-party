@@ -9,10 +9,11 @@
  *
  *  1. Clients send input, never state. A full input frame is 4 bytes.
  *  2. Shells are never streamed. A shell's whole future is determined by its
- *     spawn position, angle and bounce count, so the host sends one 8-byte
+ *     spawn position, angle and bounce count, so the host sends one 10-byte
  *     spawn event and every client simulates the trajectory locally with the
  *     identical deterministic physics. A shell that bounces around for eight
- *     seconds costs eight bytes, once. This is the single biggest saving in
+ *     seconds costs ten bytes, once -- 8 bytes of payload behind a 2-byte
+ *     message header. This is the single biggest saving in
  *     the protocol and it is the reason the deterministic-trig work in math.ts
  *     is not optional.
  *  3. Positions are quantised. Arenas are at most 32 tiles across, so 12 bits
@@ -55,8 +56,17 @@ export enum NetEvent {
 const POS_SCALE = 128; // 1/128 tile resolution
 const ANGLE_SCALE = 256 / (Math.PI * 2);
 
+/** Largest position the 12-bit field can carry: 4096/128 = 32 tiles. */
+export const MAX_QUANT_POS = 0xfff;
+
 export function quantPos(v: number): number {
-  return Math.round(v * POS_SCALE) & 0xfff; // 12 bits
+  // Clamp, do not wrap. `& 0xfff` sends a tank at x=32.0 as x=0, teleporting it
+  // across the arena instead of putting it slightly out of place. The arena cap
+  // makes this unreachable today, so the failure would first appear the day
+  // someone authors a wider map -- as an inexplicable teleport rather than
+  // anything pointing at the protocol.
+  const q = Math.round(v * POS_SCALE);
+  return q < 0 ? 0 : q > MAX_QUANT_POS ? MAX_QUANT_POS : q;
 }
 
 export function dequantPos(q: number): number {
@@ -144,6 +154,34 @@ export class Writer {
   }
 }
 
+/**
+ * Thrown when a packet ends mid-field.
+ *
+ * A distinct type so callers can tell a malformed packet from a genuine bug in
+ * their own parsing and drop the packet rather than tearing down the match.
+ */
+export class TruncatedPacketError extends Error {
+  constructor(need: number, have: number, at: number) {
+    super(`packet truncated: needed ${need} bytes at offset ${at}, ${have} remain`);
+    this.name = 'TruncatedPacketError';
+  }
+}
+
+/**
+ * Little-endian byte reader that refuses to read past the end.
+ *
+ * Every read is bounds checked, and that is not defensive programming for its
+ * own sake. Over BLE a truncated packet is a routine input, not an exotic one:
+ * a fragment can be dropped, a write can be cut short at a renegotiated MTU,
+ * and the peer on the other end is a phone whose radio stack we do not control.
+ *
+ * Unchecked, the two failure modes differ and the quiet one is worse.
+ * `getUint16` past the end throws a `RangeError`, which at least announces
+ * itself -- but `u8()` past the end returns `undefined`, and `undefined` flows
+ * into the arithmetic that unpacks positions and angles, producing `NaN` tank
+ * coordinates that propagate into the world with no error anywhere. A packet
+ * that ends early should be dropped, not half-applied.
+ */
 export class Reader {
   private view: DataView;
   private pos = 0;
@@ -152,35 +190,49 @@ export class Reader {
     this.view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   }
 
+  private need(n: number): void {
+    if (this.pos + n > this.buf.length) {
+      throw new TruncatedPacketError(n, this.buf.length - this.pos, this.pos);
+    }
+  }
+
   u8(): number {
+    this.need(1);
     return this.buf[this.pos++];
   }
 
   u16(): number {
+    this.need(2);
     const v = this.view.getUint16(this.pos, true);
     this.pos += 2;
     return v;
   }
 
   u32(): number {
+    this.need(4);
     const v = this.view.getUint32(this.pos, true);
     this.pos += 4;
     return v;
   }
 
   i8(): number {
+    this.need(1);
     const v = this.view.getInt8(this.pos);
     this.pos += 1;
     return v;
   }
 
   bytes(n: number): Uint8Array {
+    if (n < 0) throw new RangeError(`bytes(${n}): negative length`);
+    this.need(n);
     const v = this.buf.slice(this.pos, this.pos + n);
     this.pos += n;
     return v;
   }
 
   str(): string {
+    // The length prefix comes off the wire, so it is attacker- and
+    // corruption-controlled: bytes() must bounds check it rather than trust it.
     const n = this.u8();
     return new TextDecoder().decode(this.bytes(n));
   }
