@@ -57,15 +57,20 @@ jobs:
         working-directory: packages/app
         run: npx expo prebuild --platform android --no-install
 
+      # Only build for arm64-v8a. A debug APK otherwise ships native libraries
+      # for all four architectures -- arm64, armeabi-v7a, x86, x86_64 -- and
+      # comes out at 123 MB, which is a miserable download on a phone with
+      # patchy signal. Every Android phone since roughly 2017 is arm64, and the
+      # x86 variants exist for emulators we are not targeting.
       - name: Build the APK
         working-directory: packages/app/android
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: ./gradlew assembleDebug --no-daemon -PreactNativeArchitectures=arm64-v8a
 
       - name: Name the APK after the commit
         id: apk
         run: |
           SRC=$(find packages/app/android -name '*.apk' | head -1)
-          echo "Found APK at $SRC"
+          echo "Found APK at $SRC ($(du -h "$SRC" | cut -f1))"
           mkdir -p out
           cp "$SRC" "out/tanks-${GITHUB_SHA::7}.apk"
           echo "path=out/tanks-${GITHUB_SHA::7}.apk" >> "$GITHUB_OUTPUT"
@@ -86,5 +91,5 @@ jobs:
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
           gh release create latest "${{ steps.apk.outputs.path }}" \
             --title "Latest build" \
-            --notes "Android APK built from ${GITHUB_SHA::7}. Download on your phone and install." \
+            --notes "Android APK built from ${GITHUB_SHA::7} ($(du -h "${{ steps.apk.outputs.path }}" | cut -f1), arm64-v8a). Download on your phone and install." \
             --latest
