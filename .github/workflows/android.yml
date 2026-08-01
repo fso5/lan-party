@@ -57,15 +57,35 @@ jobs:
         working-directory: packages/app
         run: npx expo prebuild --platform android --no-install
 
-      # Restrict to arm64 by rewriting the generated gradle.properties. Passing
-      # -PreactNativeArchitectures on the command line looks like it should work
-      # and silently does not -- the built APK still carried all four ABIs. The
-      # property has to be in the file the React Native gradle plugin reads.
+      # Restrict the APK to arm64.
+      #
+      # Two mechanisms, and only the second actually does it.
+      # reactNativeArchitectures controls what gets *compiled from source*, so
+      # setting it alone still shipped all four ABIs: React Native's and Expo's
+      # native libraries arrive prebuilt inside AAR dependencies, and nothing
+      # recompiles them. Filtering those needs ndk.abiFilters, which applies at
+      # packaging time regardless of where a .so came from.
       - name: Build for arm64 only
         working-directory: packages/app/android
         run: |
           sed -i 's/^reactNativeArchitectures=.*/reactNativeArchitectures=arm64-v8a/' gradle.properties
           grep '^reactNativeArchitectures' gradle.properties
+          python3 - <<'PY'
+          import re, pathlib
+          p = pathlib.Path('app/build.gradle')
+          s = p.read_text()
+          if 'abiFilters' in s:
+              raise SystemExit('abiFilters already present -- check the template changed')
+          # Insert into defaultConfig, which every Expo-generated app module has.
+          s2, n = re.subn(
+              r'(defaultConfig\s*\{)',
+              r"\1\n        ndk { abiFilters 'arm64-v8a' }",
+              s, count=1)
+          if n != 1:
+              raise SystemExit('could not find defaultConfig in app/build.gradle')
+          p.write_text(s2)
+          print('injected abiFilters into defaultConfig')
+          PY
 
       # Release, not debug. The debug variant came out at 123 MB: unstripped
       # native libraries, debug symbols and an unminified bundle.
