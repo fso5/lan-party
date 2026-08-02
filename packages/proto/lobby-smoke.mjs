@@ -208,8 +208,23 @@ let expectingDisconnect = false;
  */
 const PHONE = { viewport: { width: 844, height: 390 }, hasTouch: true };
 const DESKTOP = { viewport: { width: 800, height: 600 } };
+/*
+ * Three browsers and the host, which is four players -- the size the versus
+ * maps are built for, and the smallest group that can be two-on-two.
+ *
+ * Two clients was never the target. The ask was "teams or free-for-all, not
+ * just one team but multiple", and with one client per side there is no
+ * difference between a team and a player: a roster that seats everybody
+ * one-per-team looks identical to one that honours a choice. Four players on
+ * two teams is the smallest arrangement where getting it wrong is visible.
+ *
+ * It also puts more than one client on the wire at once, which nothing did:
+ * concurrent handshakes, a roster broadcast to three sockets, and three
+ * snapshot streams off one phone.
+ */
+const NAMES = ['Alpha', 'Bravo', 'Carol'];
 const pages = [];
-for (let i = 0; i < 2; i++) {
+for (let i = 0; i < NAMES.length; i++) {
   const ctx = await browser.newContext(i === 0 ? PHONE : DESKTOP);
   const p = await ctx.newPage();
   p.on('pageerror', (e) => errors.push(`p${i}: ${e.message}`));
@@ -218,7 +233,7 @@ for (let i = 0; i < 2; i++) {
   });
   // A stable name per browser. The default is random, which is fine for people
   // and useless for asserting which row belongs to whom.
-  const name = ['Alpha', 'Bravo'][i];
+  const name = NAMES[i];
   await p.addInitScript((n) => localStorage.setItem('tanks.name', n), name);
   await p.goto(`http://${HOST}:${port}/`);
   pages.push(p);
@@ -270,7 +285,10 @@ const read = (p) =>
 const first = await read(pages[0]);
 console.log('p0 lobby:', JSON.stringify(first));
 
-check(first.rows.length === 3, `expected 3 rows (host + 2 browsers), got ${first.rows.length}`);
+check(
+  first.rows.length === NAMES.length + 1,
+  `expected ${NAMES.length + 1} rows (host + ${NAMES.length} browsers), got ${first.rows.length}`,
+);
 check(first.rows.filter((r) => r.you).length === 1, 'exactly one row must be marked as yours');
 check(first.rows.some((r) => (r.tag ?? '').includes('host')), 'the host must be labelled');
 check(first.teams.length >= 2, `expected >= 2 team buttons, got ${first.teams.length}`);
@@ -309,8 +327,8 @@ async function waitFor(what, predicate, ms = 15_000) {
   check(!!bravoPeer, 'Bravo should be seated before being dropped');
   if (bravoPeer) {
     tcp.close(bravoPeer);
-    await waitFor('Bravo to drop out of the roster', () => roster.slots.length === 2);
-    await waitFor('Bravo to reconnect on its own', () => roster.slots.length === 3);
+    await waitFor('Bravo to drop out of the roster', () => roster.slots.length === NAMES.length);
+    await waitFor('Bravo to reconnect on its own', () => roster.slots.length === NAMES.length + 1);
     check(
       roster.slots.some((s) => s.name === 'Bravo'),
       'Bravo must come back by itself rather than needing a reload',
@@ -395,27 +413,73 @@ async function waitFor(what, predicate, ms = 15_000) {
 }
 
 /*
- * Tap a team with a real touch, and confirm the change round-trips through the
- * host rather than being applied locally.
+ * Form two actual teams, and confirm every choice round-trips through the host
+ * rather than being applied locally.
+ *
+ * Host is seat 0 on team 0. Alpha joins it; Bravo and Carol take team 1. That
+ * is two on two -- the arrangement a default free-for-all seating cannot
+ * produce by accident, which is what makes the check downstream meaningful.
+ *
+ * The buttons are rendered in team order, so index is team id.
  */
-await pages[0].tap('#lobby-team-buttons button:last-child');
-await pages[0].waitForTimeout(600);
-const afterTeam = await read(pages[0]);
-const chosen = afterTeam.teams.findIndex((t) => t.on);
-check(chosen === afterTeam.teams.length - 1, `team change did not round-trip (selected ${chosen})`);
+const WANTED_TEAM = { Alpha: 0, Bravo: 1, Carol: 1 };
+
+/**
+ * Press a control the way that browser can.
+ *
+ * Only the first context has `hasTouch`; the others are desktop on purpose, so
+ * the lobby is exercised under both kinds of input rather than only the one
+ * that happens to be easiest to drive. `page.tap` throws outright without the
+ * context option, which is a better failure than silently clicking.
+ */
+const press = (i, sel) => (i === 0 ? pages[i].tap(sel) : pages[i].click(sel));
+
+for (const [i] of pages.entries()) {
+  const team = WANTED_TEAM[NAMES[i]];
+  await press(i, `#lobby-team-buttons button:nth-child(${team + 1})`);
+  await pages[i].waitForTimeout(400);
+}
+await pages[0].waitForTimeout(400);
+
+for (const [i, p] of pages.entries()) {
+  const name = NAMES[i];
+  const after = await read(p);
+  const chosen = after.teams.findIndex((t) => t.on);
+  check(
+    chosen === WANTED_TEAM[name],
+    `${name} tapped team ${WANTED_TEAM[name]} but the roster came back with ${chosen}`,
+  );
+}
+
+// Two on two, from the host's own view of the roster.
+{
+  const byTeam = new Map();
+  for (const slot of roster.slots) byTeam.set(slot.team, (byTeam.get(slot.team) ?? 0) + 1);
+  check(byTeam.size === 2, `expected two teams, host sees ${byTeam.size}: ${JSON.stringify([...byTeam])}`);
+  check(
+    [...byTeam.values()].every((n) => n === 2),
+    `expected two on two, host sees ${JSON.stringify([...byTeam])}`,
+  );
+  console.log('teams formed:', JSON.stringify(roster.slots.map((s) => `${s.name}=t${s.team}`)));
+}
 
 // Ready likewise.
-await pages[0].tap('#btn-ready');
+await press(0, '#btn-ready');
 await pages[0].waitForTimeout(600);
 const afterReady = await read(pages[0]);
 check(afterReady.ready === 'Ready', `ready did not round-trip (button says "${afterReady.ready}")`);
 
-// And the other browser must see both changes, since the roster is broadcast.
-const other = await read(pages[1]);
-check(
-  other.rows.some((r) => (r.tag ?? '').includes('ready') && !r.you),
-  'the other player must see the first one become ready',
-);
+// And every other browser must see it, since the roster is broadcast to all of
+// them. With three clients this is the first time a broadcast has had to reach
+// more than one socket.
+for (const [i, p] of pages.entries()) {
+  if (i === 0) continue;
+  const other = await read(p);
+  check(
+    other.rows.some((r) => (r.tag ?? '').includes('ready') && !r.you),
+    `${NAMES[i]} must see Alpha become ready`,
+  );
+}
 
 /* --- the handoff out of the lobby ----------------------------------------
  *
@@ -463,7 +527,7 @@ console.log('starting match with roster:', JSON.stringify(roster.slots.map((s) =
 const ticking = setInterval(() => match.update(1000 / 60), 16);
 
 for (const [i, p] of pages.entries()) {
-  const name = ['Alpha', 'Bravo'][i];
+  const name = NAMES[i];
   const want = expectedTeam.get(name);
   try {
     await p.waitForFunction(
@@ -501,8 +565,17 @@ for (const [i, p] of pages.entries()) {
  * tests cannot reach.
  */
 {
-  // Both clients share a team, so either one names the winning side.
-  const clientTeamId = [...expectedTeam.values()][0].team;
+  /*
+   * The side that does not contain the host.
+   *
+   * This used to read "both clients share a team, so either one names the
+   * winning side", which stopped being true the moment the roster became a
+   * real two-on-two: Alpha is on the host's team now. Deriving the side from
+   * the host's own team is what keeps this correct whatever the lobby chose --
+   * and it is the only side that can win a round by the host dying.
+   */
+  const hostTeamId = world.tanks[0].team;
+  const clientTeamId = [...expectedTeam.values()].map((v) => v.team).find((t) => t !== hostTeamId);
   const roundSeed = (round) => seed + round * 7919;
   match.roundBuilder = (round) =>
     createWorld({ arena, seed: roundSeed(round), players, bots: [] });
@@ -550,8 +623,9 @@ for (const [i, p] of pages.entries()) {
     ),
   );
 
-  // Kill the host so the clients' team takes the round.
-  for (const t of match.world.tanks) if (t.team === world.tanks[0].team) t.alive = false;
+  // Kill everyone on the host's side, so the other team takes the round. With
+  // two on two that is the host and Alpha, not the host alone.
+  for (const t of match.world.tanks) if (t.team === hostTeamId) t.alive = false;
 
   const reachedRoundTwo = await waitFor(
     'the host to start round two',
@@ -566,7 +640,7 @@ for (const [i, p] of pages.entries()) {
     // The clients have to follow. A client that misses the new MatchStart sits
     // watching a finished round while the match carries on without it.
     for (const [i, p] of pages.entries()) {
-      const name = ['Alpha', 'Bravo'][i];
+      const name = NAMES[i];
       const want = expectedTeam.get(name);
       const followed = await p
         .waitForFunction(
@@ -606,17 +680,30 @@ for (const [i, p] of pages.entries()) {
   }
 }
 
-// Both browsers picked the same team, so the match must genuinely be 2v1 --
-// not three one-player teams wearing the same label.
-const clientTeams = [...expectedTeam.values()].map((v) => v.team);
-check(
-  new Set(clientTeams).size === 1,
-  `both clients should share a team for this check, got ${clientTeams}`,
-);
-check(
-  world.tanks[0].team !== clientTeams[0],
-  'the host must be on the opposing side, or this proves nothing',
-);
+/*
+ * And the match itself is genuinely two on two.
+ *
+ * Asserted on the built world rather than on the roster, because the roster is
+ * only an intention until `createWorld` turns it into tanks. Four players each
+ * on their own team would satisfy every check above about choices
+ * round-tripping and still be a free-for-all wearing team labels -- which is
+ * exactly the state the app ships in today, and the thing this whole path
+ * exists to make impossible.
+ */
+{
+  const sizes = new Map();
+  for (const t of world.tanks) sizes.set(t.team, (sizes.get(t.team) ?? 0) + 1);
+  const shape = JSON.stringify([...sizes].sort());
+  check(sizes.size === 2, `the match should have two sides, has ${sizes.size}: ${shape}`);
+  check([...sizes.values()].every((n) => n === 2), `the match should be two on two: ${shape}`);
+  // Somebody must actually be sharing with the host, or "teams" is untested no
+  // matter how the numbers add up.
+  check(
+    world.tanks.filter((t) => t.team === world.tanks[0].team).length === 2,
+    'a client must be on the host\u2019s own side',
+  );
+  console.log('match shape:', shape, '(team -> tanks)');
+}
 
 /* --- a host that goes away must say something useful --------------------- */
 {
