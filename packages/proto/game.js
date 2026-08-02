@@ -1574,6 +1574,25 @@ window.__state = state;
 window.__net = net;
 
 window.addEventListener('resize', resize);
+
+/*
+ * Track the stage, not just the window.
+ *
+ * `resize()` locks the canvas to whatever `#stage` measured at the time. The
+ * first call runs before the flex layout has settled -- fonts still loading,
+ * the footer not yet at its final height -- so the canvas was sized from a
+ * stage that was ~30-50px taller than the one it ended up in, and nothing ever
+ * re-measured because `window.resize` does not fire for a reflow.
+ *
+ * `#stage` is `position: relative`, so the oversized canvas painted *and hit
+ * tested* over the footer beneath it. On a phone that footer is the Fire and
+ * Mine buttons: they were drawn on screen, sat under the canvas, and every tap
+ * meant for them went to the aim stick instead. Watching the element it is
+ * derived from is what keeps the two in agreement however the page reflows.
+ */
+if (typeof ResizeObserver !== 'undefined') {
+  new ResizeObserver(() => resize()).observe(document.getElementById('stage'));
+}
 loadMap(0);
 
 // Only look for a host when served over plain HTTP -- that is the LAN test

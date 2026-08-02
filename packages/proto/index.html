@@ -1,6 +1,25 @@
 <title>Tanks! — physics prototype</title>
 
 <style>
+  /* `hidden` has to actually hide.
+   *
+   * The UA stylesheet's `[hidden] { display: none }` loses to *any* author
+   * `display` declaration -- author rules beat UA rules whatever the
+   * specificity -- so every panel below that sets its own display silently
+   * ignored the attribute. The code was correct: `renderLobby()` sets
+   * `hidden = true` when there is no roster. It just had no effect.
+   *
+   * What shipped: `#match-lobby` is `position: fixed; inset: 0`, so the game
+   * opened with a dimmed arena under an empty "Waiting for the host to
+   * start..." panel -- in solo play, where there is no host and never will be.
+   * On a phone that overlay also swallowed every touch, which meant the tank
+   * could not be driven at all. `#rounds` and `#seat-hint` leaked the same way.
+   *
+   * `!important` rather than more specificity on purpose: this must outrank
+   * rules that do not exist yet, or the next panel someone adds reintroduces it.
+   */
+  [hidden] { display: none !important; }
+
   /* Tabletop diorama. The original reads as toy tanks on a plywood board, and
      that world gives us the palette: warm ply ground, cool slate walls, cork
      blocks, saturated enamel tanks. Neutrals are biased warm toward the ply
@@ -182,6 +201,10 @@
     position: relative;
     min-height: 0;
     touch-action: none;
+    /* Belt and braces with the ResizeObserver in game.js: the canvas is sized
+       in script, so a stage that never clips means any future mistake there
+       lands on top of the footer's Fire and Mine buttons and eats their taps. */
+    overflow: hidden;
   }
   canvas { display: block; touch-action: none; }
 
@@ -282,6 +305,11 @@
   }
 
   footer {
+    /* Positioned so it wins the paint and hit-test order against `#stage`,
+       which is also positioned. Without this the arena covers the thumb
+       buttons rather than the other way round. */
+    position: relative;
+    z-index: 1;
     display: flex;
     align-items: center;
     gap: 0.5rem;
