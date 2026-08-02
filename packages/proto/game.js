@@ -153,6 +153,9 @@ function setNetHint(text) {
   el.hidden = !text;
 }
 
+/** Pending "the host has not answered" timer, if any. */
+let waitingForHost = null;
+
 function connectMultiplayer() {
   if (net.socket) return;
   const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
@@ -190,6 +193,31 @@ function connectMultiplayer() {
     const w = new Writer();
     writeLobbyJoin(w, localPlayerName());
     transport.send('host', w.finish(), true);
+
+    /*
+     * Say something if the host never answers.
+     *
+     * Opening the URL after the match has already started is the ordinary way
+     * to arrive late at somebody's kitchen table, and it lands in a gap: the
+     * socket connects, the Join is sent, and nothing comes back. The host's
+     * lobby handler has been replaced by `MatchHost` for the duration of the
+     * match, so there is no Welcome and no roster until the next round begins.
+     *
+     * With the socket healthy no reconnect hint ever fires, so the page showed
+     * a perfectly normal single-player game -- which is the worst possible
+     * answer, because it looks like it is working. The player has no way to
+     * tell they are not in the match everyone else is playing.
+     *
+     * The wait is deliberate rather than immediate: a host that is sitting in
+     * its lobby replies in milliseconds, and flashing this at everyone who
+     * joins normally would be noise.
+     */
+    clearTimeout(waitingForHost);
+    waitingForHost = setTimeout(() => {
+      if (!net.roster && !net.client) {
+        setNetHint('Connected. Waiting for the host to start the next round…');
+      }
+    }, 2000);
   });
 
   sock.onmessage = (ev) => transport.receive('host', new Uint8Array(ev.data));
@@ -200,6 +228,8 @@ function connectMultiplayer() {
     const r = new Reader(data);
     const type = r.u8();
     if (type === MsgType.Lobby) {
+      // The host is talking to us after all.
+      clearTimeout(waitingForHost);
       try {
         handleLobbyMessage(r);
       } catch (err) {
@@ -209,6 +239,8 @@ function connectMultiplayer() {
       return;
     }
     if (type === MsgType.MatchStart) {
+      clearTimeout(waitingForHost);
+      setNetHint(null);
       try {
         beginNetworkedMatch(readMatchStart(r));
       } catch (err) {
@@ -222,6 +254,7 @@ function connectMultiplayer() {
   };
   sock.onerror = () => setNetStatus('offline');
   sock.onclose = () => {
+    clearTimeout(waitingForHost);
     net.socket = null;
     net.client = null;
     scheduleReconnect();

@@ -285,6 +285,20 @@ const read = (p) =>
 const first = await read(pages[0]);
 console.log('p0 lobby:', JSON.stringify(first));
 
+// The other half of the late-joiner hint below: somebody who arrives while the
+// lobby is open is answered in milliseconds and must never see it. A hint that
+// fires for everyone is worse than no hint, because it stops meaning anything.
+{
+  const hint = await pages[0].evaluate(() => {
+    const el = document.getElementById('net-hint');
+    return el.hidden ? null : el.textContent;
+  });
+  check(
+    !hint || !/waiting for the host/i.test(hint),
+    `a normally-seated player should not be told they are waiting (saw ${JSON.stringify(hint)})`,
+  );
+}
+
 check(
   first.rows.length === NAMES.length + 1,
   `expected ${NAMES.length + 1} rows (host + ${NAMES.length} browsers), got ${first.rows.length}`,
@@ -703,6 +717,55 @@ for (const [i, p] of pages.entries()) {
     'a client must be on the host\u2019s own side',
   );
   console.log('match shape:', shape, '(team -> tanks)');
+}
+
+/* --- somebody arriving after the match started --------------------------- */
+{
+  /*
+   * The ordinary way to turn up late at a kitchen table: open the URL once
+   * everyone else is already playing.
+   *
+   * It lands in a gap. The socket connects and the Join is sent, but the
+   * host's lobby handler has been replaced by `MatchHost` for the duration of
+   * the match, so nothing answers until the next round is built. With the
+   * socket perfectly healthy no reconnect hint fires either -- so the page
+   * showed a normal single-player game, which is the worst available answer
+   * because it looks like it is working.
+   */
+  const ctx = await browser.newContext(PHONE);
+  const late = await ctx.newPage();
+  late.on('pageerror', (e) => errors.push(`late: ${e.message}`));
+  late.on('console', (m) => {
+    if (m.type() === 'error' && !expectingDisconnect) errors.push(`late: ${m.text()}`);
+  });
+  await late.addInitScript(() => localStorage.setItem('tanks.name', 'Latecomer'));
+  await late.goto(`http://${HOST}:${port}/`);
+
+  // The socket must actually be up -- this is not the stranded case, and if it
+  // were, the wrong hint would pass this test for the wrong reason.
+  const connected = await late
+    .waitForFunction(() => window.__state && document.getElementById('net-status')?.textContent !== 'offline', undefined, { timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false);
+  check(connected, 'a late joiner should reach the host at all');
+
+  const told = await late
+    .waitForFunction(
+      () => {
+        const el = document.getElementById('net-hint');
+        return el && !el.hidden && /waiting for the host/i.test(el.textContent ?? '');
+      },
+      undefined,
+      { timeout: 15_000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check(told, 'a late joiner must be told they are waiting, not shown a silent solo game');
+  if (told) {
+    const text = await late.evaluate(() => document.getElementById('net-hint').textContent);
+    console.log('hint shown to a late joiner:', JSON.stringify(text));
+  }
+  await ctx.close();
 }
 
 /* --- a host that goes away must say something useful --------------------- */
