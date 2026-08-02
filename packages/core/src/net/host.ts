@@ -18,7 +18,7 @@
  */
 
 import { datan2 } from '../math.js';
-import { cloneWorld, step, type WorldState } from '../sim.js';
+import { cloneWorld, killTank, step, tankById, type WorldState } from '../sim.js';
 import {
   DEFAULT_RULES,
   DRAW,
@@ -53,6 +53,24 @@ const SNAPSHOT_INTERVAL = Math.round(TICK_HZ / SNAPSHOT_HZ);
  */
 const INPUT_STALE_TICKS = 20;
 
+/**
+ * How long a departed player's tank is held before it is destroyed.
+ *
+ * Without this the tank simply stands there, alive, for ever: a round ends
+ * when one team is left standing, and an abandoned tank keeps its team in the
+ * count. Somebody's phone rings, they close the tab, and everyone else has to
+ * go and shoot a statue to finish the round -- two statues around a maze if a
+ * pair left, and a round that cannot end at all if the players still there are
+ * all on one team.
+ *
+ * Not destroyed immediately, because phone WiFi drops for a second or two at a
+ * time and the browser client reconnects on a backoff that tops out at five --
+ * killing on the first missing packet would punish a hiccup with a death. Ten
+ * seconds outlasts a blip and a couple of retries, and is short enough that
+ * nobody is left wondering whether the game is broken.
+ */
+const ABANDON_TICKS = TICK_HZ * 10;
+
 interface ClientSlot {
   peerId: PeerId;
   tankId: number;
@@ -64,6 +82,8 @@ interface ClientSlot {
 
 export class MatchHost {
   private clients = new Map<PeerId, ClientSlot>();
+  /** Tank id -> the tick its player left. See ABANDON_TICKS. */
+  private abandoned = new Map<number, number>();
   private tickAccumulatorMs = 0;
   private pendingEvents: Uint8Array[] = [];
   private localInput: TankInput = emptyInput();
@@ -139,6 +159,9 @@ export class MatchHost {
 
   /** Seat a client in a tank. Returns the tank id it now controls. */
   addClient(peerId: PeerId, tankId: number): void {
+    // Seating this tank again cancels its countdown, which is what makes a
+    // reconnect survivable: the player comes back to the tank they left.
+    this.abandoned.delete(tankId);
     this.clients.set(peerId, {
       peerId,
       tankId,
@@ -159,7 +182,29 @@ export class MatchHost {
    * Idempotent -- a leave can arrive after an explicit removal.
    */
   removeClient(peerId: PeerId): void {
+    const slot = this.clients.get(peerId);
+    if (slot && !this.abandoned.has(slot.tankId)) {
+      this.abandoned.set(slot.tankId, this.world.tick);
+    }
     this.clients.delete(peerId);
+  }
+
+  /**
+   * Destroy the tanks of players who left and did not come back.
+   *
+   * Through `killTank` rather than by setting `alive = false`, so it emits a
+   * `TankDestroyed` the same as any other death: clients learn about it from
+   * the event they already handle, and the explosion is drawn. Credited to the
+   * tank itself, because there is no killer -- the player walked away.
+   */
+  private retireAbandoned(): void {
+    if (this.abandoned.size === 0) return;
+    for (const [tankId, leftAtTick] of this.abandoned) {
+      if (this.world.tick - leftAtTick < ABANDON_TICKS) continue;
+      const tank = tankById(this.world, tankId);
+      if (tank?.alive) killTank(this.world, tank, tankId);
+      this.abandoned.delete(tankId);
+    }
   }
 
   /** Peers currently seated, for a lobby roster or a reconnect check. */
@@ -231,6 +276,11 @@ export class MatchHost {
     if (this.localTankId >= 0) inputs.set(this.localTankId, this.localInput);
 
     step(this.world, inputs);
+
+    // Runs after step() -- which clears `world.events` -- and before the loop
+    // that turns those events into wire messages, so a retirement rides out on
+    // the same tick it happens and counts toward this tick's scoring.
+    this.retireAbandoned();
 
     // Any shell born this tick becomes a spawn event. Clients simulate the
     // trajectory themselves from here -- we never send its position again.
@@ -331,6 +381,11 @@ export class MatchHost {
     // Events queued against the old world describe shells and blocks that no
     // longer exist. Sending them would spawn phantoms in the new round.
     this.pendingEvents.length = 0;
+
+    // Countdowns belong to the tanks of the round that just ended. The next
+    // round is built from a fresh roster, so a player who left is simply not
+    // in it -- and carrying an id forward would retire whoever inherits it.
+    this.abandoned.clear();
 
     this.onRoundStart?.(this.world, this.match.round);
   }

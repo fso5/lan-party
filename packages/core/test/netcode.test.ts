@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createWorld, cloneWorld, step } from '../src/sim.js';
+import { createWorld, cloneWorld, killTank, step } from '../src/sim.js';
 import { loadArena, VERSUS_MAPS } from '../src/maps/index.js';
 import { Rng } from '../src/math.js';
-import { emptyInput, type TankInput } from '../src/types.js';
+import { emptyInput, EventKind, type TankInput } from '../src/types.js';
 import {
   LoopbackNetwork,
   LoopbackTransport,
@@ -279,4 +279,131 @@ test('a client whose clock falls behind the host resyncs instead of drifting', (
   const c = client.world.tanks.find((t) => t.id === 1)!;
   const drift = Math.hypot(h.x - c.x, h.y - c.y);
   assert.ok(drift < 0.5, `client still ${drift.toFixed(3)} tiles from host after resync`);
+});
+
+/**
+ * A player who leaves must not hold the round open for ever.
+ *
+ * A round ends when one team is left standing, and an abandoned tank keeps its
+ * team in that count while sitting motionless at its spawn. Left alone, the
+ * players still there have to hunt down and shoot a statue to finish -- two of
+ * them around a maze if a pair left, and if everyone remaining is on one team
+ * the round cannot end at all.
+ */
+test('a departed player’s tank is retired, and the round can end', () => {
+  const world = versusWorld(11);
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
+  const hostT = new LoopbackTransport('host', 'Host', net);
+  new LoopbackTransport('client', 'Client', net);
+  const host = new MatchHost(world, hostT);
+  net.connect('host', 'client');
+  host.addClient('client', 1);
+  host.localTankId = 0;
+
+  const leaver = () => host.world.tanks.find((t) => t.id === 1)!;
+  assert.ok(leaver().alive);
+
+  host.removeClient('client');
+
+  // Still there through the grace period: a phone that drops WiFi for a second
+  // and reconnects must not come back to a wreck.
+  for (let i = 0; i < 60 * 9; i++) host.update(1000 / 60);
+  assert.ok(leaver().alive, 'nine seconds is a hiccup, not a departure');
+  assert.equal(host.match.phase, 'playing');
+
+  for (let i = 0; i < 60 * 2; i++) host.update(1000 / 60);
+  assert.equal(leaver().alive, false, 'and after the grace period the tank goes');
+
+  // Which is the point: with only one team left standing the round resolves.
+  assert.notEqual(host.match.phase, 'playing');
+  assert.equal(host.match.lastRoundWinner, 0, 'the player still there takes it');
+});
+
+test('a player who reconnects inside the grace period keeps their tank', () => {
+  const world = versusWorld(12);
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
+  const hostT = new LoopbackTransport('host', 'Host', net);
+  new LoopbackTransport('client', 'Client', net);
+  const host = new MatchHost(world, hostT);
+  net.connect('host', 'client');
+  host.addClient('client', 1);
+  host.localTankId = 0;
+
+  host.removeClient('client');
+  for (let i = 0; i < 60 * 3; i++) host.update(1000 / 60);
+
+  // The browser reconnects on its own and the embedder re-seats it. A new
+  // connection means a new peer id, which is why the countdown is keyed on the
+  // tank rather than on the peer.
+  host.addClient('client-2', 1);
+  for (let i = 0; i < 60 * 20; i++) host.update(1000 / 60);
+
+  assert.ok(host.world.tanks.find((t) => t.id === 1)!.alive, 'came back to a live tank');
+  assert.equal(host.match.phase, 'playing', 'and the round is still running');
+});
+
+test('retiring a tank is announced, not just applied', () => {
+  /*
+   * The client would work out that the tank is gone regardless -- snapshots
+   * carry the alive flag -- so this is not about state agreement. It is about
+   * the `TankDestroyed` event, which is what draws the explosion. Without it a
+   * tank blinks out of existence and the round result arrives unexplained.
+   *
+   * An earlier version of this test asserted the client's `alive` flag and
+   * passed even with the event suppressed, which made it worth nothing.
+   */
+  const world = versusWorld(13);
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
+  const hostT = new LoopbackTransport('host', 'Host', net);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  const host = new MatchHost(world, hostT);
+  const client = new MatchClient(cloneWorld(world), clientT, 'host', 0);
+  net.connect('host', 'client');
+  host.addClient('client', 1);
+  host.localTankId = 0;
+
+  const announced: number[] = [];
+  host.removeClient('client');
+  for (let i = 0; i < 60 * 12; i++) {
+    host.update(1000 / 60);
+    for (const ev of host.world.events) {
+      if (ev.kind === EventKind.TankDestroyed) announced.push(ev.a);
+    }
+    net.advance(1000 / 60);
+    client.update(1000 / 60);
+  }
+
+  assert.deepEqual(announced, [1], 'the retirement is a death like any other');
+  assert.equal(host.world.tanks.find((t) => t.id === 1)!.alive, false);
+  assert.equal(client.world.tanks.find((t) => t.id === 1)!.alive, false);
+});
+
+test('a countdown does not survive into the next round', () => {
+  /*
+   * Tank ids are handed out by roster order, so the id a leaver had is handed
+   * to somebody else next round. A countdown that outlived the world it was
+   * started in would retire whoever inherited the id -- a player who had done
+   * nothing but join, killed ten seconds in, for a reason nothing on screen
+   * could explain.
+   */
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
+  const hostT = new LoopbackTransport('host', 'Host', net);
+  new LoopbackTransport('client', 'Client', net);
+  const host = new MatchHost(versusWorld(14), hostT);
+  host.roundBuilder = () => versusWorld(15);
+  host.localTankId = 0;
+  host.addClient('client', 1);
+
+  host.removeClient('client');
+
+  // End the round before the countdown expires: the host takes it, and the
+  // next round is built with a fresh tank 1 that nobody has abandoned.
+  killTank(host.world, host.world.tanks.find((t) => t.id === 1)!, 0);
+  for (let i = 0; i < 60 * 20; i++) host.update(1000 / 60);
+
+  assert.equal(host.match.round, 2, 'a second round started');
+  assert.ok(
+    host.world.tanks.find((t) => t.id === 1)!.alive,
+    'the new occupant of tank 1 is not retired for the last player\u2019s departure',
+  );
 });

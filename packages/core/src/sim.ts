@@ -208,7 +208,15 @@ export function layMine(w: WorldState, tank: Tank): boolean {
   return true;
 }
 
-function killTank(w: WorldState, tank: Tank, killerId: number): void {
+/**
+ * Destroy a tank and record it.
+ *
+ * Exported because the host has one reason to kill a tank that no shell or
+ * mine accounts for: a player who left. Going through here rather than setting
+ * `alive = false` directly is what puts a `TankDestroyed` event in the world,
+ * which is how every client learns about it and how the explosion gets drawn.
+ */
+export function killTank(w: WorldState, tank: Tank, killerId: number): void {
   if (!tank.alive) return;
   tank.alive = false;
   emit(w, EventKind.TankDestroyed, tank.x, tank.y, tank.id, killerId);
