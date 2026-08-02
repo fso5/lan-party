@@ -182,12 +182,20 @@ const browser = await chromium.launch({
   args: ['--no-proxy-server'],
 });
 const errors = [];
+/**
+ * Set once the host is deliberately stopped.
+ *
+ * A browser logs a console error for every failed WebSocket attempt, so the
+ * teardown check would otherwise fail the run with the very noise it is trying
+ * to provoke.
+ */
+let expectingDisconnect = false;
 const pages = [];
 for (let i = 0; i < 2; i++) {
   const p = await browser.newPage({ viewport: { width: 800, height: 600 } });
   p.on('pageerror', (e) => errors.push(`p${i}: ${e.message}`));
   p.on('console', (m) => {
-    if (m.type() === 'error') errors.push(`p${i}: ${m.text()}`);
+    if (m.type() === 'error' && !expectingDisconnect) errors.push(`p${i}: ${m.text()}`);
   });
   // A stable name per browser. The default is random, which is fine for people
   // and useless for asserting which row belongs to whom.
@@ -516,10 +524,34 @@ check(
   'the host must be on the opposing side, or this proves nothing',
 );
 
+/* --- a host that goes away must say something useful --------------------- */
+{
+  // "reconnecting" forever tells a player nothing they can act on. The two
+  // real causes -- wrong network, or the host closed the game -- are both
+  // fixable in seconds if somebody says so.
+  expectingDisconnect = true;
+  await lan.stop();
+  const explained = await pages[0]
+    .waitForFunction(
+      () => {
+        const el = document.getElementById('net-hint');
+        return el && !el.hidden && /host/i.test(el.textContent ?? '');
+      },
+      undefined,
+      { timeout: 20_000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check(explained, 'a client cut off from the host must explain what to do, not just say "reconnecting"');
+  if (explained) {
+    const text = await pages[0].evaluate(() => document.getElementById('net-hint').textContent);
+    console.log('hint shown to a stranded client:', JSON.stringify(text));
+  }
+}
+
 clearInterval(ticking);
 
 await browser.close();
-await lan.stop();
 
 for (const e of errors) failures.push('console error: ' + e);
 if (failures.length) {

@@ -139,6 +139,20 @@ function setNetStatus(s) {
   el.dataset.state = s;
 }
 
+/**
+ * A line of plain English for the states where the status alone strands you.
+ *
+ * "reconnecting" forever tells a player nothing they can act on, and the two
+ * things that actually cause it -- being on the wrong network, or the host
+ * having closed the game -- are both things they can fix in ten seconds if
+ * somebody says so.
+ */
+function setNetHint(text) {
+  const el = document.getElementById('net-hint');
+  el.textContent = text ?? '';
+  el.hidden = !text;
+}
+
 function connectMultiplayer() {
   if (net.socket) return;
   const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
@@ -170,6 +184,8 @@ function connectMultiplayer() {
     // A successful open clears the backoff, so the next drop retries promptly
     // rather than inheriting a long delay from an earlier bad patch.
     reconnectDelay = 0;
+    reconnectFailures = 0;
+    setNetHint(null);
     wantConnection = true;
     const w = new Writer();
     writeLobbyJoin(w, localPlayerName());
@@ -230,10 +246,22 @@ let wantConnection = false;
 const RECONNECT_MIN = 500;
 const RECONNECT_MAX = 5000;
 
+/** Consecutive failed attempts, for deciding when to stop being quiet. */
+let reconnectFailures = 0;
+
+/** Attempts before saying something. About five seconds of backoff. */
+const HINT_AFTER_FAILURES = 4;
+
 function scheduleReconnect() {
   if (!wantConnection || reconnectTimer) return;
   reconnectDelay = reconnectDelay ? Math.min(reconnectDelay * 2, RECONNECT_MAX) : RECONNECT_MIN;
+  reconnectFailures++;
   setNetStatus('reconnecting');
+  if (reconnectFailures >= HINT_AFTER_FAILURES) {
+    setNetHint(
+      "Can't reach the host. Check you're still on their hotspot, and that they haven't closed the game.",
+    );
+  }
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     connectMultiplayer();
@@ -1551,7 +1579,16 @@ loadMap(0);
 // Only look for a host when served over plain HTTP -- that is the LAN test
 // server. Opened from a file or a static host there is nothing to connect to,
 // and attempting it would just flash a failed connection at the player.
-if (location.protocol === 'http:') connectMultiplayer();
+if (location.protocol === 'http:') {
+  connectMultiplayer();
+} else {
+  // The installed web app is served over https, and an https page may not open
+  // a ws:// connection to a local IP -- so multiplayer is not merely absent
+  // here, it is impossible. Saying so beats leaving someone hunting for a
+  // button that cannot exist.
+  setNetStatus('solo');
+  setNetHint('To play with others, open the http:// address the host phone shows.');
+}
 
 // Bluetooth only exists inside the native app; on the web there is no radio to
 // offer, so the button stays hidden rather than dangling as a dead end.

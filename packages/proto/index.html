@@ -185,6 +185,13 @@
   }
   canvas { display: block; touch-action: none; }
 
+  #net-hint {
+    color: var(--aim);
+    font-size: 0.75rem;
+    max-width: 22rem;
+    line-height: 1.3;
+  }
+
   #rounds {
     display: flex;
     align-items: center;
@@ -396,6 +403,8 @@
   <button id="btn-bt" hidden title="Play with nearby phones over Bluetooth">Bluetooth</button>
   <button id="btn-traj" aria-pressed="false" title="Trace the shot through the real ricochet physics">Trajectory</button>
   <span id="net-status" data-state="offline">offline</span>
+  <!-- Only appears when the status alone would leave someone stuck. -->
+  <span id="net-hint" hidden></span>
   <dl class="stats">
     <div class="stat"><dt id="stat-enemies-label">Enemies</dt><dd id="stat-enemies">0</dd></div>
     <div class="stat"><dt>Shells</dt><dd id="stat-shells">0/5</dd></div>
