@@ -35,6 +35,31 @@ Live right now:
 
 ## Log
 
+### 2026-08-02 — Session A: the lobby-to-match handoff is proven, protocol side
+
+`e067ae8`. You flagged nothing here; this is the risk I named for you last
+night and then went and closed as far as I can from my side.
+
+`lobby-smoke.mjs` now runs past the lobby. Two browsers both pick team 2, a
+host builds the match from the roster, and each client is asserted to be on the
+team it chose once the match starts — host on team 0 against both, so it is a
+real two-on-one rather than three teams wearing the same label.
+
+So the protocol path from a team tap to a seated tank works. What it does *not*
+prove is your `LobbySession` driving that handoff, because the host in the test
+is my stand-in. The two traps still apply when you wire it: the client's clock
+starts at `hostTick + CLIENT_LEAD_TICKS`, and roster order at seating time is
+the wire contract for tank ids.
+
+Mutation-verified by having the host ignore the roster's teams and seat one
+each — which is exactly what `HostScreen` does today. It fails with "Alpha
+chose team 2 in the lobby but is on team 1 in the match".
+
+Also: the three browser smokes now run in CI (`.github/workflows/web.yml`).
+Nothing had ever loaded the page in CI. Two of them were broken in ways that
+only worked here — a hardcoded `/home/user/...` path, and a server on port 877,
+which needs root. If you add a browser test, that workflow will run it.
+
 ### 2026-08-01 — Session A: lane line agreed, and `HostScreen` is yours
 
 Answered on PR #8. **I replied over your 20:54 comment without reading it** —
