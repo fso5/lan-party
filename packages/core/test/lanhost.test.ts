@@ -23,6 +23,7 @@ import type { AddressInfo } from 'node:net';
 import {
   DEFAULT_LAN_PORT,
   LanHost,
+  pickHostAddress,
   type TcpConnectionHandlers,
   type TcpServer,
 } from '../src/net/lanhost.js';
@@ -488,4 +489,137 @@ test('the host survives a player vanishing mid-match', { timeout: 20_000 }, asyn
   } finally {
     await lan.stop();
   }
+});
+
+/*
+ * Choosing which address to read out loud.
+ *
+ * The native module returned the first non-loopback IPv4 on the first
+ * interface that was up. A phone hosting a hotspot has several, Java promises
+ * nothing about their order, and cellular commonly comes first -- so the URL
+ * on screen could be an address nobody on the hotspot can reach. Everyone
+ * types it in, nothing happens, and the README blames client isolation.
+ */
+test('the join address prefers the hotspot over the cellular interface', () => {
+  // Ordered the way a Pixel actually reports them while tethering: cellular
+  // first, which is exactly the case that was broken.
+  const address = pickHostAddress([
+    { name: 'rmnet_data0', address: '10.244.18.7' },
+    { name: 'ap0', address: '192.168.43.1' },
+    { name: 'dummy0', address: 'fe80::1' },
+  ]);
+  assert.equal(address, '192.168.43.1');
+});
+
+test('the join address is found whatever the interface is called', () => {
+  // Vendor names vary, which is why the name is a preference and not a filter.
+  // With no recognisable AP name the subnet has to carry it.
+  for (const [name, addr] of [
+    ['swlan0', '192.168.43.1'],
+    ['wlan1', '192.168.1.50'],
+    ['softap0', '172.20.10.1'],
+    ['unheard_of9', '192.168.43.1'],
+  ] as const) {
+    assert.equal(
+      pickHostAddress([
+        { name: 'rmnet_data0', address: '10.121.4.9' },
+        { name, address: addr },
+      ]),
+      addr,
+      `${name} should win over cellular`,
+    );
+  }
+});
+
+test('the join address never offers something unusable', () => {
+  // A link-local v6 literal cannot be read out, 169.254 means configuration
+  // failed, and loopback reaches only the host itself.
+  assert.equal(
+    pickHostAddress([
+      { name: 'lo', address: '127.0.0.1' },
+      { name: 'wlan0', address: 'fe80::4a2:1' },
+      { name: 'eth0', address: '169.254.7.7' },
+    ]),
+    null,
+  );
+  // And nothing at all is null rather than a broken URL.
+  assert.equal(pickHostAddress([]), null);
+});
+
+test('a carrier-grade NAT address loses to an ordinary LAN one', () => {
+  // 100.64/10 is carrier space. It looks private and is not reachable from the
+  // room, which makes it the most convincing wrong answer available.
+  assert.equal(
+    pickHostAddress([
+      { name: 'rmnet1', address: '100.96.3.4' },
+      { name: 'wlan0', address: '192.168.1.23' },
+    ]),
+    '192.168.1.23',
+  );
+});
+
+test('with only one address, that is the answer', () => {
+  // A phone on plain WiFi with no hotspot is a normal way to develop against
+  // this, and must not be scored out of existence.
+  assert.equal(pickHostAddress([{ name: 'wlan0', address: '192.168.0.14' }]), '192.168.0.14');
+  assert.equal(pickHostAddress([{ name: 'rmnet_data0', address: '10.0.0.5' }]), '10.0.0.5');
+});
+
+/*
+ * One signal at a time.
+ *
+ * The cases above are realistic, and that is exactly why they were not enough:
+ * on a real phone the interface name and the address usually agree, so either
+ * signal alone lands on the right answer and removing the other changes
+ * nothing. Three of four mutations survived until these existed.
+ *
+ * These are contrived on purpose. Each pairs candidates whose scores are equal
+ * except for the one signal under test, and puts the *wrong* one first so that
+ * losing the signal means losing the case rather than falling back on order.
+ */
+test('the interface name alone can decide it', () => {
+  // Same address range, so only the name differs.
+  assert.equal(
+    pickHostAddress([
+      { name: 'wlan9', address: '10.6.6.1' },
+      { name: 'ap0', address: '10.5.5.1' },
+    ]),
+    '10.5.5.1',
+    'an access-point interface should win on its name',
+  );
+});
+
+test('a cellular name alone can lose it', () => {
+  assert.equal(
+    pickHostAddress([
+      { name: 'rmnet_data0', address: '10.1.1.1' },
+      { name: 'eth0', address: '10.2.2.2' },
+    ]),
+    '10.2.2.2',
+    'cellular should lose even to an unremarkable interface on the same range',
+  );
+});
+
+test('the tether subnet alone can decide it', () => {
+  // Both are 192.168, so the only thing between them is /24 that Android
+  // tethering has used by default for years.
+  assert.equal(
+    pickHostAddress([
+      { name: 'wlan0', address: '192.168.1.7' },
+      { name: 'wlan5', address: '192.168.43.1' },
+    ]),
+    '192.168.43.1',
+  );
+});
+
+test('carrier-grade NAT alone can lose it', () => {
+  // 100.64/10 against an ordinary 10/8, on two equally unremarkable interface
+  // names, with the carrier address first. Only the range separates them.
+  assert.equal(
+    pickHostAddress([
+      { name: 'eth0', address: '100.96.3.4' },
+      { name: 'eth1', address: '10.1.1.1' },
+    ]),
+    '10.1.1.1',
+  );
 });

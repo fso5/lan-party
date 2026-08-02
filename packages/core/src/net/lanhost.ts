@@ -325,3 +325,69 @@ export class LanHost {
     }
   }
 }
+
+/** One address the device holds, as the platform reports it. */
+export interface AddressCandidate {
+  /** Interface name, e.g. "wlan0", "ap0", "rmnet_data0". */
+  name: string;
+  /** IPv4 or IPv6 literal. */
+  address: string;
+}
+
+/**
+ * Choose the address to read out loud.
+ *
+ * A phone hosting a hotspot has more than one address, and the interesting one
+ * is not first. Alongside the tether interface there is usually a live
+ * cellular interface with a carrier-assigned IPv4, and Java's
+ * `NetworkInterface.getNetworkInterfaces()` makes no promise about order --
+ * cellular commonly comes first. Taking the first non-loopback address, which
+ * is what the native module did, therefore produces a URL that is *reachable
+ * from the internet's point of view and from nobody on the hotspot*. Four
+ * people type it in and get nothing, and the README blames hotspot client
+ * isolation.
+ *
+ * There is no API that says "this is the tether interface", so this scores
+ * candidates on the two things that do correlate and takes the best. Ties keep
+ * the platform's order.
+ *
+ * Deliberately here rather than in Kotlin. The native module's own header says
+ * nothing down there should decide anything, because code on the phone can
+ * only be exercised by two people standing in a room -- and this is a decision
+ * with a table of cases, which is exactly what wants a test.
+ */
+export function pickHostAddress(candidates: readonly AddressCandidate[]): string | null {
+  let best: { score: number; address: string } | null = null;
+
+  for (const c of candidates) {
+    const address = c.address.trim();
+    // IPv6 is skipped rather than scored: a link-local literal is unusable for
+    // the thing this exists for, which is somebody reading it out and somebody
+    // else typing it into Safari.
+    if (!address || address.includes(':')) continue;
+    if (address.startsWith('127.')) continue;
+    // 169.254/16 is what an interface has when configuration failed.
+    if (address.startsWith('169.254.')) continue;
+
+    const name = c.name.toLowerCase();
+    let score = 0;
+
+    // Android's tether interfaces. Names vary by vendor, which is why this is a
+    // preference and not a filter.
+    if (/^(ap\d|swlan|softap|wlan1|p2p-)/.test(name)) score += 4;
+    // Cellular. A perfectly good address that no other phone in the room can
+    // reach.
+    if (/^(rmnet|ccmni|pdp|clat|v4-rmnet|seth_|usb)/.test(name)) score -= 4;
+
+    if (address.startsWith('192.168.43.')) score += 3; // Android's classic tether subnet
+    else if (address.startsWith('192.168.')) score += 2;
+    else if (/^172\.(1[6-9]|2\d|3[01])\./.test(address)) score += 1;
+    else if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(address)) score -= 2; // CGNAT: carrier
+    // 10/8 scores nothing on purpose -- both tethers and carriers use it, so it
+    // carries no signal either way.
+
+    if (!best || score > best.score) best = { score, address };
+  }
+
+  return best?.address ?? null;
+}

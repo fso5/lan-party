@@ -35,8 +35,16 @@ declare class TanksLanNativeModule extends NativeModule<TanksLanEvents> {
   stop(): Promise<void>;
   send(connId: string, dataBase64: string): void;
   close(connId: string): void;
-  /** This device's IPv4 on the local network, for building the join URL. */
+  /**
+   * First non-loopback IPv4. Kept for older native builds; prefer
+   * `getIpCandidates`, because "first" is often the cellular interface.
+   */
   getIpAddress(): string | null;
+  /**
+   * Every address on every interface that is up, unfiltered. Which one to read
+   * out is decided by `pickHostAddress` in @tanks/core, where it has tests.
+   */
+  getIpCandidates(): { name: string; address: string }[];
 }
 
 /**

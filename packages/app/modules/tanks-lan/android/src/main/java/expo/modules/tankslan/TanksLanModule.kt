@@ -104,6 +104,12 @@ class TanksLanModule : Module() {
 
     Function("getIpAddress") { localAddress() }
 
+    // Every address this device holds, unfiltered and in the platform's own
+    // order. Which one to read out is decided in TypeScript -- see
+    // `pickHostAddress` in @tanks/core -- because it is a judgement with a
+    // table of cases, and nothing that needs a test belongs down here.
+    Function("getIpCandidates") { addressCandidates() }
+
     Function("isSupported") { true }
   }
 
@@ -160,12 +166,34 @@ class TanksLanModule : Module() {
   }
 
   /**
-   * This device's address on the local network.
+   * Every address on every interface that is up, in the platform's order.
    *
-   * When the phone is running a hotspot the usable address is on the access
-   * point interface, not on wlan0, so this cannot simply read the WiFi state --
-   * it enumerates and takes the first non-loopback IPv4 it finds. A hotspot
-   * host typically lands on 192.168.43.1.
+   * Reported rather than filtered. When the phone is running a hotspot the
+   * usable address is on the access point interface, not on wlan0, and there is
+   * no API that says which interface that is -- so the choice is a heuristic,
+   * and heuristics belong where they can be tested. See `pickHostAddress`.
+   */
+  private fun addressCandidates(): List<Map<String, String>> {
+    val out = mutableListOf<Map<String, String>>()
+    try {
+      for (iface in NetworkInterface.getNetworkInterfaces()) {
+        if (!iface.isUp || iface.isLoopback) continue
+        for (addr: InetAddress in iface.inetAddresses) {
+          val host = addr.hostAddress ?: continue
+          out.add(mapOf("name" to iface.name, "address" to host))
+        }
+      }
+    } catch (_: Exception) {
+      return out
+    }
+    return out
+  }
+
+  /**
+   * First non-loopback IPv4, kept only as a fallback for an app bundle older
+   * than `getIpCandidates`. It picks whatever the platform happens to list
+   * first, which on a tethering phone is often the cellular interface -- an
+   * address that is perfectly valid and reachable by nobody in the room.
    */
   private fun localAddress(): String? {
     try {

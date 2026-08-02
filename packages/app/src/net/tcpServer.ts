@@ -7,7 +7,7 @@
  * tested without a phone.
  */
 
-import type { TcpConnectionHandlers, TcpServer } from '@tanks/core';
+import { pickHostAddress, type TcpConnectionHandlers, type TcpServer } from '@tanks/core';
 
 import { TanksLanNative } from '../../modules/tanks-lan';
 import { base64ToBytes, bytesToBase64 } from './base64';
@@ -20,8 +20,28 @@ export class NativeTcpServer implements TcpServer {
     this.handlers = handlers;
   }
 
+  /**
+   * The address to put in the URL the host reads out.
+   *
+   * A tethering phone holds several. The cellular one is a perfectly valid
+   * address that nobody in the room can reach, and it is frequently the one the
+   * platform lists first -- so asking for "the IP" produced a URL that failed
+   * for everybody, in a way that looks exactly like a hotspot isolating its
+   * clients. `pickHostAddress` does the choosing, in core, with tests.
+   *
+   * Falls back to the old single-address call, which is all a native build
+   * older than `getIpCandidates` can offer.
+   */
   getIpAddress(): string | null {
-    return TanksLanNative?.getIpAddress() ?? null;
+    const native = TanksLanNative;
+    if (!native) return null;
+    try {
+      const candidates = native.getIpCandidates?.();
+      if (candidates?.length) return pickHostAddress(candidates);
+    } catch {
+      // An older native module has no such function. Fall through.
+    }
+    return native.getIpAddress() ?? null;
   }
 
   async start(port: number): Promise<number> {
