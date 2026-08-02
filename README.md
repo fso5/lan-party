@@ -90,8 +90,13 @@ The game tries to say what to do rather than leaving you guessing:
   for a fixable reason: it is served over HTTPS, and an HTTPS page is not
   allowed to open a connection to a local address. Open the `http://` address
   the host phone shows instead.
-- **Nothing loads at all** — some Android hotspots isolate connected devices
-  from each other. That is a hotspot setting, not the game.
+- **Nothing loads at all** — first check the URL is the hotspot's address and
+  not the phone's mobile-data one. A tethering phone holds both, and until
+  recently the host could read out the wrong one, which fails in exactly this
+  way. It should now start `192.168.`; if the host shows no URL at all it will
+  say so and ask you to turn the hotspot on. Failing that, some Android
+  hotspots isolate connected devices from each other, which is a hotspot
+  setting rather than the game.
 - **An iPhone drops the network** — iOS sometimes abandons a WiFi network with
   no internet. Telling it to stay connected fixes it.
 
@@ -150,7 +155,7 @@ what `net/websocket.ts` is for, and it is why Bluetooth is not the only route.
 
 ```
 npm install
-npm test  --workspace @tanks/core      # 130 tests, headless
+npm test  --workspace @tanks/core      # 141 tests, headless
 npm test  --workspace @tanks/app       # 28 tests
 npm run build --workspace @tanks/proto # -> packages/proto/dist/tanks-proto.html
 npm run smoke --workspace @tanks/proto # drives the built page in a real browser

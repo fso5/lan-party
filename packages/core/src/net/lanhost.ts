@@ -370,20 +370,40 @@ export function pickHostAddress(candidates: readonly AddressCandidate[]): string
     if (address.startsWith('169.254.')) continue;
 
     const name = c.name.toLowerCase();
+
+    /*
+     * Two things are rejected rather than scored, because they are not local
+     * addresses at all -- no phone in the room can reach them however they
+     * rank against the alternatives.
+     *
+     * Returning null when they are all that is left is the useful answer, not
+     * a defeat: the host screen already says "No network address yet. Turn on
+     * your hotspot, then tap Host again", which is exactly the instruction
+     * somebody who has not started tethering needs. Handing them a carrier
+     * address instead produces a URL four people type in for nothing.
+     *
+     * The asymmetry is deliberate. Rejecting a working setup by mistake shows
+     * a hotspot prompt to somebody whose hotspot is on -- irritating, visible,
+     * recoverable. Accepting a carrier address shows a confident URL that
+     * cannot work, with nothing on screen to suggest why.
+     */
+    if (/^(rmnet|ccmni|pdp|clat|v4-rmnet|seth_)/.test(name)) continue;
+    // 100.64/10 is carrier-grade NAT. It looks private, which makes it the
+    // most convincing wrong answer available.
+    if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(address)) continue;
+
     let score = 0;
 
     // Android's tether interfaces. Names vary by vendor, which is why this is a
-    // preference and not a filter.
+    // preference and not a filter. `usb`/`rndis` are deliberately absent from
+    // the rejection above: USB tethering is a real local network, usually on
+    // 192.168.42/24, and rejecting it would break a setup that works.
     if (/^(ap\d|swlan|softap|wlan1|p2p-)/.test(name)) score += 4;
-    // Cellular. A perfectly good address that no other phone in the room can
-    // reach.
-    if (/^(rmnet|ccmni|pdp|clat|v4-rmnet|seth_|usb)/.test(name)) score -= 4;
 
     if (address.startsWith('192.168.43.')) score += 3; // Android's classic tether subnet
     else if (address.startsWith('192.168.')) score += 2;
     else if (/^172\.(1[6-9]|2\d|3[01])\./.test(address)) score += 1;
-    else if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(address)) score -= 2; // CGNAT: carrier
-    // 10/8 scores nothing on purpose -- both tethers and carriers use it, so it
+    // 10/8 scores nothing on purpose -- both tethers and routers use it, so it
     // carries no signal either way.
 
     if (!best || score > best.score) best = { score, address };

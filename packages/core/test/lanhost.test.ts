@@ -558,11 +558,45 @@ test('a carrier-grade NAT address loses to an ordinary LAN one', () => {
   );
 });
 
-test('with only one address, that is the answer', () => {
+test('with only one usable address, that is the answer', () => {
   // A phone on plain WiFi with no hotspot is a normal way to develop against
   // this, and must not be scored out of existence.
   assert.equal(pickHostAddress([{ name: 'wlan0', address: '192.168.0.14' }]), '192.168.0.14');
-  assert.equal(pickHostAddress([{ name: 'rmnet_data0', address: '10.0.0.5' }]), '10.0.0.5');
+  // 10/8 carries no signal either way -- routers and tethers both use it -- so
+  // an unremarkable interface holding one is perfectly acceptable.
+  assert.equal(pickHostAddress([{ name: 'eth0', address: '10.0.0.5' }]), '10.0.0.5');
+});
+
+test('a phone with nothing but cellular gets no URL at all', () => {
+  /*
+   * Not a defeat -- the useful answer. This is what somebody who has not
+   * turned their hotspot on looks like, and the host screen answers a null
+   * URL with "No network address yet. Turn on your hotspot, then tap Host
+   * again", which is exactly the instruction they need.
+   *
+   * The alternative is a confident URL that four people type in for nothing,
+   * with nothing on screen to suggest why.
+   */
+  assert.equal(
+    pickHostAddress([
+      { name: 'rmnet_data0', address: '10.244.18.7' },
+      { name: 'rmnet_data1', address: '100.96.3.4' },
+    ]),
+    null,
+  );
+});
+
+test('USB tethering is a real local network and is not thrown away', () => {
+  // `usb0`/`rndis0` sit next to the cellular interfaces alphabetically and in
+  // spirit, and are the opposite thing: a cable to a device that can reach
+  // this phone. Rejecting them would break a setup that works.
+  assert.equal(
+    pickHostAddress([
+      { name: 'rmnet_data0', address: '10.244.18.7' },
+      { name: 'usb0', address: '192.168.42.129' },
+    ]),
+    '192.168.42.129',
+  );
 });
 
 /*
