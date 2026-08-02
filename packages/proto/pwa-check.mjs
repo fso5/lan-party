@@ -56,8 +56,26 @@ function check(ok, what, detail) {
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript',
   '.webmanifest': 'application/manifest+json', '.png': 'image/png' };
 const root = new URL('./pwa/', import.meta.url).pathname;
+
+/*
+ * Served under a subpath, because that is where it actually lives.
+ *
+ * GitHub Pages puts a project site at `/<repo>/`, not at the root. Serving from
+ * `/` here made the test easier than the deployment in a way that hides a whole
+ * class of mistake: one absolute path -- `/index.html` in the precache list, a
+ * `start_url` of `/` -- resolves correctly at the root and points at somebody
+ * else's site on Pages. `caches.addAll` would reject, the service worker would
+ * never install, and "add to home screen, works offline" would fail silently on
+ * the one route an iPhone has.
+ *
+ * Everything is relative today and this passes. The point is that it now stops
+ * passing the day it is not.
+ */
+const BASE = '/tanks-mobile/';
 const srv = createServer((req, res) => {
   let p = req.url.split('?')[0];
+  if (!p.startsWith(BASE)) { res.writeHead(404); res.end('not under the base path'); return; }
+  p = p.slice(BASE.length - 1);
   if (p === '/') p = '/index.html';
   const file = join(root, p);
   if (!existsSync(file)) { res.writeHead(404); res.end('nope'); return; }
@@ -66,13 +84,34 @@ const srv = createServer((req, res) => {
 });
 await new Promise(r => srv.listen(8099, r));
 
+/*
+ * The manifest, read rather than exercised.
+ *
+ * `start_url` and `scope` decide what a home-screen launch opens, which is the
+ * one thing this test cannot drive -- Playwright loads a page, it does not
+ * install an app. Absolute values here are correct at a domain root and wrong
+ * on Pages, where they would send the tapped icon to somebody else's site, and
+ * every runtime check below would still pass. So they are checked as text.
+ */
+{
+  const manifest = JSON.parse(readFileSync(join(root, 'manifest.webmanifest'), 'utf8'));
+  for (const key of ['start_url', 'scope']) {
+    const v = manifest[key];
+    check(
+      typeof v === 'string' && v.startsWith('.'),
+      `the manifest's ${key} is relative, so it survives being served under a subpath`,
+      `${key} = ${JSON.stringify(v)}`,
+    );
+  }
+}
+
 const b = await chromium.launch({ executablePath: findChrome() });
 const ctx = await b.newContext({ viewport: { width: 844, height: 390 } });
 const p = await ctx.newPage();
 const errs = [];
 p.on('pageerror', e => errs.push(e.message));
 
-await p.goto('http://localhost:8099/');
+await p.goto(`http://localhost:8099${BASE}`);
 await p.waitForFunction(() => navigator.serviceWorker?.controller !== null, null, { timeout: 15000 })
   .catch(() => console.log('  (worker did not take control in time)'));
 const swState = await p.evaluate(async () => {
@@ -91,8 +130,8 @@ console.log('cached:', JSON.stringify(cached));
 // The page itself must be in the cache. Everything else is decoration; without
 // this entry an offline reload has nothing to serve.
 check(
-  cached.entries.some((e) => e === '/' || e === '/index.html'),
-  'the game page itself is cached',
+  cached.entries.some((e) => e === BASE || e === `${BASE}index.html`),
+  'the game page itself is cached, under the path it is served from',
   cached.entries.join(' '),
 );
 

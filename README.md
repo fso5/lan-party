@@ -57,8 +57,8 @@ the browser asks. Built in CI on every push, so there is no laptop anywhere in
 the delivery path.
 
 Every push builds a new APK and attaches it, alongside `tanks.html` — the same
-game as a single 153 KB file that opens in any browser and runs offline. Both
-are generated from source by CI, so neither can go stale.
+game as a single file, around 160 KB, that opens in any browser and runs
+offline. Both are generated from source by CI, so neither can go stale.
 
 ## Playing together
 
