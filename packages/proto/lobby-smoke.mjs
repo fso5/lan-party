@@ -93,7 +93,8 @@ class NodeTcp {
   }
 }
 
-const lan = new LanHost(new NodeTcp(), { page: new Uint8Array(page), port: 0 });
+const tcp = new NodeTcp();
+const lan = new LanHost(tcp, { page: new Uint8Array(page), port: 0 });
 const port = await lan.start();
 
 // A minimal host-side lobby: seat whoever sends Join, honour team changes,
@@ -119,6 +120,14 @@ function broadcastRoster() {
   writeRoster(w, roster);
   lan.transport.broadcast(w.finish(), true);
 }
+
+lan.onPlayerLeave = (peerId) => {
+  const entry = [...peerBySlot.entries()].find(([, id]) => id === peerId);
+  if (!entry) return;
+  peerBySlot.delete(entry[0]);
+  roster.slots = roster.slots.filter((s) => s.slotId !== entry[0]);
+  broadcastRoster();
+};
 
 lan.transport.setEvents({
   onPacket: (from, data) => {
@@ -210,6 +219,44 @@ check(
 // Nobody may share a team: that is the whole reason free-for-all is the default.
 const teamsHeld = roster.slots.map((s) => s.team);
 check(new Set(teamsHeld).size === teamsHeld.length, `teams collided on the host: ${teamsHeld}`);
+
+/* --- a dropped connection must heal itself -------------------------------
+ *
+ * Sockets do not survive an evening on a phone: the screen sleeps, the tab is
+ * suspended, someone walks out of range. Until now a drop was permanent -- the
+ * page went "offline" and the only way back was knowing to reload, which on a
+ * home-screen install is not even an obvious gesture.
+ *
+ * Done before the team tap so the roster ends up in the same shape either way:
+ * Bravo's slot is freed and its rejoin takes the same lowest-unused team.
+ */
+async function waitFor(what, predicate, ms = 15_000) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  failures.push(`timed out waiting for ${what}`);
+  return false;
+}
+
+{
+  const bravo = roster.slots.find((s) => s.name === 'Bravo');
+  const bravoPeer = bravo && peerBySlot.get(bravo.slotId);
+  check(!!bravoPeer, 'Bravo should be seated before being dropped');
+  if (bravoPeer) {
+    tcp.close(bravoPeer);
+    await waitFor('Bravo to drop out of the roster', () => roster.slots.length === 2);
+    await waitFor('Bravo to reconnect on its own', () => roster.slots.length === 3);
+    check(
+      roster.slots.some((s) => s.name === 'Bravo'),
+      'Bravo must come back by itself rather than needing a reload',
+    );
+    console.log('after drop + reconnect:', JSON.stringify(roster.slots.map((s) => `${s.name}=t${s.team}`)));
+    // Let the roster broadcast settle on both pages before the team tap.
+    await pages[0].waitForTimeout(400);
+  }
+}
 
 // Tap a team and confirm the change round-trips through the host rather than
 // being applied locally.

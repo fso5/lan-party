@@ -167,6 +167,10 @@ function connectMultiplayer() {
   // starts immediately ignores it, because MatchHost drops anything that is not
   // an Input packet. So this is safe to send either way.
   sock.addEventListener('open', () => {
+    // A successful open clears the backoff, so the next drop retries promptly
+    // rather than inheriting a long delay from an earlier bad patch.
+    reconnectDelay = 0;
+    wantConnection = true;
     const w = new Writer();
     writeLobbyJoin(w, localPlayerName());
     transport.send('host', w.finish(), true);
@@ -202,11 +206,57 @@ function connectMultiplayer() {
   };
   sock.onerror = () => setNetStatus('offline');
   sock.onclose = () => {
-    setNetStatus('offline');
     net.socket = null;
     net.client = null;
+    scheduleReconnect();
   };
 }
+
+/* --- staying connected ---------------------------------------------------
+ *
+ * A dropped socket used to be permanent: status went to "offline" and the only
+ * way back was knowing to reload the page. On a phone that is not an edge case,
+ * it is the normal course of an evening -- the screen sleeps, the tab gets
+ * suspended, somebody walks to the other end of the garden. Installed to the
+ * home screen there is not even an obvious reload gesture.
+ */
+
+/** Backoff between attempts, in ms. */
+let reconnectDelay = 0;
+let reconnectTimer = null;
+/** Set once we have connected at all, so a solo page never starts polling. */
+let wantConnection = false;
+
+const RECONNECT_MIN = 500;
+const RECONNECT_MAX = 5000;
+
+function scheduleReconnect() {
+  if (!wantConnection || reconnectTimer) return;
+  reconnectDelay = reconnectDelay ? Math.min(reconnectDelay * 2, RECONNECT_MAX) : RECONNECT_MIN;
+  setNetStatus('reconnecting');
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectMultiplayer();
+  }, reconnectDelay);
+}
+
+/**
+ * Retry the moment the page is looked at again.
+ *
+ * Backgrounded tabs get their timers throttled to near-nothing on iOS, so the
+ * backoff alone can leave someone staring at "reconnecting" for many seconds
+ * after unlocking their phone -- exactly when they are watching.
+ */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (!wantConnection || net.socket) return;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  reconnectDelay = 0;
+  connectMultiplayer();
+});
 
 /* --- lobby ---------------------------------------------------------------
  *
