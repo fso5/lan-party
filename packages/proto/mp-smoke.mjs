@@ -16,8 +16,15 @@ import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 
+/**
+ * This container ships a Chromium at a fixed path; CI does not, and installs
+ * one where Playwright expects it. Returning undefined there is correct -- but
+ * readdirSync on a missing directory throws ENOENT, which would have made this
+ * die on the first line in CI rather than fall back.
+ */
 function findChrome() {
   const root = '/opt/pw-browsers';
+  if (!existsSync(root)) return undefined;
   for (const dir of readdirSync(root)) {
     if (!dir.startsWith('chromium-')) continue;
     for (const rel of ['chrome-linux/chrome', 'chrome-linux64/chrome']) {

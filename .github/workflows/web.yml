@@ -1,0 +1,72 @@
+# Drives the built game page in a real browser.
+#
+# The page is not a side artifact: it is the client every iPhone runs, because
+# an iPhone cannot be given the native app without a paid Apple account. Nothing
+# in CI has ever loaded it, so a bundling mistake reaches a phone as a blank
+# screen with a green tick behind it.
+#
+# Deliberately a separate workflow from the APK and Pages builds rather than a
+# step inside them. It needs a browser download, which is the flakiest thing in
+# this repo's CI, and the delivery path must not go red because a Chromium
+# mirror was slow. A failure here is a loud signal; it is not a gate.
+name: Web client
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/proto/**'
+      - 'packages/core/**'
+      - 'package-lock.json'
+      - '.github/workflows/web.yml'
+  pull_request:
+    paths:
+      - 'packages/proto/**'
+      - 'packages/core/**'
+  workflow_dispatch:
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    # Browser runs can hang rather than fail -- a rejected WebSocket handshake
+    # produces no error, the socket simply never opens. Cap it so a hang costs
+    # minutes rather than the job's full default hour.
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # The smokes import @tanks/core through the workspace entry point, which
+      # only exists once it is built.
+      - run: npm run build --workspace @tanks/core
+
+      # Both targets on purpose. A headless launch resolves to the separate
+      # headless-shell build, not to `chromium`, so installing only the latter
+      # fails at launch with "Executable doesn't exist" -- which reads like a
+      # broken test rather than a missing download.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium chromium-headless-shell
+
+      - name: Single player, every map
+        working-directory: packages/proto
+        run: npm run smoke
+
+      # Two real browsers against the real host. Covers the netcode path and the
+      # round HUD, neither of which the single-player run can reach.
+      - name: Two clients against a real host
+        working-directory: packages/proto
+        run: npm run mp:smoke
+
+      # The lobby panel only appears when a host sends a roster, and this is the
+      # only host in the repo that does. Without it the whole lobby path --
+      # join, welcome, roster, team selection -- ships unexercised.
+      - name: Lobby, end to end
+        working-directory: packages/proto
+        run: npm run lobby:smoke
