@@ -687,6 +687,18 @@ document.getElementById('btn-restart').addEventListener('click', () => loadMap(s
 document.getElementById('btn-2p').addEventListener('click', () => {
   setLocalPlayers(state.localPlayers > 1 ? 1 : 2);
 });
+/*
+ * The diagnostics, reachable from a phone.
+ *
+ * `G` toggles the same readout, and that was the only way in -- which meant
+ * the numbers that answer "why will this not play" were unavailable on the
+ * only hardware the game runs on. The build stamp already answers the other
+ * half of that question, so it carries both.
+ */
+document.getElementById('btn-build').addEventListener('click', (e) => {
+  state.showDebug = !state.showDebug;
+  e.currentTarget.setAttribute('aria-pressed', String(state.showDebug));
+});
 document.getElementById('btn-traj').addEventListener('click', (e) => {
   state.showTrajectory = !state.showTrajectory;
   e.currentTarget.setAttribute('aria-pressed', String(state.showTrajectory));

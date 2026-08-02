@@ -387,13 +387,39 @@
     color: var(--ink);
   }
   .hint { display: flex; align-items: center; gap: 0.3rem; }
+  /*
+   * The build stamp doubles as the way into the diagnostics.
+   *
+   * Everything the debug readout shows -- snapshots applied and stale,
+   * reconciles, resyncs, position error -- is exactly what you want when four
+   * people are standing around a hotspot wondering why it will not play, and
+   * it was reachable only by pressing G. No phone has a G.
+   *
+   * This element already means "which build is this phone running", which is
+   * the other half of that same conversation, so it is the honest place to put
+   * it rather than spending a new button on the footer.
+   */
   .build-id {
     margin-left: auto;
     font-family: var(--font-num);
     font-size: 0.62rem;
     opacity: 0.65;
     letter-spacing: 0.03em;
+    background: none;
+    border: 0;
+    color: inherit;
+    padding: 0;
+    /* Extends the tappable area past the text without taking layout space, the
+       same trick the Fire and Mine buttons use -- the footer has no room to
+       spare and the arena should not lose any. */
+    position: relative;
   }
+  .build-id::after {
+    content: '';
+    position: absolute;
+    inset: -0.75rem -0.5rem;
+  }
+  .build-id[aria-pressed='true'] { opacity: 1; text-decoration: underline; }
 
   #lobby {
     position: fixed;
@@ -559,7 +585,13 @@
   <span class="hint desktop-only"><kbd>T</kbd> trajectory</span>
   <span class="hint desktop-only"><kbd>G</kbd> debug</span>
   <span class="hint desktop-only"><kbd>R</kbd> restart</span>
-  <span class="hint build-id" title="Which build this is. Compare against the release notes.">build __BUILD_ID__</span>
+  <button
+    type="button"
+    id="btn-build"
+    class="hint build-id"
+    aria-pressed="false"
+    title="Which build this is. Tap for connection stats."
+  >build __BUILD_ID__</button>
   <span class="hint" style="display:none" id="touch-hint">left thumb drives · right thumb aims and fires</span>
   <span class="hint" id="seat-hint" hidden>2 players: left thumb = blue · right thumb = red · drag to steer, tap to fire</span>
   <div class="touch-buttons">

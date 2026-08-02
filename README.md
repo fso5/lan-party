@@ -100,6 +100,13 @@ The game tries to say what to do rather than leaving you guessing:
 - **An iPhone drops the network** — iOS sometimes abandons a WiFi network with
   no internet. Telling it to stay connected fixes it.
 
+**Tap the build number** in the corner for connection stats: ticks, snapshots
+applied and stale, reconciles, resyncs, position error. Zero snapshots means
+nothing is arriving from the host; a climbing stale count means it is arriving
+too late to use. It was on the `G` key, which is no help on a phone — and a
+phone with no laptop next to it is exactly the situation where the numbers
+matter.
+
 Bluetooth is a separate route that needs no hotspot at all. The native module
 compiles and ships in the APK, but nothing in the JavaScript imports it yet, so
 it is present and unreachable in the current build — and it has never been run

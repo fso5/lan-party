@@ -487,6 +487,51 @@ check(moved[0].dx * moved[1].dx < 0, 'the two seats move independently',
 await phone.screenshot({ path: SCRATCH + '/shot-2p.png' });
 
 /*
+ * ---------------------------------------------------------------------------
+ * The diagnostics, from a phone.
+ * ---------------------------------------------------------------------------
+ *
+ * The debug readout carries the numbers that answer "why will this not play"
+ * -- snapshots applied and stale, reconciles, resyncs, position error -- and
+ * `G` was the only way to it. No phone has a G, so on the one hardware this
+ * game runs on they were unreachable, which matters most on the evening
+ * somebody first tries it on a real hotspot with no laptop in the room.
+ */
+console.log('\ndiagnostics:');
+const buildBtn = await phone.locator('#btn-build').boundingBox();
+check(!!buildBtn, 'the build stamp is on screen');
+if (buildBtn) {
+  const reachable = await phone.evaluate(() => {
+    const el = document.getElementById('btn-build');
+    const r = el.getBoundingClientRect();
+    const cx = r.x + r.width / 2;
+    const cy = r.y + r.height / 2;
+    const reaches = (x, y) => {
+      const hit = document.elementFromPoint(x, y);
+      return !!hit && (hit === el || el.contains(hit) || hit.parentElement === el);
+    };
+    const walk = (dx, dy) => { let n = 0; while (n < 40 && reaches(cx + dx * (n + 1), cy + dy * (n + 1))) n++; return n; };
+    return { onTop: reaches(cx, cy), h: walk(0, -1) + walk(0, 1) + 1 };
+  });
+  check(reachable.onTop, 'the build stamp is the topmost thing at its own centre');
+  check(reachable.h >= 28, 'the build stamp is tall enough to tap', `${reachable.h}px tappable`);
+
+  check(!(await phone.locator('#debug').isVisible()), 'diagnostics start hidden');
+  await tapButton('#btn-build', 93);
+  await phone.waitForTimeout(250);
+  check(await phone.locator('#debug').isVisible(), 'tapping the build stamp shows the diagnostics');
+  const text = await phone.locator('#debug').textContent();
+  console.log('  ', JSON.stringify(text));
+  // Solo has no MatchClient, so the netcode half is absent by design -- but the
+  // sim half has to be real, or the readout is decoration.
+  check(/tick \d+/.test(text ?? ''), 'the readout carries live numbers', text ?? '');
+
+  await tapButton('#btn-build', 94);
+  await phone.waitForTimeout(250);
+  check(!(await phone.locator('#debug').isVisible()), 'and tapping again puts them away');
+}
+
+/*
  * Held upright.
  *
  * The game asks to be played sideways, but nothing stops someone opening the
