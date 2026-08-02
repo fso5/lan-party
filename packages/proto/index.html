@@ -265,7 +265,17 @@
   #lobby-slots li[data-you="true"] .who { font-weight: 700; }
   .lobby-label { color: var(--ink-soft); font-size: 0.8rem; display: block; margin-bottom: 0.35rem; }
   #lobby-team-buttons { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 1rem; }
-  #lobby-team-buttons button { min-width: 2.4rem; }
+  /* Picking a side is the one thing this panel exists for, and on a phone held
+     sideways the compact-chrome rule below shrank these to 38x20 -- under even
+     WCAG's 24px floor, let alone Apple's 44. There is room in a modal, so these
+     get real size rather than an extended hit area. */
+  #lobby-team-buttons button,
+  #btn-ready {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.85rem;
+  }
   #lobby-team-buttons button[aria-pressed="true"] { outline: 2px solid var(--aim); }
   #btn-ready[aria-pressed="true"] { background: #4F8A3D; color: white; }
   .lobby-note { color: var(--ink-soft); font-size: 0.78rem; margin: 0.8rem 0 0; }
@@ -391,6 +401,20 @@
   body[data-seats="2"] #touch-hint { display: none !important; }
   body[data-seats="2"] #stage { border-top: 1px solid var(--hairline); }
   .touch-buttons { display: none; gap: 0.5rem; margin-left: auto; }
+  /*
+   * Fire and Mine get a thumb-sized hit area without a thumb-sized footer.
+   *
+   * Drawn they are ~45x20. Growing the buttons themselves would grow the
+   * footer and shrink the arena, and seeing every bank shot coming is the
+   * whole game -- so the target is extended past the border instead. The
+   * pseudo-element is out of flow, so it costs no layout at all.
+   */
+  .touch-buttons button { position: relative; }
+  .touch-buttons button::after {
+    content: '';
+    position: absolute;
+    inset: -0.75rem -0.4rem;
+  }
 
   /* Coarse pointer: hide the keyboard legend, show thumb buttons. */
   @media (pointer: coarse) {

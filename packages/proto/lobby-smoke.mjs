@@ -190,9 +190,28 @@ const errors = [];
  * to provoke.
  */
 let expectingDisconnect = false;
+/*
+ * One phone, one desktop -- and the phone is the one that picks a team.
+ *
+ * Everyone joining a hosted match does it on a phone, in a browser, held
+ * sideways. Both clients here used to be 800x600 with a mouse, so the lobby --
+ * the only screen where a player chooses a side -- had never been seen at the
+ * size or with the input every real player uses.
+ *
+ * That mattered: the game page shipped with a full-screen overlay covering the
+ * arena and both thumb buttons buried under the canvas, none of which a
+ * mouse-driven desktop viewport could notice.
+ *
+ * Separate contexts rather than pages, because `hasTouch` is a context option
+ * -- and because pages in one context share localStorage, so the two players'
+ * names were racing to write the same key.
+ */
+const PHONE = { viewport: { width: 844, height: 390 }, hasTouch: true };
+const DESKTOP = { viewport: { width: 800, height: 600 } };
 const pages = [];
 for (let i = 0; i < 2; i++) {
-  const p = await browser.newPage({ viewport: { width: 800, height: 600 } });
+  const ctx = await browser.newContext(i === 0 ? PHONE : DESKTOP);
+  const p = await ctx.newPage();
   p.on('pageerror', (e) => errors.push(`p${i}: ${e.message}`));
   p.on('console', (m) => {
     if (m.type() === 'error' && !expectingDisconnect) errors.push(`p${i}: ${m.text()}`);
@@ -302,16 +321,91 @@ async function waitFor(what, predicate, ms = 15_000) {
   }
 }
 
-// Tap a team and confirm the change round-trips through the host rather than
-// being applied locally.
-await pages[0].click('#lobby-team-buttons button:last-child');
+/*
+ * Before tapping anything: is the lobby usable with a thumb on a phone?
+ *
+ * `click()` synthesises a press on whatever the selector matched, so it works
+ * even when the control is buried under something else, off screen, or two
+ * pixels tall. A player's thumb hits whatever is topmost at that pixel. Ask
+ * what is actually there, and how big it is.
+ */
+{
+  const reach = await pages[0].evaluate(() => {
+    /*
+     * Measure the region a thumb can actually land on, not the box.
+     *
+     * A control can be visually small and still comfortable to hit if its
+     * touch area is extended past its border -- so walking outward from the
+     * centre asking "does this pixel still reach the button?" measures what a
+     * player experiences, where `getBoundingClientRect()` measures what the
+     * designer drew. It also stops the check from forcing chunky buttons into
+     * a layout where vertical space is genuinely contested.
+     */
+    const probe = (sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return { sel, missing: true };
+      const r = el.getBoundingClientRect();
+      const cx = r.x + r.width / 2;
+      const cy = r.y + r.height / 2;
+      const reaches = (x, y) => {
+        const hit = document.elementFromPoint(x, y);
+        return !!hit && (hit === el || el.contains(hit) || hit.parentElement === el);
+      };
+      const walk = (dx, dy) => {
+        let n = 0;
+        while (n < 40 && reaches(cx + dx * (n + 1), cy + dy * (n + 1))) n++;
+        return n;
+      };
+      const hit = document.elementFromPoint(cx, cy);
+      const tapW = walk(-1, 0) + walk(1, 0) + 1;
+      const tapH = walk(0, -1) + walk(0, 1) + 1;
+      return {
+        sel,
+        onTop: reaches(cx, cy),
+        hit: hit ? `${hit.tagName.toLowerCase()}${hit.id ? '#' + hit.id : ''}` : 'nothing',
+        inView: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth,
+        // 28px: below every published minimum (WCAG 2.5.8 wants 24, Apple 44,
+        // Material 48), so this only fires on a control that is genuinely hard
+        // to hit rather than merely tighter than a guideline prefers.
+        big: Math.min(tapW, tapH) >= 28,
+        size: `${Math.round(r.width)}x${Math.round(r.height)} drawn, ${tapW}x${tapH} tappable`,
+      };
+    };
+    return ['#lobby-team-buttons button:last-child', '#btn-ready'].map(probe);
+  });
+  for (const r of reach) {
+    check(!r.missing, `${r.sel} is missing from the lobby`);
+    if (r.missing) continue;
+    check(r.onTop, `${r.sel} is not the topmost thing at its own centre (${r.hit} is)`);
+    check(r.inView, `${r.sel} is off screen on a phone -- a thumb cannot reach it`);
+    check(r.big, `${r.sel} is ${r.size} on a phone, too small to hit reliably`);
+  }
+  console.log('phone lobby reachability:', JSON.stringify(reach));
+}
+
+// The panel itself must fit the phone sideways. It is `max-height: 86vh` with
+// its own scroll, so a roster that overflows is survivable -- a panel wider
+// than the screen is not.
+{
+  const wide = await pages[0].evaluate(() => {
+    const r = document.querySelector('#match-lobby .panel').getBoundingClientRect();
+    return { over: Math.round(r.width - innerWidth), w: Math.round(r.width), vw: innerWidth };
+  });
+  check(wide.over <= 0, `the lobby panel is ${wide.w}px wide on a ${wide.vw}px screen`);
+}
+
+/*
+ * Tap a team with a real touch, and confirm the change round-trips through the
+ * host rather than being applied locally.
+ */
+await pages[0].tap('#lobby-team-buttons button:last-child');
 await pages[0].waitForTimeout(600);
 const afterTeam = await read(pages[0]);
 const chosen = afterTeam.teams.findIndex((t) => t.on);
 check(chosen === afterTeam.teams.length - 1, `team change did not round-trip (selected ${chosen})`);
 
 // Ready likewise.
-await pages[0].click('#btn-ready');
+await pages[0].tap('#btn-ready');
 await pages[0].waitForTimeout(600);
 const afterReady = await read(pages[0]);
 check(afterReady.ready === 'Ready', `ready did not round-trip (button says "${afterReady.ready}")`);

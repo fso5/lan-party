@@ -156,14 +156,27 @@ check(!(await phone.locator('.desktop-only').first().isVisible()), 'keyboard leg
  * looked right, and every tap went to the aim stick. Ask what is actually at
  * the pixel instead.
  */
-const buried = await phone.evaluate(() =>
-  ['#btn-fire', '#btn-mine'].filter((sel) => {
+const reach = await phone.evaluate(() =>
+  ['#btn-fire', '#btn-mine'].map((sel) => {
     const el = document.querySelector(sel);
     const r = el.getBoundingClientRect();
-    const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-    return hit !== el && !el.contains(hit);
+    const cx = r.x + r.width / 2;
+    const cy = r.y + r.height / 2;
+    const reaches = (x, y) => {
+      const hit = document.elementFromPoint(x, y);
+      return !!hit && (hit === el || el.contains(hit) || hit.parentElement === el);
+    };
+    const walk = (dx, dy) => { let n = 0; while (n < 40 && reaches(cx + dx * (n + 1), cy + dy * (n + 1))) n++; return n; };
+    // The tappable extent, not the drawn box: these are ~45x20 on purpose, and
+    // their target is extended past the border so the footer -- and therefore
+    // the arena -- keeps its size.
+    return { sel, onTop: reaches(cx, cy), w: walk(-1, 0) + walk(1, 0) + 1, h: walk(0, -1) + walk(0, 1) + 1 };
   }));
+const buried = reach.filter((r) => !r.onTop).map((r) => r.sel);
 check(buried.length === 0, 'the thumb buttons are on top, not under the arena', `buried: ${buried.join(', ')}`);
+const small = reach.filter((r) => Math.min(r.w, r.h) < 28);
+check(small.length === 0, 'the thumb buttons are big enough to hit',
+  small.map((r) => `${r.sel} ${r.w}x${r.h} tappable`).join(', ') || reach.map((r) => `${r.sel} ${r.w}x${r.h}`).join(' '));
 
 // The arena must not spill past the stage that sizes it -- that overflow is
 // what buried the buttons, and it is invisible until something lands on it.
