@@ -150,20 +150,46 @@ what `net/websocket.ts` is for, and it is why Bluetooth is not the only route.
 
 ```
 npm install
-npm test  --workspace @tanks/core      # 119 tests, headless
+npm test  --workspace @tanks/core      # 130 tests, headless
 npm test  --workspace @tanks/app       # 28 tests
 npm run build --workspace @tanks/proto # -> packages/proto/dist/tanks-proto.html
 npm run smoke --workspace @tanks/proto # drives the built page in a real browser
 npm run mp:smoke    --workspace @tanks/proto  # two browsers against a real host
 npm run lobby:smoke --workspace @tanks/proto  # the lobby, teams, and a round change
+npm run pwa:check   --workspace @tanks/proto  # the installed app, with the network cut
 npm run serve --workspace @tanks/proto  # single-player, serve on your LAN
 npm run mp    --workspace @tanks/proto  # multiplayer: host + serve on your LAN
 ```
 
-The three browser runs are the only things that exercise the multiplayer client
-at all — the scoreboard and the lobby are both invisible in solo play, so
-nothing else can reach them. They run in CI on every change to the game or the
-core.
+The browser runs are the only things that exercise the multiplayer client at
+all — the scoreboard and the lobby are both invisible in solo play, so nothing
+else can reach them. They run in CI on every change to the game or the core.
+
+### Checking that a test would fail
+
+```
+tools/mutate.sh <file> "<command>" "<old text>" "<new text>" ["label"]
+```
+
+Breaks something on purpose, runs the command, and puts the file back. Exit 0
+means the mutation was caught, 1 means nothing covers it, and 9 means the text
+was not found so the run proves nothing.
+
+That last one is the whole reason this is a script rather than a one-liner.
+Every mutation here started as a `perl -0pi -e s///`, and a pattern that
+matched nothing failed silently — reporting that the code had survived when
+nothing had been changed. Two map checks "survived" that way before the
+miscounted pattern turned up. A harness that cannot tell *the code survived*
+from *I changed nothing* manufactures confidence in tests that do not have it,
+which is worse than not checking.
+
+Most tests in this repo have been through it. A few things genuinely are not
+covered and are recorded as such rather than papered over — removing
+`skipWaiting()` from the service worker changes nothing, because the worker
+ends up controlling the reload anyway, and removing the cache-hit branch of
+its fetch handler changes nothing either, because the page is one
+self-contained file and the navigate fallback serves the only request there
+is.
 
 `mp` runs the authoritative host in Node and serves the page; open the printed
 URL on two phones and they play each other. Everything above the transport is
