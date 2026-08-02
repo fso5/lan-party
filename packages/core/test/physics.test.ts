@@ -209,3 +209,54 @@ test('swept collision catches a shell that would pass through in one step', () =
   const miss = sweepCircleHit(0, 0, 2, 0, 0.12, 1, 1, 0.38);
   assert.equal(miss, false);
 });
+
+/**
+ * Every versus arena must treat its spawns identically.
+ *
+ * Nothing enforced this. The three shipped maps happen to be perfectly
+ * symmetric -- measured before writing the test: each spawn on Crossfire and
+ * The Moat sees exactly two others down an open line, each spawn on Pillars
+ * sees exactly one, and on all three the nearest other spawn is 11.0 tiles
+ * away from wherever you start.
+ *
+ * That is a property worth keeping rather than re-deriving. Asymmetric spawns
+ * are the classic mistake when adding an arena, and the cost lands entirely on
+ * one player: whoever starts in the open dies first, every round, and reads it
+ * as the game being unfair rather than the map. Nobody playing has any way to
+ * see that coming.
+ *
+ * Missions are deliberately exempt. One player against scripted enemies is
+ * asymmetric on purpose.
+ */
+test('every versus arena gives all four spawns the same start', async () => {
+  const { loadArena, VERSUS_MAPS } = await import('../src/maps/index.js');
+
+  for (const map of VERSUS_MAPS) {
+    const a = loadArena(map);
+    assert.ok(a.spawns.length >= 2, `${map.name} needs spawns to compare`);
+
+    const sightlines = a.spawns.map((s) =>
+      a.spawns.filter((t) => t !== s && a.hasShellLineOfSight(s.x, s.y, t.x, t.y)).length,
+    );
+    assert.equal(
+      new Set(sightlines).size,
+      1,
+      `${map.name}: spawns are exposed unequally -- sightlines to other spawns are [${sightlines}]. ` +
+        `Whoever starts in the open loses every round and cannot tell why.`,
+    );
+
+    // Distance to the nearest neighbour, rounded to a tenth of a tile. Being
+    // closer to the fight than everyone else is the other way a start is
+    // unfair, and it is invisible on the map.
+    const nearest = a.spawns.map((s) =>
+      Math.min(
+        ...a.spawns.filter((t) => t !== s).map((t) => Math.round(Math.hypot(s.x - t.x, s.y - t.y) * 10) / 10),
+      ),
+    );
+    assert.equal(
+      new Set(nearest).size,
+      1,
+      `${map.name}: one spawn starts closer to the fight than the others -- nearest neighbours are [${nearest}]`,
+    );
+  }
+});
