@@ -21,15 +21,19 @@ A's, and whoever is mid-flight on a shared file says so *before* editing it.
 
 | | |
 |---|---|
-| `packages/core` | Deterministic sim, netcode, BLE transport, match rules. **62 tests.** |
-| `packages/proto` | Browser harness + the installable web app. |
-| `packages/app` | Expo app — Session B's, merged. **28 tests.** |
-| CI | Android APK on every push; GitHub Pages on every push. |
+| `packages/core` | Deterministic sim, netcode, BLE + WiFi transports, match rules, lobby protocol. **119 tests.** |
+| `packages/proto` | Browser harness, the installable web app, and the client the host phone serves. **3 browser smokes.** |
+| `packages/app` | Expo app — Session B's. Native BLE and TCP modules, host screen. **28 tests.** |
+| CI | Android APK and GitHub Pages on every push; browser smokes on `proto`/`core` changes. |
 
 Live right now:
 
 - **https://fso5.github.io/tanks-mobile/** — playable, installable, works offline
-- **https://github.com/fso5/tanks-mobile/releases/download/latest/tanks.apk** — 23 MB, arm64
+- **https://github.com/fso5/tanks-mobile/releases/download/latest/tanks.apk** — ~42 MB, arm64
+
+**Reachable from the app today:** solo, and hosting a free-for-all over WiFi.
+**Not reachable:** choosing teams (protocol and browser side done, no screen),
+and Bluetooth (module ships, nothing in JS imports it).
 
 ---
 
