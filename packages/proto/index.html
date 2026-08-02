@@ -1,4 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Tanks! — physics prototype</title>
+
+<!--
+  The three lines above are what make this page behave like a phone game
+  rather than a desktop page shrunk to fit. None of them were here.
+
+  **viewport** is the one a player would notice. Without it a phone browser
+  assumes a page written for a desktop: it lays out at 980 CSS pixels and then
+  scales the result down to fit the screen. On a 390px phone that is 40% --
+  the arena, the buttons and every number in the HUD rendered at well under
+  half the size they were designed at, on the device this game is *for*.
+
+  It also means the browser tests here were describing a layout no phone ever
+  rendered. Playwright's `isMobile` turns this emulation on, and it was left
+  off precisely because it made `innerWidth` 980 and threw the touch
+  coordinates out -- which was the bug reporting itself, read as a quirk of
+  the harness.
+
+  **doctype** because without one the page renders in quirks mode
+  (`document.compatMode === 'BackCompat'`), which changes the box model out
+  from under every measurement in the stylesheet.
+
+  **charset** because this file is published as a standalone download meant to
+  be opened from disk, where there is no `Content-Type` header to carry it.
+  Chromium sniffs UTF-8 correctly today; the em dash in the title above and
+  the arrows on the map buttons depend on every other browser doing the same.
+  (Served over the LAN it is already declared -- `LanHost` sends
+  `text/html; charset=utf-8` -- so this covers the file:// case only.)
+-->
 
 <style>
   /* `hidden` has to actually hide.
@@ -98,6 +129,22 @@
 
   body {
     margin: 0;
+    /*
+     * A definite height, not just a minimum.
+     *
+     * With only `min-height` the column has no fixed budget to divide, so when
+     * its contents are taller it simply grows -- and `#stage`'s contents are a
+     * canvas whose height `resize()` copies *from `#stage`*. That is circular:
+     * the canvas is as tall as the stage, and the stage is as tall as the
+     * canvas, so the pair settles wherever it happened to start. Quirks mode
+     * landed on 259px and standards mode on 291px, which pushed the footer --
+     * the Fire and Mine buttons -- off the bottom of a 390px screen entirely.
+     *
+     * Fixing the height gives the flex layout a real budget to distribute, so
+     * the stage is whatever is left after the header and footer and the canvas
+     * has to follow it rather than argue with it.
+     */
+    height: 100dvh;
     min-height: 100dvh;
     display: flex;
     flex-direction: column;

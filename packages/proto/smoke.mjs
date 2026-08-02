@@ -101,13 +101,25 @@ await p.close();
  * A phone, held sideways, driven with two thumbs.
  * ---------------------------------------------------------------------------
  *
- * `hasTouch` without `isMobile`: `isMobile` turns on meta-viewport emulation,
- * which lays the page out at 980px and then scales it, so CSS coordinates stop
- * matching the coordinates touch events are dispatched in. Every tap then lands
- * somewhere other than where the test aimed it, and the failure looks like the
- * game ignoring input.
+ * `isMobile: true` turns on meta-viewport emulation, which is what every phone
+ * browser does -- so it is the only configuration that describes a player.
+ *
+ * It used to be off. With it on, `innerWidth` came back 980 on an 844px screen
+ * and every touch coordinate landed somewhere other than where the test aimed
+ * it. That read like a quirk of the harness. It was the page reporting a
+ * missing `<meta name="viewport">`: without one a phone browser assumes a
+ * desktop page, lays out at 980 CSS pixels, and scales the result down -- to
+ * 40% in portrait, where the Fire button came out 19x10 physical pixels.
+ *
+ * So every touch check written before that meta landed was measuring a layout
+ * no phone ever rendered. With `width=device-width` the layout viewport is the
+ * device again, CSS pixels are device pixels, and the coordinates line up.
  */
-const ctx = await b.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true });
+const ctx = await b.newContext({
+  viewport: { width: 844, height: 390 },
+  hasTouch: true,
+  isMobile: true,
+});
 const phone = await ctx.newPage();
 const phoneErrors = [];
 phone.on('console', m => { if (m.type()==='error') phoneErrors.push(m.text()); });
@@ -116,6 +128,38 @@ await phone.goto(PAGE);
 await phone.waitForTimeout(700);
 
 console.log('\nphone, touch:');
+
+/*
+ * The page must lay out at the size of the phone holding it.
+ *
+ * Checked first because everything below is measured in CSS pixels, and if the
+ * layout viewport is not the device then those pixels are not what a player
+ * sees -- they get scaled by however far 980 is from the screen. A touch-target
+ * check passing in a coordinate space that is then shrunk to 40% is worse than
+ * no check at all: it reports comfort the player does not get.
+ */
+const layout = await phone.evaluate(() => ({
+  inner: innerWidth,
+  standards: document.compatMode === 'CSS1Compat',
+  viewportMeta: document.querySelector('meta[name=viewport]')?.content ?? null,
+}));
+check(layout.inner === 844, 'the page lays out at the width of the phone',
+  `innerWidth ${layout.inner} on an 844px screen -- missing or wrong viewport meta (${layout.viewportMeta})`);
+check(layout.standards, 'the page renders in standards mode, not quirks',
+  'no doctype -- the box model shifts under every rule in the stylesheet');
+
+/*
+ * Nothing may sit below the fold. `body` is `overflow: hidden`, so anything
+ * past the bottom edge is not scrolled to -- it is simply gone, and the footer
+ * is where Fire and Mine live.
+ */
+const fits = await phone.evaluate(() => ({
+  body: Math.round(document.body.getBoundingClientRect().height),
+  screen: innerHeight,
+  footerBottom: Math.round(document.querySelector('footer').getBoundingClientRect().bottom),
+}));
+check(fits.footerBottom <= fits.screen + 1, 'the whole page fits the screen',
+  `body ${fits.body}px and footer ends at ${fits.footerBottom}px on a ${fits.screen}px screen`);
 
 /*
  * Nothing marked `hidden` may be on screen.
@@ -441,6 +485,48 @@ check(moved[0].dx * moved[1].dx < 0, 'the two seats move independently',
   `dx ${moved[0].dx.toFixed(2)} and ${moved[1].dx.toFixed(2)}`);
 
 await phone.screenshot({ path: SCRATCH + '/shot-2p.png' });
+
+/*
+ * Held upright.
+ *
+ * The game asks to be played sideways, but nothing stops someone opening the
+ * link portrait -- and that is how a link gets opened first, before anyone has
+ * read anything. It does not have to be good, but it does have to be playable:
+ * the controls reachable, the page not spilling off an edge, and no errors.
+ * Portrait is also where the missing viewport meta hurt most, scaling the page
+ * to 40%, so it is worth holding the line here specifically.
+ */
+console.log('\nheld upright:');
+await phone.setViewportSize({ width: 390, height: 844 });
+await phone.waitForTimeout(500);
+const upright = await phone.evaluate(() => {
+  const probe = (sel) => {
+    const el = document.querySelector(sel);
+    const r = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return { sel, onTop: !!hit && (hit === el || el.contains(hit) || hit.parentElement === el), r: `${Math.round(r.width)}x${Math.round(r.height)}` };
+  };
+  const cv = document.getElementById('arena').getBoundingClientRect();
+  const st = document.getElementById('stage').getBoundingClientRect();
+  return {
+    inner: innerWidth,
+    overflowX: document.documentElement.scrollWidth - innerWidth,
+    footerBottom: Math.round(document.querySelector('footer').getBoundingClientRect().bottom),
+    screen: innerHeight,
+    arenaSpill: Math.round(cv.bottom - st.bottom),
+    buttons: ['#btn-fire', '#btn-mine'].map(probe),
+  };
+});
+console.log('  ', JSON.stringify(upright));
+check(upright.inner === 390, 'portrait lays out at the width of the phone', `innerWidth ${upright.inner}`);
+check(upright.overflowX <= 0, 'nothing spills off the side in portrait', `${upright.overflowX}px over`);
+check(upright.footerBottom <= upright.screen + 1, 'the page still fits the screen in portrait',
+  `footer ends at ${upright.footerBottom} on a ${upright.screen}px screen`);
+check(upright.arenaSpill <= 1, 'the arena still fits its stage in portrait', `${upright.arenaSpill}px over`);
+check(upright.buttons.every((b) => b.onTop), 'the thumb buttons stay reachable in portrait',
+  upright.buttons.filter((b) => !b.onTop).map((b) => b.sel).join(', '));
+await phone.screenshot({ path: SCRATCH + '/shot-portrait.png' });
+
 check(phoneErrors.length === 0, 'no console errors on the phone page', phoneErrors.join(' | '));
 
 await b.close();
