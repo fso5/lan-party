@@ -346,6 +346,101 @@ check(afterMine.alive, 'the player is alive for the mine check');
 check(afterMine.mines > beforeMine.mines, 'the Mine button lays a mine', `mines ${beforeMine.mines} -> ${afterMine.mines}`);
 
 await phone.screenshot({ path: SCRATCH + '/shot-touch.png' });
+
+/*
+ * ---------------------------------------------------------------------------
+ * Two players on one phone.
+ * ---------------------------------------------------------------------------
+ *
+ * The release notes tell people to tap 2P for this, and nothing had ever
+ * exercised it with the input it is for. It is a different code path from solo
+ * -- `gatherSeatInput` per seat rather than one `gatherInput` -- where each
+ * thumb owns a whole tank instead of half the controls, and the two must not
+ * bleed into each other. Sharing a screen is the only multiplayer that needs
+ * no second device at all, so it is the one that works everywhere.
+ */
+console.log('\ntwo players, one phone:');
+await tapButton('#btn-2p', 92);
+await phone.waitForTimeout(400);
+
+const seats = await phone.evaluate(() => ({
+  attr: document.body.dataset.seats,
+  pressed: document.getElementById('btn-2p').getAttribute('aria-pressed'),
+  seatHint: !document.getElementById('seat-hint').hidden
+    && getComputedStyle(document.getElementById('seat-hint')).display !== 'none',
+  soloHint: getComputedStyle(document.getElementById('touch-hint')).display !== 'none',
+  humans: window.__state.world.tanks.filter((t) => t.kind === 0).length,
+}));
+check(seats.attr === '2' && seats.pressed === 'true', 'the 2P button switches to two seats', JSON.stringify(seats));
+check(seats.humans === 2, 'two human tanks are seated', `got ${seats.humans}`);
+// One legend or the other, never both: they describe contradictory controls,
+// and `#seat-hint` was one of the elements the `hidden` bug used to leak.
+check(seats.seatHint && !seats.soloHint, 'couch play shows its own legend and hides the solo one',
+  `seat=${seats.seatHint} solo=${seats.soloHint}`);
+
+/*
+ * Both thumbs at once, each steering its own tank in a different direction.
+ *
+ * The seats share one `input` object -- seat 0 reads `driveStick`, seat 1 reads
+ * `aimStick` -- so a mistake there shows up as both tanks following one thumb,
+ * or one seat freezing. Driving them apart is what makes that visible; driving
+ * them the same way would look identical either way.
+ */
+const twoTanks = () => phone.evaluate(() => {
+  const w = window.__state.world;
+  return w.tanks.filter((t) => t.kind === 0).sort((a, b) => a.id - b.id)
+    .map((t) => ({ id: t.id, x: t.x, y: t.y, alive: t.alive }));
+});
+/*
+ * Retried, because couch play always seats two AI tanks alongside the two
+ * humans -- every versus map has four spawns and `loadMap` fills the spare
+ * ones. A stationary seat is dead in about a second, so a single attempt makes
+ * this test a coin flip on the AI's aim rather than a check on the controls.
+ *
+ * Restarting immediately before driving buys the full window back; the retry
+ * covers the case where a seat is shot inside it anyway. Failing all three
+ * attempts is itself worth knowing -- it would mean a seat cannot reliably
+ * survive long enough to move.
+ */
+let moved = null;
+for (let attempt = 1; attempt <= 3 && !moved; attempt++) {
+  await freshRound();
+  const before2p = await twoTanks();
+  await send('touchStart', pts(LEFT.x, LEFT.y, 10));
+  await send('touchStart', [...pts(LEFT.x, LEFT.y, 10), ...pts(RIGHT.x, RIGHT.y, 11)]);
+  /*
+   * Driven apart horizontally, not vertically.
+   *
+   * Both seats spawn along the top of every versus map, so "up" is straight
+   * into the wall -- seat 0 managed 0.12 tiles against it while seat 1 drove
+   * freely, and the check read as a dead left thumb. Inward is the axis they
+   * both have room on.
+   */
+  for (let i = 1; i <= 5; i++) {
+    await send('touchMove', [
+      ...pts(LEFT.x + i * 11, LEFT.y, 10),   // seat 0 drives right
+      ...pts(RIGHT.x - i * 11, RIGHT.y, 11), // seat 1 drives left
+    ]);
+    await phone.waitForTimeout(30);
+  }
+  await phone.waitForTimeout(200);
+  const after2p = await twoTanks();
+  await send('touchEnd', []);
+  const m = after2p.map((t, i) => ({ id: t.id, dx: t.x - before2p[i].x, alive: t.alive }));
+  console.log(`  attempt ${attempt}:`, JSON.stringify(m.map((x) => `${x.id}:dx${x.dx.toFixed(2)}${x.alive ? '' : ' DEAD'}`)));
+  if (m.every((x) => x.alive)) moved = m;
+  else if (attempt === 3) moved = m;
+}
+check(moved.every((m) => m.alive), 'both seats survive long enough to move',
+  moved.filter((m) => !m.alive).map((m) => `seat ${m.id} died`).join(', '));
+check(moved[0].dx > 0.2, 'the left thumb drives seat one', `seat 0 dx ${moved[0].dx.toFixed(2)}`);
+check(moved[1].dx < -0.2, 'the right thumb drives seat two', `seat 1 dx ${moved[1].dx.toFixed(2)}`);
+// The point of two sticks: opposite directions at the same time, not one tank
+// dragging the other along.
+check(moved[0].dx * moved[1].dx < 0, 'the two seats move independently',
+  `dx ${moved[0].dx.toFixed(2)} and ${moved[1].dx.toFixed(2)}`);
+
+await phone.screenshot({ path: SCRATCH + '/shot-2p.png' });
 check(phoneErrors.length === 0, 'no console errors on the phone page', phoneErrors.join(' | '));
 
 await b.close();
