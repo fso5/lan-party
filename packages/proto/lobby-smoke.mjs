@@ -388,6 +388,122 @@ for (const [i, p] of pages.entries()) {
   );
 }
 
+/* --- round two, over a real socket ---------------------------------------
+ *
+ * The round-restart path is where the worst bug of the night lived: nothing
+ * rebuilt the world between rounds, so one win swept a whole best-of-three in
+ * about six seconds with nobody playing. That is fixed and covered by core
+ * tests over a loopback transport -- but a round *transition* has never been
+ * driven over a real socket with real browsers, and the client half of it
+ * (rebuild the world from a fresh MatchStart, mid-match) is the part those
+ * tests cannot reach.
+ */
+{
+  // Both clients share a team, so either one names the winning side.
+  const clientTeamId = [...expectedTeam.values()][0].team;
+  const roundSeed = (round) => seed + round * 7919;
+  match.roundBuilder = (round) =>
+    createWorld({ arena, seed: roundSeed(round), players, bots: [] });
+
+  match.onRoundStart = (nextWorld, round) => {
+    // Same roster, so tank ids are unchanged and everyone keeps their seat.
+    roster.slots.forEach((slot, i) => {
+      const peer = peerBySlot.get(slot.slotId);
+      if (!peer) return;
+      const w = new Writer();
+      writeMatchStart(w, {
+        mapId: map.id,
+        seed: roundSeed(round),
+        hostTick: nextWorld.tick,
+        yourTankId: i,
+        players,
+        bots: [],
+      });
+      lan.transport.send(peer, w.finish(), true);
+    });
+  };
+
+  /*
+   * Mark each client's arena before the round ends.
+   *
+   * Checking that the tanks are alive again is *not* enough, and I only found
+   * that by mutating the host to skip the round-two MatchStart and watching the
+   * test still pass. Snapshots carry alive flags, so an un-rebuilt client gets
+   * its tanks revived anyway -- while keeping round one's arena and shell state.
+   * The tanks look right and the walls disagree, which is the worst kind of
+   * desync because nothing on screen says anything is wrong.
+   *
+   * A rebuilt world comes from loadArena, so it erases this. A
+   * snapshot-patched one does not.
+   */
+  const scribbles = await Promise.all(
+    pages.map((p) =>
+      p.evaluate(() => {
+        const a = window.__state.world.arena;
+        const i = Math.floor(a.tiles.length / 2);
+        const before = a.tiles[i];
+        a.tiles[i] = before === 0 ? 2 : 0;
+        return { i, before };
+      }),
+    ),
+  );
+
+  // Kill the host so the clients' team takes the round.
+  for (const t of match.world.tanks) if (t.team === world.tanks[0].team) t.alive = false;
+
+  const reachedRoundTwo = await waitFor(
+    'the host to start round two',
+    () => match.match.round === 2 && match.world.tanks.every((t) => t.alive),
+    20_000,
+  );
+  check(reachedRoundTwo, 'the host must begin a second round on a fresh world');
+
+  if (reachedRoundTwo) {
+    check(match.match.score.get(clientTeamId) === 1, 'the winning team should have one round');
+
+    // The clients have to follow. A client that misses the new MatchStart sits
+    // watching a finished round while the match carries on without it.
+    for (const [i, p] of pages.entries()) {
+      const name = ['Alpha', 'Bravo'][i];
+      const want = expectedTeam.get(name);
+      const followed = await p
+        .waitForFunction(
+          (id) => {
+            const w = window.__state?.world;
+            const me = w?.tanks.find((t) => t.id === id);
+            return !!me && me.alive && w.tanks.every((t) => t.alive);
+          },
+          want.tankId,
+          { timeout: 15_000 },
+        )
+        .then(() => true)
+        .catch(() => false);
+      check(followed, `${name} did not follow the host into round two`);
+
+      if (followed) {
+        const team = await p.evaluate(
+          (id) => window.__state.world.tanks.find((t) => t.id === id)?.team,
+          want.tankId,
+        );
+        check(
+          team === want.team,
+          `${name} was on team ${want.team} in round one and ${team} in round two`,
+        );
+
+        const rebuilt = await p.evaluate(
+          ({ i, before }) => window.__state.world.arena.tiles[i] === before,
+          scribbles[i],
+        );
+        check(
+          rebuilt,
+          `${name} kept round one's arena -- the world was never rebuilt, only patched by snapshots`,
+        );
+      }
+    }
+    console.log(`round two: host round=${match.match.round}, both clients followed with their teams intact`);
+  }
+}
+
 // Both browsers picked the same team, so the match must genuinely be 2v1 --
 // not three one-player teams wearing the same label.
 const clientTeams = [...expectedTeam.values()].map((v) => v.team);
