@@ -34,10 +34,45 @@ function findChrome() {
   }
 }
 
-const srv = spawn('node', ['server.mjs'], { env: { ...process.env, PORT: '877' }, stdio: 'pipe' });
-srv.stdout.on('data', d => process.stdout.write('  [srv] ' + d));
-srv.stderr.on('data', d => process.stdout.write('  [srv!] ' + d));
-await new Promise(r => setTimeout(r, 4000));
+/**
+ * Port 8137, not 877.
+ *
+ * Anything below 1024 is privileged. This ran as root in the container it was
+ * written in, so 877 bound fine; on a CI runner the bind fails with EACCES, the
+ * server dies, and the symptom is the *browser* reporting connection refused --
+ * which points at the test rather than at the port.
+ */
+const PORT = process.env.PORT || '8137';
+const srv = spawn('node', ['server.mjs'], { env: { ...process.env, PORT }, stdio: 'pipe' });
+const srvLog = [];
+srv.stdout.on('data', (d) => { srvLog.push(d.toString()); process.stdout.write('  [srv] ' + d); });
+srv.stderr.on('data', (d) => { srvLog.push(d.toString()); process.stdout.write('  [srv!] ' + d); });
+srv.on('exit', (code) => { if (code) srvLog.push(`server exited with code ${code}\n`); });
+
+// Wait for the port to answer rather than for a guessed interval. A fixed sleep
+// is a race that a cold CI runner loses -- server.mjs rebuilds the page before
+// it listens -- and it fails as a browser error rather than as "server slow".
+{
+  const deadline = Date.now() + 60_000;
+  for (;;) {
+    if (srv.exitCode !== null) {
+      console.error('server exited before listening:\n' + srvLog.join(''));
+      process.exit(1);
+    }
+    if (Date.now() > deadline) {
+      console.error('server never listened within 60s:\n' + srvLog.join(''));
+      srv.kill();
+      process.exit(1);
+    }
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT}/`);
+      if (res.ok) break;
+    } catch {
+      /* not up yet */
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
 
 const b = await chromium.launch({ executablePath: findChrome() });
 const errors = [];
@@ -46,7 +81,7 @@ for (let i = 0; i < 2; i++) {
   const p = await b.newPage({ viewport: { width: 800, height: 500 } });
   p.on('pageerror', e => errors.push(`p${i}: ${e.message}`));
   p.on('console', m => { if (m.type() === 'error') errors.push(`p${i}: ${m.text()}`); });
-  await p.goto('http://localhost:877/');
+  await p.goto(`http://127.0.0.1:${PORT}/`);
   pages.push(p);
   await p.waitForTimeout(1200);
 }
