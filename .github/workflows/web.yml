@@ -70,3 +70,15 @@ jobs:
       - name: Lobby, end to end
         working-directory: packages/proto
         run: npm run lobby:smoke
+
+      # The installable version, with the network switched off mid-test.
+      #
+      # `pages.yml` builds this and deploys it without ever loading it, so a
+      # service worker that caches the wrong thing ships green and fails as a
+      # blank page -- on the one occasion the player has no network to retry
+      # with. It belongs here rather than in the deploy for the reason at the
+      # top of this file: it needs the browser, and the delivery path must not
+      # be gated on that download.
+      - name: Installed, with no network
+        working-directory: packages/proto
+        run: npm run pwa:check

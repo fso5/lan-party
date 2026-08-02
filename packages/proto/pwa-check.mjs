@@ -4,19 +4,53 @@
  * Loads the page, waits for the service worker to install, then blocks every
  * network request and reloads. If the game still renders and ticks, offline is
  * real rather than merely configured.
+ *
+ * This is the "add to home screen, works on a train" path, and until now
+ * nothing ran it in CI -- `pages.yml` builds the PWA and deploys it without
+ * ever loading it. A service worker that caches the wrong thing deploys green
+ * and fails as a blank page, on the one occasion the player has no network to
+ * retry with.
+ *
+ * Runs in `web.yml` rather than in the deploy, deliberately: it needs a
+ * browser download, which is the flakiest thing in this repo's CI, and the
+ * delivery path must not go red because a Chromium mirror was slow.
+ *
+ * `localhost` is not laziness here, unlike in the other smokes. Service
+ * workers require a secure context, and a browser grants that to localhost and
+ * to HTTPS -- which is Pages. A phone loading the game from another phone's
+ * hotspot over plain http gets no service worker at all, and does not need
+ * one: it is being handed the page by the host.
  */
 import { chromium } from 'playwright';
 import { createServer } from 'node:http';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, extname } from 'node:path';
 
+/**
+ * The container ships a Chromium at a fixed path; CI does not, and installs one
+ * where Playwright expects it. Returning undefined there is correct -- but
+ * `readdirSync` on a missing directory throws ENOENT, which would kill this on
+ * its first line in CI rather than fall back.
+ */
 function findChrome() {
-  for (const d of readdirSync('/opt/pw-browsers')) {
+  const root = '/opt/pw-browsers';
+  if (!existsSync(root)) return undefined;
+  for (const d of readdirSync(root)) {
     if (!d.startsWith('chromium-')) continue;
     for (const r of ['chrome-linux/chrome', 'chrome-linux64/chrome']) {
-      const p = `/opt/pw-browsers/${d}/${r}`;
+      const p = `${root}/${d}/${r}`;
       if (existsSync(p)) return p;
     }
+  }
+  return undefined;
+}
+
+const failures = [];
+function check(ok, what, detail) {
+  if (ok) console.log(`  ok   ${what}`);
+  else {
+    console.log(`  FAIL ${what}${detail ? ` -- ${detail}` : ''}`);
+    failures.push(what);
   }
 }
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript',
@@ -46,6 +80,7 @@ const swState = await p.evaluate(async () => {
   return { active: !!r?.active, scope: r?.scope };
 });
 console.log('service worker:', JSON.stringify(swState));
+check(swState.active, 'the service worker installed and became active');
 
 const cached = await p.evaluate(async () => {
   const names = await caches.keys();
@@ -53,12 +88,29 @@ const cached = await p.evaluate(async () => {
   return { cache: names[0], entries: (await c.keys()).map(r => new URL(r.url).pathname) };
 });
 console.log('cached:', JSON.stringify(cached));
+// The page itself must be in the cache. Everything else is decoration; without
+// this entry an offline reload has nothing to serve.
+check(
+  cached.entries.some((e) => e === '/' || e === '/index.html'),
+  'the game page itself is cached',
+  cached.entries.join(' '),
+);
 
 // Now cut the network entirely and reload.
 await ctx.setOffline(true);
 srv.close();
-await p.reload();
+// A reload that cannot be served throws `net::ERR_FAILED` rather than
+// returning, and an unhandled rejection here is the failure reported as a
+// stack trace instead of as the sentence below -- which is the whole point of
+// the test. Catch it and let the checks say what happened.
+let reloadError = null;
+try {
+  await p.reload();
+} catch (err) {
+  reloadError = err instanceof Error ? err.message : String(err);
+}
 await p.waitForTimeout(1500);
+check(!reloadError, 'the page reloads at all with the server gone', reloadError ?? '');
 
 const offline = await p.evaluate(() => ({
   title: document.title,
@@ -67,6 +119,15 @@ const offline = await p.evaluate(() => ({
   tanks: window.__state?.world?.tanks?.length ?? 0,
 }));
 console.log('OFFLINE reload:', JSON.stringify(offline));
-console.log(offline.tick > 0 ? '>>> works with no network' : '>>> FAILED offline');
-console.log(errs.length ? 'errors: ' + errs.join('; ') : 'no page errors');
+// A tick above zero is the whole claim: the page loaded from cache, the bundle
+// ran, and the simulation is advancing with the server shut down.
+check(offline.tick > 0, 'the game runs with no network at all', `tick ${offline.tick}`);
+check(offline.tanks > 0, 'and with a real world behind it', `${offline.tanks} tanks`);
+check(errs.length === 0, 'no page errors offline', errs.join('; '));
+
 await b.close();
+
+console.log(failures.length ? `\n${failures.length} FAILED: ${failures.join(', ')}` : '\nworks with no network');
+// Exits non-zero. It used to print ">>> FAILED offline" and exit 0, so a PWA
+// that could not open without a network still showed a green tick.
+if (failures.length) process.exit(1);
