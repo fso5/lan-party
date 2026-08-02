@@ -278,8 +278,24 @@ export class MatchClient {
 
     if (kind === NetEvent.ShellSpawn) {
       const s = readShellSpawn(r);
-      // Do not double-add a shell our own prediction already created.
-      if (this.world.shells.some((x) => (x.id & 0xff) === s.shellId)) return;
+      /*
+       * Do not double-add a shell our own prediction already created.
+       *
+       * Matched on owner as well as id, because the id on the wire is only the
+       * low eight bits and a stranger's shell can land on the same byte. The
+       * shells this can legitimately duplicate are the ones we predicted, and
+       * we only ever predict our own -- so anyone else's spawn is never a
+       * duplicate, whatever byte it arrives with.
+       *
+       * Dropping a spawn is not cosmetic: clients simulate shells locally from
+       * this event, so a shell dropped here exists on the host, kills you
+       * there, and is never drawn on your phone.
+       */
+      if (
+        this.world.shells.some((x) => (x.id & 0xff) === s.shellId && x.ownerId === s.ownerId)
+      ) {
+        return;
+      }
 
       // The whole trajectory follows from here. This is the payoff for the
       // deterministic physics: ten bytes buys every bounce this shell will

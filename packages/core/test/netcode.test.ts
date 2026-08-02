@@ -13,7 +13,7 @@ import {
 } from '../src/net/loopback.js';
 import { MatchHost } from '../src/net/host.js';
 import { MatchClient } from '../src/net/client.js';
-import { Writer, writeInput } from '../src/net/protocol.js';
+import { Writer, writeInput, writeShellSpawn } from '../src/net/protocol.js';
 
 function versusWorld(seed = 42) {
   return createWorld({
@@ -405,5 +405,120 @@ test('a countdown does not survive into the next round', () => {
   assert.ok(
     host.world.tanks.find((t) => t.id === 1)!.alive,
     'the new occupant of tank 1 is not retired for the last player\u2019s departure',
+  );
+});
+
+/**
+ * A shell whose id happens to share its low byte with another live one must
+ * still arrive.
+ *
+ * The client skips a spawn it thinks it already predicted, and it recognised
+ * one by the eight bits of id the wire carries. Any other tank's shell landing
+ * on the same low byte was therefore dropped -- and a dropped spawn is not a
+ * cosmetic problem, because clients simulate shells locally: the shell exists
+ * on the host, kills you there, and was never drawn on your phone.
+ *
+ * Measured before changing anything: forty full free-for-all rounds used at
+ * most 53 entity ids each, and ids restart every round, so 256 is not reached
+ * in normal play. This is not a bug anyone has hit. It is a severe consequence
+ * behind a thin margin, and the dedupe was looser than it needed to be -- a
+ * shell the client predicted is always one of its *own*, so the owner belongs
+ * in the comparison. A genuine duplicate still matches; a stranger's shell no
+ * longer does.
+ */
+test('a spawn is not dropped just because its low byte is taken', () => {
+  const world = versusWorld(21);
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
+  new LoopbackTransport('host', 'Host', net);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  const client = new MatchClient(cloneWorld(world), clientT, 'host', 0);
+
+  // A live shell belonging to the local tank, id 7.
+  client.world.shells.push({
+    id: 7,
+    ownerId: 0,
+    team: 0,
+    x: 5,
+    y: 5,
+    vx: 1,
+    vy: 0,
+    radius: 0.12,
+    bouncesLeft: 1,
+    bornTick: client.world.tick,
+    selfArmDelay: 8,
+  });
+
+  // The opponent fires. Their shell is entity 263, which the wire carries as 7.
+  const w = new Writer(16);
+  writeShellSpawn(w, {
+    shellId: 263 & 0xff,
+    ownerId: 1,
+    x: 12,
+    y: 6,
+    angle: 0,
+    bounces: 1,
+    tick: client.world.tick,
+  });
+  clientT.setEvents({});
+  client.handlePacket('host', w.finish());
+
+  const mine = client.world.shells.filter((s) => s.ownerId === 0);
+  const theirs = client.world.shells.filter((s) => s.ownerId === 1);
+  assert.equal(mine.length, 1, 'our own predicted shell is untouched');
+  assert.equal(theirs.length, 1, 'and the opponent’s shell exists on our phone too');
+});
+
+test('our own predicted shell is still not added twice', () => {
+  // The other half of the contract. Loosening the dedupe must not let the
+  // host's copy of a shot we already predicted become a second shell -- a
+  // phantom that only the shooter sees, travelling alongside the real one.
+  const world = versusWorld(22);
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  new LoopbackTransport('host', 'Host', net);
+  const client = new MatchClient(cloneWorld(world), clientT, 'host', 0);
+
+  client.world.shells.push({
+    id: 7, ownerId: 0, team: 0, x: 5, y: 5, vx: 1, vy: 0,
+    radius: 0.12, bouncesLeft: 1, bornTick: client.world.tick, selfArmDelay: 8,
+  });
+
+  const w = new Writer(16);
+  writeShellSpawn(w, { shellId: 7, ownerId: 0, x: 5, y: 5, angle: 0, bounces: 1, tick: client.world.tick });
+  clientT.setEvents({});
+  client.handlePacket('host', w.finish());
+
+  assert.equal(client.world.shells.filter((s) => s.ownerId === 0).length, 1, 'one shell, not two');
+});
+
+test('an opponent’s second shell arrives while their first is still flying', () => {
+  // The other half again, from the id's side. A tank may have five shells in
+  // the air at once, so matching on owner alone would drop every one after the
+  // first -- invisible on your phone, lethal on the host's.
+  const world = versusWorld(23);
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  new LoopbackTransport('host', 'Host', net);
+  const client = new MatchClient(cloneWorld(world), clientT, 'host', 0);
+  clientT.setEvents({});
+
+  for (const shellId of [11, 12]) {
+    const w = new Writer(16);
+    writeShellSpawn(w, {
+      shellId,
+      ownerId: 1,
+      x: 12,
+      y: 6,
+      angle: 0,
+      bounces: 1,
+      tick: client.world.tick,
+    });
+    client.handlePacket('host', w.finish());
+  }
+
+  assert.equal(
+    client.world.shells.filter((s) => s.ownerId === 1).length,
+    2,
+    'both of the opponent’s shells are on our phone',
   );
 });
