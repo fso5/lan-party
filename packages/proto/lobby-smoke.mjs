@@ -20,10 +20,15 @@ import { fileURLToPath } from 'node:url';
 import {
   LanHost,
   LobbyOp,
+  MatchHost,
   MsgType,
   Reader,
+  VERSUS_MAPS,
   Writer,
+  createWorld,
+  loadArena,
   writeLobbyWelcome,
+  writeMatchStart,
   writeRoster,
 } from '@tanks/core';
 
@@ -159,6 +164,10 @@ for (let i = 0; i < 2; i++) {
   p.on('console', (m) => {
     if (m.type() === 'error') errors.push(`p${i}: ${m.text()}`);
   });
+  // A stable name per browser. The default is random, which is fine for people
+  // and useless for asserting which row belongs to whom.
+  const name = ['Alpha', 'Bravo'][i];
+  await p.addInitScript((n) => localStorage.setItem('tanks.name', n), name);
   await p.goto(`http://127.0.0.1:${port}/`);
   pages.push(p);
 }
@@ -223,6 +232,93 @@ check(
   'the other player must see the first one become ready',
 );
 
+/* --- the handoff out of the lobby ----------------------------------------
+ *
+ * The point of the whole feature: a team picked in the lobby has to be the team
+ * you are actually on once the match starts. Nothing else tests that. The
+ * lobby could round-trip perfectly and the match still seat everyone
+ * one-per-team, and every existing check would pass.
+ *
+ * After the tap above the roster is Host=t0, Alpha=t2, Bravo=t2 -- a genuine
+ * two-on-one rather than the default one-team-each.
+ */
+const map = VERSUS_MAPS[roster.mapId] ?? VERSUS_MAPS[0];
+const arena = loadArena(map);
+// Roster order is the wire contract: tank ids come from creation order, so
+// players must be built in exactly this order on every device.
+const players = roster.slots.map((slot, i) => ({ team: slot.team, spawnIndex: i }));
+const seed = 0xa11ce;
+const world = createWorld({ arena, seed, players, bots: [] });
+
+// Constructing this replaces the lobby's onPacket, which is correct now that
+// the lobby is done -- same key, last writer wins.
+const match = new MatchHost(world, lan.transport);
+match.localTankId = world.tanks[0].id;
+
+const expectedTeam = new Map(); // page index -> team chosen in the lobby
+roster.slots.forEach((slot, i) => {
+  const peer = peerBySlot.get(slot.slotId);
+  if (!peer) return; // slot 0 is the host itself
+  match.addClient(peer, i);
+  expectedTeam.set(slot.name, { tankId: i, team: slot.team });
+  const w = new Writer();
+  writeMatchStart(w, {
+    mapId: map.id,
+    seed,
+    hostTick: world.tick,
+    yourTankId: i,
+    players,
+    bots: [],
+  });
+  lan.transport.send(peer, w.finish(), true);
+});
+console.log('starting match with roster:', JSON.stringify(roster.slots.map((s) => `${s.name}=t${s.team}`)));
+
+// Drive the host so snapshots actually flow while the clients settle.
+const ticking = setInterval(() => match.update(1000 / 60), 16);
+
+for (const [i, p] of pages.entries()) {
+  const name = ['Alpha', 'Bravo'][i];
+  const want = expectedTeam.get(name);
+  try {
+    await p.waitForFunction(
+      (id) => {
+        const w = window.__state?.world;
+        return !!w && w.tanks.some((t) => t.id === id) && document.getElementById('match-lobby').hidden;
+      },
+      want.tankId,
+      { timeout: 15_000 },
+    );
+  } catch {
+    failures.push(`${name}: never entered the match after MatchStart`);
+    continue;
+  }
+
+  const seenTeam = await p.evaluate(
+    (id) => window.__state.world.tanks.find((t) => t.id === id)?.team,
+    want.tankId,
+  );
+  console.log(`${name}: tank ${want.tankId} team ${seenTeam} (chose ${want.team})`);
+  check(
+    seenTeam === want.team,
+    `${name} chose team ${want.team} in the lobby but is on team ${seenTeam} in the match`,
+  );
+}
+
+// Both browsers picked the same team, so the match must genuinely be 2v1 --
+// not three one-player teams wearing the same label.
+const clientTeams = [...expectedTeam.values()].map((v) => v.team);
+check(
+  new Set(clientTeams).size === 1,
+  `both clients should share a team for this check, got ${clientTeams}`,
+);
+check(
+  world.tanks[0].team !== clientTeams[0],
+  'the host must be on the opposing side, or this proves nothing',
+);
+
+clearInterval(ticking);
+
 await browser.close();
 await lan.stop();
 
@@ -231,4 +327,4 @@ if (failures.length) {
   console.error('FAILED:\n  ' + failures.join('\n  '));
   process.exit(1);
 }
-console.log('lobby smoke passed: roster rendered, team and ready round-tripped through the host');
+console.log('lobby smoke passed: roster rendered, team and ready round-tripped, and the chosen teams survived into the match');
