@@ -11,10 +11,14 @@ import {
   Writer,
   dequantPos,
   quantPos,
+  MAX_LOBBY_SLOTS,
+  readShellSpawn,
   readSnapshot,
   writeInput,
+  writeShellSpawn,
   writeSnapshot,
 } from '../src/net/protocol.js';
+import { TANK_SPECS } from '../src/tuning.js';
 
 /**
  * Bounds checking.
@@ -178,4 +182,51 @@ test('the published entry point exists and exports runtime values', async () => 
   ]) {
     assert.equal(typeof mod[name], 'function', `${name} must be exported`);
   }
+});
+
+/**
+ * The wire format's fixed-width fields against the game that has to fit in
+ * them.
+ *
+ * `writeShellSpawn` packs the bounce count into two bits and the owner into
+ * four, and both are written with a mask -- so a value that does not fit is
+ * not rejected, it is silently truncated. The shell then arrives describing a
+ * different trajectory from the one the host fired, and since clients simulate
+ * shells locally rather than receiving their positions, the divergence is
+ * visible in play: a shell that stops bouncing on one phone and carries on
+ * upon another.
+ *
+ * Nothing in the game exceeds either field today. This exists so the day
+ * someone adds a shell that ricochets four times, or seats a ninth player,
+ * that shows up here rather than as an argument about whose phone is wrong.
+ * Flagged by the other session reading protocol.ts (issue #2, finding 3).
+ */
+test('every shell profile and player slot fits the bits the wire gives it', () => {
+  const BOUNCE_BITS = 2;
+  const OWNER_BITS = 4;
+  const maxBounces = (1 << BOUNCE_BITS) - 1;
+  const maxOwner = (1 << OWNER_BITS) - 1;
+
+  for (const [kind, spec] of Object.entries(TANK_SPECS)) {
+    assert.ok(
+      spec.shell.maxBounces <= maxBounces,
+      `tank kind ${kind} fires a shell with ${spec.shell.maxBounces} bounces; ` +
+        `the wire field holds ${maxBounces}. Widen it -- the packed byte has spare bits.`,
+    );
+  }
+
+  // Tank ids come from the roster order, so the last seat is the largest id.
+  assert.ok(
+    MAX_LOBBY_SLOTS - 1 <= maxOwner,
+    `${MAX_LOBBY_SLOTS} lobby slots means an owner id up to ${MAX_LOBBY_SLOTS - 1}, ` +
+      `and the wire field holds ${maxOwner}`,
+  );
+
+  // And the masking really is silent, which is why the check above exists.
+  const w = new Writer();
+  writeShellSpawn(w, { shellId: 1, ownerId: 0, x: 1, y: 1, angle: 0, bounces: maxBounces + 1, tick: 0 });
+  const r = new Reader(w.finish());
+  r.u8();
+  r.u8();
+  assert.equal(readShellSpawn(r).bounces, 0, 'an over-wide bounce count wraps rather than failing');
 });

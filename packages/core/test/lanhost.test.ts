@@ -27,6 +27,7 @@ import {
   type TcpServer,
 } from '../src/net/lanhost.js';
 import { WsOpcode } from '../src/net/websocket.js';
+import { MsgType, Reader, Writer, readInput, writeInput } from '../src/net/protocol.js';
 import { BridgeTransport } from '../src/net/bridge.js';
 import { MatchHost } from '../src/net/host.js';
 import { MatchClient } from '../src/net/client.js';
@@ -207,6 +208,82 @@ test('one corrupt frame drops that player and nobody else', async () => {
   assert.deepEqual(errors, ['frame']);
   assert.ok(tcp.closed.includes('c1'));
   assert.deepEqual(host.playerIds, ['c2'], 'the other player keeps playing');
+});
+
+test('a well-framed packet with a short payload drops that player and nobody else', async () => {
+  /*
+   * The framing guard above is not enough. A frame can be perfectly legal
+   * WebSocket and still carry a payload the game protocol cannot read -- an
+   * `Input` header with no input behind it -- and that throws out of `Reader`
+   * inside the dispatch, past the framing try/catch, and out of the socket
+   * callback that delivered it. On the host phone that is an unhandled error
+   * on the JS thread: the match ends for everyone because one device sent
+   * eight bad bytes.
+   *
+   * It does not take malice. A tab reloading mid-write, or a player on a page
+   * cached from an older build, produces exactly this. And anything else on
+   * the hotspot can simply connect to the port and send whatever it likes.
+   */
+  const tcp = new FakeTcp();
+  const host = await makeHost(tcp);
+  const errors: string[] = [];
+  host.onError = (where) => errors.push(where);
+
+  // Exactly what MatchHost.handlePacket does with an incoming packet.
+  let delivered = 0;
+  host.transport.setEvents({
+    onPacket: (_from, data) => {
+      const r = new Reader(data);
+      if (r.u8() !== MsgType.Input) return;
+      readInput(r);
+      delivered++;
+    },
+  });
+
+  for (const id of ['c1', 'c2']) {
+    tcp.handlers.onConnection(id);
+    tcp.feed(id, upgradeRequest());
+  }
+  assert.equal(host.playerIds.length, 2);
+
+  // MsgType.Input and then nothing. Legal frame, unreadable message.
+  tcp.feed('c1', clientFrame(Uint8Array.from([MsgType.Input])));
+
+  assert.deepEqual(errors, ['packet'], 'the bad packet is reported, not thrown');
+  assert.ok(tcp.closed.includes('c1'), 'the sender is dropped -- it is not speaking this protocol');
+  assert.deepEqual(host.playerIds, ['c2'], 'the other player keeps playing');
+
+  // And the host is still usable afterwards.
+  const w = new Writer();
+  writeInput(w, { tick: 5, moveX: 0, moveY: 0, aimX: 1, aimY: 0, fire: false, layMine: false });
+  tcp.feed('c2', clientFrame(w.finish()));
+  assert.equal(delivered, 1, 'a good packet after a bad one still gets through');
+  assert.equal(errors.length, 1, 'and reports nothing');
+});
+
+test('a lobby that throws while seating a player costs that player, not the host', async () => {
+  /*
+   * `onPlayerJoin` is an app callback -- a lobby seating the new arrival --
+   * and it runs inside the socket read that delivered the handshake. A bug
+   * there is one player's problem; without a guard it becomes an unhandled
+   * error on the host's JS thread and ends the match for everybody.
+   */
+  const tcp = new FakeTcp();
+  const host = await makeHost(tcp);
+  const errors: string[] = [];
+  host.onError = (where) => errors.push(where);
+  host.onPlayerJoin = (peer) => {
+    if (peer.id === 'c1') throw new Error('lobby is full');
+  };
+
+  for (const id of ['c1', 'c2']) {
+    tcp.handlers.onConnection(id);
+    tcp.feed(id, upgradeRequest());
+  }
+
+  assert.deepEqual(errors, ['receive'], 'reported rather than thrown');
+  assert.ok(tcp.closed.includes('c1'));
+  assert.deepEqual(host.playerIds, ['c2'], 'the next player still gets in');
 });
 
 test('an endless request head is cut off rather than buffered forever', async () => {

@@ -180,7 +180,30 @@ export class LanHost {
     }
   }
 
+  /**
+   * Everything a socket read can reach, behind one net.
+   *
+   * The guards inside `pump` handle the two cases with a sensible recovery and
+   * a name worth reporting. This is the backstop for everything else on the
+   * path -- notably `onPlayerJoin`, which is an app callback (a lobby seating
+   * the new player) invoked straight from a socket read. A throw anywhere in
+   * here reaches the platform as an unhandled error on the JS thread, and on
+   * the host phone that ends the match for every player at once.
+   *
+   * One connection is always the cheaper thing to lose than the host, so the
+   * rule is absolute and stated in one place rather than argued per call site.
+   */
   private receive(id: string, data: Uint8Array): void {
+    try {
+      this.receiveOrThrow(id, data);
+    } catch (err) {
+      this.onError?.('receive', err instanceof Error ? err.message : String(err));
+      this.tcp.close(id);
+      this.drop(id);
+    }
+  }
+
+  private receiveOrThrow(id: string, data: Uint8Array): void {
     const conn = this.conns.get(id);
     if (!conn) return;
 
@@ -260,7 +283,39 @@ export class LanHost {
 
     for (const msg of messages) {
       if (msg.opcode === WsOpcode.Binary) {
-        this.transport.receive(conn.id, msg.data);
+        /*
+         * The framing guard above is not enough on its own.
+         *
+         * A frame can be perfectly legal WebSocket and still carry a payload
+         * the game protocol cannot read -- an `Input` header with no input
+         * behind it. `Reader` is bounds-checked and throws, which is right,
+         * but the throw comes back out through here and out of the socket
+         * callback that delivered the bytes. On the host phone that is an
+         * unhandled error on the JS thread: the match ends for *everyone*
+         * because one device sent a few bad bytes.
+         *
+         * It does not take malice to reach. A tab reloading mid-write, or a
+         * player whose browser cached the page from an older build, produces
+         * exactly this -- and anything else on the hotspot can just open the
+         * port and send whatever it likes.
+         *
+         * Same verdict as a framing error, for the same reason: a peer that
+         * cannot speak this protocol will not start, so drop that one
+         * connection and keep hosting. Catching everything rather than only
+         * protocol errors is deliberate -- the cost of a mistake in a game
+         * handler is one player's connection, and the cost of not catching it
+         * is the host, so the asymmetry only points one way.
+         */
+        try {
+          this.transport.receive(conn.id, msg.data);
+        } catch (err) {
+          this.onError?.('packet', err instanceof Error ? err.message : String(err));
+          this.tcp.close(conn.id);
+          this.drop(conn.id);
+          // The rest of this batch belongs to a connection that no longer
+          // exists; delivering it would reach handlers for a departed peer.
+          return;
+        }
       } else if (msg.opcode === WsOpcode.Ping) {
         this.tcp.send(conn.id, encodeFrame(msg.data, WsOpcode.Pong));
       } else if (msg.opcode === WsOpcode.Close) {
