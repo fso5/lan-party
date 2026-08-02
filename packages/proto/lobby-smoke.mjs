@@ -538,7 +538,7 @@ roster.slots.forEach((slot, i) => {
 console.log('starting match with roster:', JSON.stringify(roster.slots.map((s) => `${s.name}=t${s.team}`)));
 
 // Drive the host so snapshots actually flow while the clients settle.
-const ticking = setInterval(() => match.update(1000 / 60), 16);
+let ticking = setInterval(() => match.update(1000 / 60), 16);
 
 for (const [i, p] of pages.entries()) {
   const name = NAMES[i];
@@ -717,6 +717,56 @@ for (const [i, p] of pages.entries()) {
     'a client must be on the host\u2019s own side',
   );
   console.log('match shape:', shape, '(team -> tanks)');
+}
+
+/* --- the host's phone going to sleep ------------------------------------- */
+{
+  /*
+   * The single most likely thing to happen at a kitchen table: the host puts
+   * their phone down and the screen locks.
+   *
+   * Nothing disconnects. The host's socket threads hold every connection open
+   * while the loop that steps the match stops, so snapshots cease. Each client
+   * keeps predicting its own tank perfectly and every other tank stands still
+   * -- which looks exactly like everyone else quitting at once, and
+   * "reconnecting" never appears because nothing dropped.
+   *
+   * Stopping the interval is precisely that: the transport stays up, the host
+   * simply stops stepping.
+   */
+  clearInterval(ticking);
+
+  const told = await pages[0]
+    .waitForFunction(
+      () => {
+        const el = document.getElementById('net-hint');
+        return el && !el.hidden && /gone to sleep/i.test(el.textContent ?? '');
+      },
+      undefined,
+      { timeout: 15_000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check(told, 'a frozen match must say the host went quiet, not just stop');
+  if (told) {
+    const text = await pages[0].evaluate(() => document.getElementById('net-hint').textContent);
+    console.log('hint shown while the host is asleep:', JSON.stringify(text));
+  }
+
+  // And it clears the moment the host is back, or it becomes furniture.
+  ticking = setInterval(() => match.update(1000 / 60), 16);
+  const cleared = await pages[0]
+    .waitForFunction(
+      () => {
+        const el = document.getElementById('net-hint');
+        return !el || el.hidden || !/gone to sleep/i.test(el.textContent ?? '');
+      },
+      undefined,
+      { timeout: 15_000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  check(cleared, 'the hint must go away when the host wakes up');
 }
 
 /* --- somebody arriving after the match started --------------------------- */

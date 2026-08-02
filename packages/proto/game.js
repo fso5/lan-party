@@ -156,6 +156,33 @@ function setNetHint(text) {
 /** Pending "the host has not answered" timer, if any. */
 let waitingForHost = null;
 
+/**
+ * Say something when the host stops talking but the socket stays up.
+ *
+ * The host phone's screen locking does not disconnect anything -- its TCP
+ * threads hold the socket open while the loop that steps the match stops. So
+ * snapshots cease, your own tank keeps responding perfectly, and every other
+ * tank stands still. It looks exactly like everyone else quitting at the same
+ * moment, and "reconnecting" never appears because nothing dropped.
+ *
+ * Three seconds, against snapshots that arrive fifteen times a second. That is
+ * far past any jitter and still short enough to answer the question before
+ * anybody starts pressing things.
+ */
+const HOST_QUIET_MS = 3000;
+let hostQuiet = false;
+
+function checkHostAwake() {
+  const quiet = (net.client?.msSinceHostUpdate ?? 0) > HOST_QUIET_MS;
+  if (quiet === hostQuiet) return;
+  hostQuiet = quiet;
+  setNetHint(
+    quiet
+      ? "Waiting for the host — their phone may have gone to sleep. Everyone's still connected."
+      : null,
+  );
+}
+
 function connectMultiplayer() {
   if (net.socket) return;
   const url = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
@@ -1454,6 +1481,7 @@ function frame(now) {
     state.world = net.client.world;
     consumeEvents();
     updateParticles(elapsed / 1000);
+    checkHostAwake();
   } else if (state.running) {
     accumulator += elapsed;
     let budget = 8;

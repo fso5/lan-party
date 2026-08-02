@@ -94,6 +94,8 @@ export class MatchClient {
 
   private history: HistoryEntry[] = [];
   private tickAccumulatorMs = 0;
+  /** Wall-clock since the last applied snapshot. See `msSinceHostUpdate`. */
+  private msSinceSnapshot = 0;
   private pendingInput: TankInput = emptyInput();
 
   /**
@@ -126,7 +128,30 @@ export class MatchClient {
     this.pendingInput = input;
   }
 
+  /**
+   * Milliseconds since the host last said anything about the world.
+   *
+   * The host phone going to sleep does not close anything. Its TCP threads keep
+   * the socket open, the JS loop that steps the match stops, and snapshots
+   * simply cease -- so every other phone keeps predicting its own tank
+   * perfectly while every other tank stands still. It looks exactly like
+   * everyone else quitting at the same moment, and nothing on screen says
+   * otherwise.
+   *
+   * Measured over fifteen seconds of that: the client ran 900 ticks past the
+   * host, and snapped back on wake. The snapping back is correct -- it is the
+   * resync doing its job -- but the silence in between is not something a
+   * player should have to interpret.
+   *
+   * Exposed as a number rather than a callback so a render loop can just read
+   * it, and so the threshold for "too long" belongs to whoever is drawing.
+   */
+  get msSinceHostUpdate(): number {
+    return this.msSinceSnapshot;
+  }
+
   update(elapsedMs: number): void {
+    this.msSinceSnapshot += elapsedMs;
     this.tickAccumulatorMs += elapsedMs;
     const tickMs = 1000 / TICK_HZ;
     let budget = 8;
@@ -174,6 +199,7 @@ export class MatchClient {
   }
 
   private applySnapshot(r: Reader): void {
+    this.msSinceSnapshot = 0;
     const snap = readSnapshot(r);
 
     // Recover the full tick from the 16-bit wire value using our own clock.

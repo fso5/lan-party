@@ -155,7 +155,7 @@ what `net/websocket.ts` is for, and it is why Bluetooth is not the only route.
 
 ```
 npm install
-npm test  --workspace @tanks/core      # 141 tests, headless
+npm test  --workspace @tanks/core      # 142 tests, headless
 npm test  --workspace @tanks/app       # 28 tests
 npm run build --workspace @tanks/proto # -> packages/proto/dist/tanks-proto.html
 npm run smoke --workspace @tanks/proto # drives the built page in a real browser

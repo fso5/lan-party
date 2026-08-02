@@ -522,3 +522,62 @@ test('an opponent’s second shell arrives while their first is still flying', (
     'both of the opponent’s shells are on our phone',
   );
 });
+
+/**
+ * The host's phone going to sleep is silent, and must not be.
+ *
+ * Nothing disconnects: the host's TCP threads keep the socket open while the
+ * JS loop that steps the match stops. Snapshots simply cease. Every other
+ * phone carries on predicting its own tank perfectly while every other tank
+ * stands still -- which looks exactly like everyone else quitting at once.
+ *
+ * Measured before adding anything: fifteen seconds of that put the client 900
+ * ticks past the host, and it snapped back on wake. The snap back is the
+ * resync working. The silence in between is the part a player cannot
+ * interpret, so the client now says how long it has been.
+ */
+test('a client can tell how long the host has been quiet', () => {
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 5);
+  const hostT = new LoopbackTransport('host', 'Host', net);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  const world = versusWorld(31);
+  const host = new MatchHost(world, hostT);
+  const client = new MatchClient(cloneWorld(world), clientT, 'host', 1);
+  net.connect('host', 'client');
+  host.addClient('client', 1);
+  host.localTankId = 0;
+
+  const step = 1000 / 60;
+  for (let i = 0; i < 120; i++) {
+    client.update(step);
+    net.advance(step);
+    host.update(step);
+    net.advance(0);
+  }
+  assert.ok(
+    client.msSinceHostUpdate < 500,
+    `a healthy match should be hearing from the host constantly, got ${client.msSinceHostUpdate}ms`,
+  );
+
+  // The screen locks. The client keeps running; nothing else does.
+  for (let i = 0; i < 60 * 5; i++) {
+    client.update(step);
+    net.advance(step);
+  }
+  assert.ok(
+    client.msSinceHostUpdate > 4000,
+    `five seconds of silence should be visible, got ${client.msSinceHostUpdate}ms`,
+  );
+
+  // And it wakes up.
+  for (let i = 0; i < 60; i++) {
+    client.update(step);
+    net.advance(step);
+    host.update(step);
+    net.advance(0);
+  }
+  assert.ok(
+    client.msSinceHostUpdate < 500,
+    `the counter must reset once the host speaks again, got ${client.msSinceHostUpdate}ms`,
+  );
+});
