@@ -29,7 +29,11 @@ const p = await b.newPage({ viewport: { width: 1000, height: 640 } });
 const errors = [];
 p.on('console', m => { if (m.type()==='error') errors.push(m.text()); });
 p.on('pageerror', e => errors.push('PAGEERROR: ' + e.message));
-await p.goto('file:///home/user/tanks-mobile/packages/proto/dist/tanks-proto.html');
+// Derived, not hardcoded. An absolute path baked in here works only on the
+// machine it was written on -- in CI the checkout lives somewhere else, and the
+// failure is a browser error about a missing file rather than anything
+// pointing at the path.
+await p.goto(new URL('./dist/tanks-proto.html', import.meta.url).href);
 await p.waitForTimeout(600);
 
 const probe = async () => p.evaluate(() => {
