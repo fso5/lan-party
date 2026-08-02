@@ -16,6 +16,8 @@ import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 
+import { lanAddress } from './lan-address.mjs';
+
 /**
  * This container ships a Chromium at a fixed path; CI does not, and installs
  * one where Playwright expects it. Returning undefined there is correct -- but
@@ -43,6 +45,9 @@ function findChrome() {
  * which points at the test rather than at the port.
  */
 const PORT = process.env.PORT || '8137';
+// Not loopback: browsers treat localhost as a secure context and a phone's
+// address is not, so a loopback-only test is easier than reality.
+const HOST = lanAddress();
 const srv = spawn('node', ['server.mjs'], { env: { ...process.env, PORT }, stdio: 'pipe' });
 const srvLog = [];
 srv.stdout.on('data', (d) => { srvLog.push(d.toString()); process.stdout.write('  [srv] ' + d); });
@@ -65,7 +70,7 @@ srv.on('exit', (code) => { if (code) srvLog.push(`server exited with code ${code
       process.exit(1);
     }
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT}/`);
+      const res = await fetch(`http://${HOST}:${PORT}/`);
       if (res.ok) break;
     } catch {
       /* not up yet */
@@ -74,14 +79,22 @@ srv.on('exit', (code) => { if (code) srvLog.push(`server exited with code ${code
   }
 }
 
-const b = await chromium.launch({ executablePath: findChrome() });
+// The browser must not use this environment's HTTP proxy. It intercepts
+// non-loopback addresses and answers the WebSocket upgrade with a 403, which
+// has nothing to do with the game -- a phone talking to a phone has no proxy
+// in the path. Loopback was bypassed automatically, which is part of why
+// testing on localhost hid this whole class of difference.
+const b = await chromium.launch({
+  executablePath: findChrome(),
+  args: ['--no-proxy-server'],
+});
 const errors = [];
 const pages = [];
 for (let i = 0; i < 2; i++) {
   const p = await b.newPage({ viewport: { width: 800, height: 500 } });
   p.on('pageerror', e => errors.push(`p${i}: ${e.message}`));
   p.on('console', m => { if (m.type() === 'error') errors.push(`p${i}: ${m.text()}`); });
-  await p.goto(`http://127.0.0.1:${PORT}/`);
+  await p.goto(`http://${HOST}:${PORT}/`);
   pages.push(p);
   await p.waitForTimeout(1200);
 }

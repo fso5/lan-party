@@ -17,6 +17,8 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { lanAddress } from './lan-address.mjs';
+
 import {
   LanHost,
   LobbyOp,
@@ -61,7 +63,7 @@ class NodeTcp {
     this.#handlers = h;
   }
   getIpAddress() {
-    return '127.0.0.1';
+    return HOST;
   }
   async start(port) {
     this.#server = createServer((sock) => {
@@ -77,7 +79,8 @@ class NodeTcp {
       });
       sock.on('error', () => sock.destroy());
     });
-    this.#server.listen(port, '127.0.0.1');
+    // All interfaces, so a browser can reach this the way a phone would.
+    this.#server.listen(port, '0.0.0.0');
     await once(this.#server, 'listening');
     return this.#server.address().port;
   }
@@ -92,6 +95,11 @@ class NodeTcp {
     this.#socks.get(id)?.end();
   }
 }
+
+// A real interface address rather than loopback: browsers treat localhost as a
+// secure context and a phone's 192.168.x.x is not, so testing on loopback is
+// easier than reality. See lan-address.mjs.
+const HOST = lanAddress();
 
 const tcp = new NodeTcp();
 const lan = new LanHost(tcp, { page: new Uint8Array(page), port: 0 });
@@ -164,7 +172,15 @@ const check = (cond, msg) => {
   if (!cond) failures.push(msg);
 };
 
-const browser = await chromium.launch({ executablePath: findChrome() });
+// The browser must not use this environment's HTTP proxy. It intercepts
+// non-loopback addresses and answers the WebSocket upgrade with a 403, which
+// has nothing to do with the game -- a phone talking to a phone has no proxy
+// in the path. Loopback was bypassed automatically, which is part of why
+// testing on localhost hid this whole class of difference.
+const browser = await chromium.launch({
+  executablePath: findChrome(),
+  args: ['--no-proxy-server'],
+});
 const errors = [];
 const pages = [];
 for (let i = 0; i < 2; i++) {
@@ -177,8 +193,28 @@ for (let i = 0; i < 2; i++) {
   // and useless for asserting which row belongs to whom.
   const name = ['Alpha', 'Bravo'][i];
   await p.addInitScript((n) => localStorage.setItem('tanks.name', n), name);
-  await p.goto(`http://127.0.0.1:${port}/`);
+  await p.goto(`http://${HOST}:${port}/`);
   pages.push(p);
+}
+
+// Pin the point of using a LAN address: a phone's origin is *not* a secure
+// context, and localhost is. If this ever reverts to loopback, this fails and
+// says why rather than the tests quietly getting easier.
+{
+  // Fails rather than skips if someone points this back at loopback while a
+  // real interface exists -- a skip would let the tests quietly get easier,
+  // which is the exact failure this guards against.
+  check(
+    HOST === lanAddress(),
+    `must reach the host the way a phone does; using ${HOST} with ${lanAddress()} available`,
+  );
+  const secure = await pages[0].evaluate(() => window.isSecureContext);
+  if (HOST === '127.0.0.1') {
+    console.log('no non-loopback interface here; running on loopback, which is a secure context unlike a phone');
+  } else {
+    check(secure === false, `expected an insecure origin like a phone's, got isSecureContext=${secure}`);
+    console.log(`origin ${HOST}: isSecureContext=${secure} (a phone sees the same)`);
+  }
 }
 
 // The panel is the whole point: it must appear off the back of a real roster.
