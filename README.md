@@ -22,9 +22,9 @@ Where that stands:
 | Match rules — rounds, scoring, free-for-all and several teams | done, live in the host |
 | Bluetooth — transport, framing, native GATT on both platforms | written, **never run on a radio** |
 | WiFi hotspot — host on Android, join from any browser, no Apple account | built, **never run on a real hotspot** |
-| Lobby — the wire protocol for rosters, teams and round results | done |
+| Lobby — wire protocol, and the browser side of picking a team | done, tested end to end |
 | Host screen — tap to host, shows the URL to read out | built |
-| Lobby — picking teams and a map before the match | **not built** — hosting seats everyone free-for-all |
+| **Picking teams in the app** | **not built** — the host still seats everyone free-for-all |
 
 The honest summary: the whole path is now built, and it has been driven end to
 end — a real socket, a real WebSocket client, a real match — but only ever on
@@ -57,7 +57,7 @@ the browser asks. Built in CI on every push, so there is no laptop anywhere in
 the delivery path.
 
 Every push builds a new APK and attaches it, alongside `tanks.html` — the same
-game as a single 108 KB file that opens in any browser and runs offline. Both
+game as a single 153 KB file that opens in any browser and runs offline. Both
 are generated from source by CI, so neither can go stale.
 
 ## Playing together
@@ -78,9 +78,22 @@ No internet, no accounts, nothing installed on the iPhones.
 
 **Back on the host:** it counts who has joined. Tap **Start match**.
 
-The URL has to be typed, and it has to be the `http://` one from the host — not
-the web app above. An HTTPS page is not allowed to talk to a local IP, so the
-cached web app cannot be the client here.
+### If it goes wrong
+
+The game tries to say what to do rather than leaving you guessing:
+
+- **"reconnecting"** — the connection dropped, which on a phone is routine: the
+  screen sleeping is enough. It retries on its own, and retries immediately when
+  you look at the page again. If it keeps failing for a few seconds it will say
+  to check you are still on the host's hotspot.
+- **"solo" on the installed web app** — that one cannot join a match, and not
+  for a fixable reason: it is served over HTTPS, and an HTTPS page is not
+  allowed to open a connection to a local address. Open the `http://` address
+  the host phone shows instead.
+- **Nothing loads at all** — some Android hotspots isolate connected devices
+  from each other. That is a hotspot setting, not the game.
+- **An iPhone drops the network** — iOS sometimes abandons a WiFi network with
+  no internet. Telling it to stay connected fixes it.
 
 Bluetooth is a separate route that needs no hotspot at all. The native module
 compiles and ships in the APK, but nothing in the JavaScript imports it yet, so
@@ -137,13 +150,20 @@ what `net/websocket.ts` is for, and it is why Bluetooth is not the only route.
 
 ```
 npm install
-npm test  --workspace @tanks/core      # 111 tests, headless
+npm test  --workspace @tanks/core      # 119 tests, headless
 npm test  --workspace @tanks/app       # 28 tests
 npm run build --workspace @tanks/proto # -> packages/proto/dist/tanks-proto.html
 npm run smoke --workspace @tanks/proto # drives the built page in a real browser
+npm run mp:smoke    --workspace @tanks/proto  # two browsers against a real host
+npm run lobby:smoke --workspace @tanks/proto  # the lobby, teams, and a round change
 npm run serve --workspace @tanks/proto  # single-player, serve on your LAN
 npm run mp    --workspace @tanks/proto  # multiplayer: host + serve on your LAN
 ```
+
+The three browser runs are the only things that exercise the multiplayer client
+at all — the scoreboard and the lobby are both invisible in solo play, so
+nothing else can reach them. They run in CI on every change to the game or the
+core.
 
 `mp` runs the authoritative host in Node and serves the page; open the printed
 URL on two phones and they play each other. Everything above the transport is
@@ -275,7 +295,7 @@ Maps are authored as ASCII so a level reads as a picture in source:
 13. Host migration
 14. Mods: more maps, map editor
 
-111 tests passing. Steps 5 and 6 are deliberately ordered: debugging prediction
+119 tests passing. Steps 5 and 6 are deliberately ordered: debugging prediction
 and reconciliation over UDP is tractable; debugging it *simultaneously* with
 debugging BLE is not.
 
