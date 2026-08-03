@@ -180,6 +180,16 @@ The browser runs are the only things that exercise the multiplayer client at
 all — the scoreboard and the lobby are both invisible in solo play, so nothing
 else can reach them. They run in CI on every change to the game or the core.
 
+CI also unpacks the APK it just built and checks the JavaScript bundle inside
+it still contains the native transport and core's netcode. Metro only bundles
+what something imports, so a module nothing reaches from JavaScript is dropped
+silently and the app ships without it while every other step stays green —
+which is exactly the state the Bluetooth module is in. Note for anyone reading
+that bundle by hand: Hermes stores ASCII strings one byte per character and
+only uses UTF-16 for strings that need it, so `TanksLan` is found by a UTF-8
+search and *not* by a UTF-16 one. Searching only UTF-16 for a module name
+returns nothing whether or not the module ships.
+
 ### Checking that a test would fail
 
 ```

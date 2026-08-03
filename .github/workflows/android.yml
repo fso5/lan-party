@@ -136,6 +136,64 @@ jobs:
           echo "name=tanks.apk" >> "$GITHUB_OUTPUT"
           unzip -l out/tanks.apk | grep -oE 'lib/[^/]+/' | sort -u | head
 
+      # Prove the APK actually contains what it is supposed to, rather than
+      # trusting that a green build implies it.
+      #
+      # The failure this guards against is silent by construction: Metro only
+      # bundles what something imports, so a native module nothing reaches from
+      # JavaScript is simply dropped, and the app ships without it while every
+      # step here still passes. That is not hypothetical -- it is the state
+      # TanksBle is in right now.
+      #
+      # On encodings, because getting this wrong reports the opposite of the
+      # truth: Hermes keeps ASCII strings in a one-byte-per-character table and
+      # only uses UTF-16 for strings that need it. So an identifier like
+      # `TanksLan` is found by a plain UTF-8 search and NOT by a UTF-16 one,
+      # while a UI string with an em dash in it is the other way round.
+      # Searching only UTF-16 for a module name returns zero whether or not the
+      # module ships. Both encodings, always.
+      - name: Check the JS bundle carries the transport and the netcode
+        run: |
+          unzip -p out/tanks.apk assets/index.android.bundle > bundle.hbc
+          ls -l bundle.hbc
+          python3 - <<'PY'
+          import sys
+          data = open('bundle.hbc','rb').read()
+
+          def find(sym):
+              return data.count(sym.encode('utf-8')), data.count(sym.encode('utf-16-le'))
+
+          # Must be reachable from JavaScript or the app cannot host over WiFi
+          # and cannot run a match at all.
+          required = {
+              'TanksLan': 'the native TCP transport, via requireNativeModule',
+              'msSinceHostUpdate': "@tanks/core's MatchClient",
+              'retireAbandoned': "@tanks/core's MatchHost",
+          }
+          # Not yet wired up. Reported so that the day it is, this says so.
+          watched = ['TanksBle', 'bleAdapter']
+
+          missing = []
+          for sym, what in required.items():
+              u8, u16 = find(sym)
+              ok = u8 or u16
+              print(f"{'ok  ' if ok else 'MISSING'}  {sym:<20} utf8={u8} utf16={u16}  ({what})")
+              if not ok:
+                  missing.append(sym)
+
+          for sym in watched:
+              u8, u16 = find(sym)
+              state = 'present' if (u8 or u16) else 'absent, as expected'
+              print(f"note      {sym:<20} utf8={u8} utf16={u16}  ({state})")
+
+          if missing:
+              print(f"\n{len(missing)} required symbol(s) absent from the shipped bundle: "
+                    f"{', '.join(missing)}")
+              print("Metro drops whatever nothing imports. Check the import chain "
+                    "from packages/app/src reaches it.")
+              sys.exit(1)
+          PY
+
       - uses: actions/upload-artifact@v4
         with:
           name: tanks-apk
