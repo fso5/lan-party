@@ -358,6 +358,39 @@ test('a client that restarts its count each round does not spray on spawn', () =
   assert.equal(tickCountingShots(200), 0, 'the restarted count was read as shots owed');
 });
 
+test('and it can still fire in the round after', () => {
+  /*
+   * The positive half, which nothing asserted.
+   *
+   * Both tests above are about shots that must *not* happen -- none carried
+   * across the boundary, none sprayed out of the new spawn. Between them they
+   * would be satisfied completely by a host that stopped granting this client
+   * shots for the rest of the match, which is the worse bug of the two: you
+   * spawn into round two and the trigger simply does nothing.
+   *
+   * The browser check in lobby-smoke.mjs is what caught this being possible --
+   * it went red with "Alpha could not fire in round two" and the cause is still
+   * unidentified. This pins the core half at the tick it happens on, which a
+   * browser cannot see.
+   */
+  const { host, send, tickCountingShots } = hostAcrossRounds();
+
+  send(1, 5);
+  for (let i = 0; i < 2; i++) host.update(1000 / 60);
+
+  killTank(host.world, host.world.tanks.find((t) => t.id === 1)!, 0);
+  for (let i = 0; i < 200; i++) host.update(1000 / 60);
+  assert.ok(host.match.round > 1, 'the round should have turned over');
+
+  // The fresh client's baseline: no shot, per the test above.
+  send(50, 0);
+  assert.equal(tickCountingShots(60), 0, 'the baseline packet should not fire');
+
+  // And now the player actually pulls the trigger.
+  send(120, 1);
+  assert.ok(tickCountingShots(120) > 0, 'the client could not fire at all in the new round');
+});
+
 test('the shot count still catches up when it wraps', () => {
   // Three bits on the wire, so it returns to zero every eight shots.
   const { fired, tick, send } = hostWithInputs();

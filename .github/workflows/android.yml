@@ -30,6 +30,16 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # A bound, because core's tests no longer run under `--test-force-exit`.
+    # That flag was added with the WebSocket server, whose test left a socket
+    # listening so node would not exit on its own -- but it also cut the last
+    # test file off mid-run, and node reported the shortened run as a clean
+    # pass: `fail 0`, `cancelled 0`, `skipped 0`, exit 0. Three identical local
+    # runs gave 178, 172 and 178 tests, so a green tick meant "some tests
+    # passed". Without the flag it is 178 every time. If a future test does
+    # leak a handle the run will hang instead, and hanging for 30 minutes is a
+    # far better failure than silently skipping six tests for ever.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
