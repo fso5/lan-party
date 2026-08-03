@@ -255,8 +255,26 @@ function explodeMine(w: WorldState, mine: Mine): void {
   if (owner && owner.minesOut > 0) owner.minesOut--;
 }
 
-/** Advance the world one tick. `inputs` is keyed by tank id. */
-export function step(w: WorldState, inputs: Map<number, TankInput>): void {
+/**
+ * Advance the world one tick. `inputs` is keyed by tank id.
+ *
+ * `spawnsFor` names the one tank allowed to create shells and mines. Omit it
+ * on the host, where every tank may.
+ *
+ * A client must pass its own tank, because entity creation is the one part of
+ * the simulation it cannot be allowed to predict for anybody else. The host
+ * sends a spawn for every shell fired in the match, including the bots' -- and
+ * the client is also running those same bots locally, so without this it ends
+ * up holding two of each: the one it invented and the one it was told about,
+ * with different ids, at slightly different places. Ten seconds of a
+ * bots-and-two-players match had the client drawing eleven more shells than
+ * existed on the host.
+ *
+ * Movement is still predicted for everyone -- that is what keeps the other
+ * tanks smooth between snapshots, and a snapshot corrects it fifteen times a
+ * second. Nothing corrects an invented shell.
+ */
+export function step(w: WorldState, inputs: Map<number, TankInput>, spawnsFor?: number): void {
   w.events.length = 0;
 
   // --- Tanks: aim, drive, act -------------------------------------------
@@ -301,8 +319,9 @@ export function step(w: WorldState, inputs: Map<number, TankInput>): void {
       tank.y = moved.y;
     }
 
-    if (input.fire) fireShell(w, tank);
-    if (input.layMine) layMine(w, tank);
+    const maySpawn = spawnsFor === undefined || tank.id === spawnsFor;
+    if (input.fire && maySpawn) fireShell(w, tank);
+    if (input.layMine && maySpawn) layMine(w, tank);
   }
 
   // --- Shells ------------------------------------------------------------

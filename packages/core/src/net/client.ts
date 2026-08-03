@@ -187,7 +187,7 @@ export class MatchClient {
     writeInput(w, { tick: this.world.tick, ...input });
     this.transport.send(this.hostId, w.finish(), false);
 
-    step(this.world, new Map([[this.localTankId, input]]));
+    step(this.world, new Map([[this.localTankId, input]]), this.localTankId);
   }
 
   /**
@@ -289,7 +289,7 @@ export class MatchClient {
       // told us was born on it. See `spawnLog`.
       this.replaySpawns(h.tick);
       h.world = cloneWorld(this.world);
-      step(this.world, new Map([[this.localTankId, h.input]]));
+      step(this.world, new Map([[this.localTankId, h.input]]), this.localTankId);
     }
   }
 

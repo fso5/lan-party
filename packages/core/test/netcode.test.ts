@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createWorld, cloneWorld, killTank, step } from '../src/sim.js';
 import { loadArena, VERSUS_MAPS } from '../src/maps/index.js';
 import { Rng } from '../src/math.js';
-import { emptyInput, EventKind, Tile, type TankInput } from '../src/types.js';
+import { emptyInput, EventKind, TankKind, Tile, type TankInput } from '../src/types.js';
 import {
   LoopbackNetwork,
   LoopbackTransport,
@@ -193,6 +193,129 @@ test('host discards inputs reordered by jitter', () => {
     Math.abs(tank.bodyAngle) < 0.5,
     `body angle ${tank.bodyAngle.toFixed(3)} suggests the stale input won`,
   );
+});
+
+test('a client never invents a shell for a tank it does not control', () => {
+  // The host sends a spawn for every shell fired in the match, the bots'
+  // included -- and the client is running those same bots in its own
+  // simulation. Let it fire them and it holds two of each: the one it invented
+  // and the one it was told about, different ids, slightly different places.
+  // Measured before this was fixed: eleven more shells on the client than
+  // existed on the host, in a minute of a bots-and-two-players match.
+  //
+  // No host and no input at all here, so anything created is invented.
+  const arena = loadArena(VERSUS_MAPS[0]);
+  const bots: { kind: number; team: number; spawnIndex: number }[] = [];
+  for (let s = 2; s < arena.spawns.length; s++) {
+    bots.push({ kind: TankKind.Grey, team: 90 + s, spawnIndex: s });
+  }
+  const world = createWorld({
+    arena,
+    seed: 42,
+    players: [
+      { team: 0, spawnIndex: 0 },
+      { team: 1, spawnIndex: 1 },
+    ],
+    bots,
+  });
+
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  new LoopbackTransport('host', 'Host', net);
+  const client = new MatchClient(world, clientT, 'host', 1);
+  clientT.setEvents({});
+
+  const idsBefore = client.world.nextEntityId;
+  for (let i = 0; i < 600; i++) client.update(1000 / 60);
+
+  // Entity ids are only consumed by creating something, so the counter is the
+  // honest count even for shells that have since expired -- which is what made
+  // this hard to see from the world alone.
+  assert.equal(
+    client.world.nextEntityId,
+    idsBefore,
+    `the client created ${client.world.nextEntityId - idsBefore} entities with no host and no input`,
+  );
+  assert.equal(client.world.shells.length, 0, 'and no shells should be in flight');
+
+  // The bots must still *move*, though -- that is what keeps them smooth
+  // between snapshots, and a snapshot corrects it fifteen times a second.
+  const bot = client.world.tanks.find((t) => t.id === 2)!;
+  const start = world.arena.spawns[2];
+  assert.ok(
+    Math.hypot(bot.x - start.x, bot.y - start.y) > 0.5,
+    'suppressing spawns must not also freeze the tanks',
+  );
+});
+
+test('a reconciliation replay does not re-invent other tanks’ shells either', () => {
+  // The restriction has to hold on the replay step as well as the live one. A
+  // replay re-runs our stored inputs through the whole world, bots included,
+  // so without it every reconciliation -- fifteen a second -- mints a fresh
+  // batch of shells nobody else has.
+  const arena = loadArena(VERSUS_MAPS[0]);
+  const bots: { kind: number; team: number; spawnIndex: number }[] = [];
+  for (let s = 2; s < arena.spawns.length; s++) {
+    bots.push({ kind: TankKind.Grey, team: 90 + s, spawnIndex: s });
+  }
+  const build = () =>
+    createWorld({
+      arena,
+      seed: 42,
+      players: [
+        { team: 0, spawnIndex: 0 },
+        { team: 1, spawnIndex: 1 },
+      ],
+      bots,
+    });
+
+  const net = new LoopbackNetwork(BLE_PROFILE, 5);
+  const hostT = new LoopbackTransport('host', 'Host', net);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  const host = new MatchHost(build(), hostT);
+  host.localTankId = 0;
+  const client = new MatchClient(cloneWorld(host.world), clientT, 'host', 1);
+  net.connect('host', 'client');
+  host.addClient('client', 1);
+
+  const rng = new Rng(7);
+  const stepMs = 1000 / 60;
+  const hostEverHeld = new Set<string>();
+  let strays = 0;
+
+  for (let i = 0; i < 900; i++) {
+    const thumb: TankInput = {
+      moveX: rng.range(-1, 1),
+      moveY: rng.range(-1, 1),
+      aimX: rng.range(-1, 1),
+      aimY: rng.range(-1, 1),
+      fire: rng.next() < 0.2,
+      layMine: false,
+    };
+    host.setLocalInput(thumb);
+    client.setInput(thumb);
+    client.update(stepMs);
+    net.advance(stepMs);
+    host.update(stepMs);
+    net.advance(0);
+
+    // Every shell the host has ever held. Compared against this rather than
+    // against the host's *current* shells, because we run ten ticks ahead: one
+    // the host has just destroyed legitimately outlives it on our side for a
+    // few ticks, and that is timing, not invention. An invented shell carries
+    // an id the host never issued for that tank at all.
+    for (const h of host.world.shells) hostEverHeld.add(`${h.ownerId}:${h.id}`);
+
+    // Our own tank is exempt: we predict those, and the two sides number them
+    // independently.
+    for (const s of client.world.shells) {
+      if (s.ownerId === client.localTankId) continue;
+      if (!hostEverHeld.has(`${s.ownerId}:${s.id}`)) strays++;
+    }
+  }
+
+  assert.ok(client.reconciles > 20, `expected plenty of reconciles, got ${client.reconciles}`);
+  assert.equal(strays, 0, `${strays} tick-samples held a shell the host never fired`);
 });
 
 test('a shell the other player fired stays on our screen', () => {
