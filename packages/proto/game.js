@@ -939,7 +939,26 @@ function seatBluetoothClient(peer) {
   const world = ble.host.world;
   const arena = world.arena;
   const taken = world.tanks.filter((t) => t.kind === TankKind.Player).length;
-  const spawn = arena.spawns[taken] ?? arena.spawns[0];
+
+  /*
+   * Refuse rather than stack.
+   *
+   * There are four spawn points on every versus map and the roster message
+   * carries eight slots, so this runs out. It used to fall back to spawns[0],
+   * which puts the new arrival on top of whoever already had that corner --
+   * two tanks on one square, indistinguishable on screen, killed by the same
+   * shell. A player told the match is full can go and watch; a player secretly
+   * sharing someone else's tank cannot work out what is happening.
+   *
+   * Correct whichever way the seat count is settled later: if the maps grow
+   * spawn points to match the roster, this simply stops triggering.
+   */
+  if (taken >= arena.spawns.length) {
+    setNetStatus(`hosting · ${taken} joined · full`);
+    return;
+  }
+
+  const spawn = arena.spawns[taken];
 
   const tankId = world.nextEntityId++;
   world.tanks.push({
