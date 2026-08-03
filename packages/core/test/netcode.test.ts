@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createWorld, cloneWorld, killTank, step } from '../src/sim.js';
 import { loadArena, VERSUS_MAPS } from '../src/maps/index.js';
 import { Rng } from '../src/math.js';
-import { emptyInput, EventKind, type TankInput } from '../src/types.js';
+import { emptyInput, EventKind, Tile, type TankInput } from '../src/types.js';
 import {
   LoopbackNetwork,
   LoopbackTransport,
@@ -14,6 +14,8 @@ import {
 import { MatchHost } from '../src/net/host.js';
 import { MatchClient } from '../src/net/client.js';
 import {
+  MsgType,
+  NetEvent,
   Writer,
   writeInput,
   writeMineSpawn,
@@ -254,6 +256,118 @@ test('we do not end up with two copies of a mine we laid ourselves', () => {
   assert.equal(client.world.mines.filter((m) => m.ownerId === 0).length, 1, 'one mine, not two');
 });
 
+/** A client at tick 1000 with 40 ticks of history behind it, and no host. */
+function clientWithHistory(localTankId = 0) {
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  new LoopbackTransport('host', 'Host', net);
+  const world = versusWorld(22);
+  world.tick = 1000;
+  const client = new MatchClient(cloneWorld(world), clientT, 'host', localTankId);
+  clientT.setEvents({});
+  for (let i = 0; i < 40; i++) client.update(1000 / 60);
+
+  /** A snapshot that agrees with prediction exactly -- the routine case. */
+  const agreeingSnapshot = (tick: number) => {
+    const w = new Writer(64);
+    writeSnapshot(
+      w,
+      tick,
+      client.world.tanks.map((t) => ({
+        id: t.id,
+        alive: t.alive,
+        x: t.x,
+        y: t.y,
+        bodyAngle: t.bodyAngle,
+        turretAngle: t.turretAngle,
+      })),
+    );
+    return w.finish();
+  };
+
+  return { client, agreeingSnapshot };
+}
+
+test('a block the host destroyed does not grow back', () => {
+  // Terrain damage arrives as an event and appears in no snapshot, so a
+  // reconciliation that restores a world recorded before the message is the
+  // end of it: the block is back for good. Solid on your phone, gone on the
+  // host -- your shells bounce off a wall the host will let them through, and
+  // the two simulations disagree about the shape of the arena from then on.
+  const { client, agreeingSnapshot } = clientWithHistory();
+
+  const arena = client.world.arena;
+  let bx = -1;
+  let by = -1;
+  outer: for (let y = 0; y < arena.height; y++) {
+    for (let x = 0; x < arena.width; x++) {
+      if (arena.at(x, y) === Tile.Block) {
+        bx = x;
+        by = y;
+        break outer;
+      }
+    }
+  }
+  assert.ok(bx >= 0, 'the map should have a destructible block to shoot');
+
+  const w = new Writer(8);
+  w.u8(MsgType.Event).u8(NetEvent.BlockDestroyed).u16(by * arena.width + bx);
+  client.handlePacket('host', w.finish());
+  assert.equal(client.world.arena.at(bx, by), 0, 'the event should clear the block');
+
+  client.handlePacket('host', agreeingSnapshot(1020));
+  assert.equal(client.world.arena.at(bx, by), 0, 'the block grew back on the first reconcile');
+
+  for (let i = 0; i < 60; i++) client.update(1000 / 60);
+  client.handlePacket('host', agreeingSnapshot(client.world.tick - 5));
+  assert.equal(client.world.arena.at(bx, by), 0, 'the block grew back later');
+});
+
+test('our own tank stays dead once the host says it died', () => {
+  // Every other tank recovers from this on its own, because snapshots carry
+  // `alive`. Ours does not: the overlay skips our tank whenever prediction
+  // agrees with the host to within quantisation, and a dead tank has stopped
+  // moving, so it agrees exactly. Stand still when you die -- which is what
+  // being killed by a mine looks like -- and you go on driving a tank that
+  // exists nowhere but on your own screen.
+  const { client, agreeingSnapshot } = clientWithHistory(0);
+
+  // The host is always behind our clock, so its kill tick lands in our history.
+  const w = new Writer(8);
+  w.u8(MsgType.Event).u8(NetEvent.TankKilled).u16(1030).u8(0).u8(1);
+  client.handlePacket('host', w.finish());
+  const alive = () => client.world.tanks.find((t) => t.id === 0)!.alive;
+  assert.equal(alive(), false, 'the event should have killed us');
+
+  // Rewinding to before the death: the replay passes through the death tick,
+  // and the local sim has no reason to reproduce a kill it never simulated.
+  client.handlePacket('host', agreeingSnapshot(1020));
+  assert.equal(alive(), false, 'we came back alive reconciling from before the death');
+
+  for (let i = 0; i < 60; i++) client.update(1000 / 60);
+  client.handlePacket('host', agreeingSnapshot(client.world.tick - 5));
+  assert.equal(alive(), false, 'we came back alive a second later');
+});
+
+test('our own tank stays dead when the correction lands after the death', () => {
+  // The other half, and it needs its own test rather than a second assertion
+  // in the one above: once a replay has passed through the death tick it
+  // rewrites the stored worlds, so a rewind that reaches back past the death
+  // *first* hides the case where one never does. Here the only snapshot is
+  // from after it, so the replay never reaches the death tick at all and the
+  // rewind base has to carry it already.
+  const { client, agreeingSnapshot } = clientWithHistory(0);
+
+  const w = new Writer(8);
+  w.u8(MsgType.Event).u8(NetEvent.TankKilled).u16(1030).u8(0).u8(1);
+  client.handlePacket('host', w.finish());
+  const alive = () => client.world.tanks.find((t) => t.id === 0)!.alive;
+  assert.equal(alive(), false, 'the event should have killed us');
+
+  client.handlePacket('host', agreeingSnapshot(1035));
+  assert.equal(alive(), false, 'we came back alive reconciling from after the death');
+});
+
 test('a resync does not leave a shell behind to be resurrected', () => {
   // A resync throws away history and restarts the clock, and it can restart it
   // *backwards* -- the case that produced it was a client that ran 900 ticks
@@ -270,6 +384,8 @@ test('a resync does not leave a shell behind to be resurrected', () => {
 
   for (let i = 0; i < 40; i++) client.update(1000 / 60);
 
+  // Everyone alive, always -- so that if a tank ends up dead below, the only
+  // thing that could have killed it is the log.
   const snapshotFor = (tick: number) => {
     const w = new Writer(64);
     writeSnapshot(
@@ -277,7 +393,7 @@ test('a resync does not leave a shell behind to be resurrected', () => {
       tick,
       client.world.tanks.map((t) => ({
         id: t.id,
-        alive: t.alive,
+        alive: true,
         x: t.x,
         y: t.y,
         bodyAngle: t.bodyAngle,
@@ -295,6 +411,12 @@ test('a resync does not leave a shell behind to be resurrected', () => {
   client.handlePacket('host', spawn.finish());
   assert.equal(client.world.shells.length, 1, 'the spawn should have landed');
 
+  // And it kills the other tank -- a death logged against tick 1012.
+  const kill = new Writer(8);
+  kill.u8(MsgType.Event).u8(NetEvent.TankKilled).u16(1012).u8(1).u8(0);
+  client.handlePacket('host', kill.finish());
+  assert.equal(client.world.tanks.find((t) => t.id === 1)!.alive, false);
+
   // Then we go deaf for long enough to force a resync back to tick 910.
   for (let i = 0; i < 30; i++) client.handlePacket('host', snapshotFor(900));
   assert.ok(client.resyncs > 0, 'the run should have forced a resync');
@@ -306,6 +428,15 @@ test('a resync does not leave a shell behind to be resurrected', () => {
   client.handlePacket('host', snapshotFor(1000));
 
   assert.equal(client.world.shells.length, 0, 'a shell from the abandoned timeline came back');
+
+  // The resync restored that tank from the snapshot, alive. A death left in
+  // the log would kill it again the moment the new clock crossed tick 1012 --
+  // a player struck down by a shell fired in a timeline nobody is in any more.
+  assert.equal(
+    client.world.tanks.find((t) => t.id === 1)!.alive,
+    true,
+    'a death from the abandoned timeline was applied again',
+  );
 });
 
 test('client stays converged across the 16-bit tick wraparound', () => {

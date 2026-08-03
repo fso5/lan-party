@@ -120,6 +120,9 @@ export class MatchClient {
    */
   private spawnLog: { kind: 'shell' | 'mine'; tick: number; entity: Shell | Mine }[] = [];
 
+  /** Deaths the host reported, kept for the same window and the same reason. */
+  private deathLog: { tick: number; victim: number }[] = [];
+
   constructor(
     initial: WorldState,
     private transport: Transport,
@@ -322,6 +325,24 @@ export class MatchClient {
   }
 
   /**
+   * Apply an authoritative change to the live world *and* to the stored worlds
+   * a rewind could land on, from `from` onwards.
+   *
+   * The general form of the same trap the spawn log exists for: a
+   * reconciliation restores a world recorded before the message arrived, so
+   * anything written only to the live world is undone. Whether that matters
+   * depends entirely on whether snapshots happen to carry the same fact --
+   * which is a thin reason for a correction to survive, and for the two things
+   * routed through here they do not.
+   */
+  private editTimeline(from: number, edit: (w: WorldState) => void): void {
+    edit(this.world);
+    for (const h of this.history) {
+      if (h.tick >= from) edit(h.world);
+    }
+  }
+
+  /**
    * Re-create the entities the host spawned on `tick`, if the rewind lost them.
    *
    * A rewind restores a world we cloned before the spawn message arrived, and
@@ -338,6 +359,11 @@ export class MatchClient {
    * player survived to be drawn. They were all still lethal on the host.
    */
   private replaySpawns(tick: number): void {
+    for (const d of this.deathLog) {
+      if (d.tick !== tick) continue;
+      const tank = this.world.tanks.find((t) => t.id === d.victim);
+      if (tank) tank.alive = false;
+    }
     for (const s of this.spawnLog) {
       if (s.tick !== tick) continue;
       if (s.kind === 'shell') {
@@ -355,6 +381,12 @@ export class MatchClient {
    * rewind can reach any more -- once a spawn is older than our whole history
    * ring, every world we could rewind to already contains it.
    */
+  private logDeath(tick: number, victim: number): void {
+    this.deathLog.push({ tick, victim });
+    const oldest = this.history.length ? this.history[0].tick : this.world.tick;
+    this.deathLog = this.deathLog.filter((d) => d.tick >= oldest);
+  }
+
   private logSpawn(kind: 'shell' | 'mine', tick: number, entity: Shell | Mine): void {
     this.spawnLog.push({ kind, tick, entity: { ...entity } });
     const oldest = this.history.length ? this.history[0].tick : this.world.tick;
@@ -389,6 +421,7 @@ export class MatchClient {
     // The log describes a timeline we just abandoned, and there is no history
     // left for a rewind to reach anyway.
     this.spawnLog.length = 0;
+    this.deathLog.length = 0;
     this.consecutiveStale = 0;
     this.resyncs++;
   }
@@ -463,15 +496,36 @@ export class MatchClient {
       this.logSpawn('mine', laidOn, mine);
       if (!this.rewindForSpawn(laidOn)) this.world.mines.push(mine);
     } else if (kind === NetEvent.TankKilled) {
-      r.u16();
+      const at = this.expandTick(r.u16());
       const victim = r.u8();
-      const tank = this.world.tanks.find((t) => t.id === victim);
-      if (tank) tank.alive = false;
+      // Also into the history, for the same reason. A remote tank recovers on
+      // its own -- snapshots carry `alive` -- but our own does not: the
+      // snapshot overlay skips our tank whenever prediction agrees with the
+      // host to within quantisation, and a dead tank has stopped moving, so it
+      // agrees exactly. Stand still when you die and you go on driving a tank
+      // that no longer exists anywhere but on your screen.
+      //
+      // Both halves are needed. Editing the stored worlds covers a rewind to a
+      // tick after the death -- the replay re-clones from there, so the edit
+      // propagates. The log covers a rewind to before it, where the replay
+      // passes through the death tick again and the local sim has no reason to
+      // reproduce a kill it never simulated.
+      this.logDeath(at, victim);
+      this.editTimeline(at, (w) => {
+        const tank = w.tanks.find((t) => t.id === victim);
+        if (tank) tank.alive = false;
+      });
     } else if (kind === NetEvent.BlockDestroyed) {
       const idx = r.u16();
       const cx = idx % this.world.arena.width;
       const cy = Math.floor(idx / this.world.arena.width);
-      this.world.arena.set(cx, cy, 0);
+      // Every stored world, not just the live one -- and with no lower bound,
+      // because terrain damage is permanent and no snapshot ever mentions the
+      // arena. Written only to the live world it lasted until the next
+      // reconciliation and then the block came back for good: solid on your
+      // phone, gone on the host, so your own shells bounced off a wall that
+      // was not there.
+      this.editTimeline(-Infinity, (w) => w.arena.set(cx, cy, 0));
     } else if (kind === NetEvent.RoundOver) {
       // Taken from the host verbatim rather than derived. Deriving it here
       // would re-run during every reconciliation replay and score the same
