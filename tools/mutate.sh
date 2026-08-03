@@ -22,7 +22,10 @@
 #
 # 2. THE FILE COMES BACK. Restored from a copy via a trap, never an `&&` chain
 #    -- a failed `cd` in one of those once left a source file half-mutated on
-#    disk, which is a far worse outcome than a bad test result.
+#    disk, which is a far worse outcome than a bad test result. The trap alone
+#    was not enough: a command of the form `cd packages/core && npm test` moved
+#    the shell out from under a relative FILE and the restoring `cp` failed, so
+#    the path is resolved up front and the command runs in a subshell.
 #
 # Exit code is the mutation's verdict, not the command's:
 #   0  the command failed, so the mutation was caught  (what you want)
@@ -44,6 +47,10 @@ LABEL=${5:-mutation}
 
 [ -f "$FILE" ] || { echo "mutate: no such file: $FILE" >&2; exit 2; }
 
+# Absolute, because the command under test is free to cd -- and a relative
+# path in the restore is how the file gets left mutated on disk.
+FILE=$(cd "$(dirname "$FILE")" && pwd)/$(basename "$FILE")
+
 BACKUP=$(mktemp "${TMPDIR:-/tmp}/mutate.XXXXXX")
 cp "$FILE" "$BACKUP"
 restore() {
@@ -63,7 +70,8 @@ open(path, 'w').write(text.replace(old, new, 1))
 PY
 
 echo "=== $LABEL ==="
-if eval "$COMMAND"; then
+# In a subshell, so a `cd` in the command cannot follow us back out.
+if ( eval "$COMMAND" ); then
   echo "--- SURVIVED: nothing catches this ---"
   exit 1
 fi

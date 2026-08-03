@@ -13,7 +13,13 @@ import {
 } from '../src/net/loopback.js';
 import { MatchHost } from '../src/net/host.js';
 import { MatchClient } from '../src/net/client.js';
-import { Writer, writeInput, writeShellSpawn } from '../src/net/protocol.js';
+import {
+  Writer,
+  writeInput,
+  writeRoundOver,
+  writeShellSpawn,
+  writeSnapshot,
+} from '../src/net/protocol.js';
 
 function versusWorld(seed = 42) {
   return createWorld({
@@ -27,12 +33,13 @@ function versusWorld(seed = 42) {
 }
 
 /** Drive a host and one client for `seconds` of virtual time. */
-function runMatch(profile = PERFECT_PROFILE, seconds = 10, netSeed = 5) {
+function runMatch(profile = PERFECT_PROFILE, seconds = 10, netSeed = 5, startTick = 0) {
   const net = new LoopbackNetwork(profile, netSeed);
   const hostT = new LoopbackTransport('host', 'Host', net);
   const clientT = new LoopbackTransport('client', 'Client', net);
 
   const hostWorld = versusWorld();
+  hostWorld.tick = startTick;
   const host = new MatchHost(hostWorld, hostT);
   const client = new MatchClient(cloneWorld(hostWorld), clientT, 'host', 1);
 
@@ -131,6 +138,191 @@ test('host discards inputs reordered by jitter', () => {
   assert.ok(
     Math.abs(tank.bodyAngle) < 0.5,
     `body angle ${tank.bodyAngle.toFixed(3)} suggests the stale input won`,
+  );
+});
+
+test('client stays converged across the 16-bit tick wraparound', () => {
+  // Ticks travel as 16 bits, so the wire value returns to zero every 65536
+  // ticks -- 18 minutes at 60Hz, which is roughly one good session. Every
+  // snapshot and every shell spawn carries one, and the client has to rebuild
+  // the full tick from it. Get that wrong and the match falls apart at the
+  // 18-minute mark and nowhere else, which is the hardest kind of bug to be
+  // told about second-hand.
+  const start = 0x10000 - 300;
+  const { host, client } = runMatch(BLE_PROFILE, 10, 5, start);
+
+  assert.ok(
+    host.world.tick > 0x10000,
+    `run must actually cross the boundary (ended at tick ${host.world.tick})`,
+  );
+
+  const h = host.world.tanks.find((t) => t.id === 1)!;
+  const c = client.world.tanks.find((t) => t.id === 1)!;
+  const drift = Math.hypot(h.x - c.x, h.y - c.y);
+
+  assert.ok(client.snapshotsApplied > 100, 'expected many snapshots across the wrap');
+  assert.equal(client.snapshotsStale, 0, 'no snapshot should land outside our window');
+  assert.equal(client.resyncs, 0, 'a correct expansion needs no resync to recover');
+  assert.ok(drift < 0.5, `client drifted ${drift.toFixed(3)} tiles across the wrap`);
+
+  // Shells are simulated locally from a spawn event whose bornTick is also 16
+  // bits. A mis-expanded bornTick makes a shell expire on arrival or never at
+  // all, so compare the counts rather than trusting the tank positions alone.
+  assert.equal(
+    client.world.shells.length,
+    host.world.shells.length,
+    'shell counts diverged across the wrap',
+  );
+});
+
+test('a snapshot from just before the wrap still lands in our history', () => {
+  // The sharp version of the test above. Our clock has crossed the boundary
+  // and the host's snapshot has not, so the wire tick reads near 65535 while
+  // ours reads near 65540. Expanding against our own high bits alone puts the
+  // snapshot 65536 ticks in the future, where nothing can rewind to it.
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  new LoopbackTransport('host', 'Host', net);
+  const world = versusWorld(22);
+  world.tick = 0x10000 - 20;
+  const client = new MatchClient(cloneWorld(world), clientT, 'host', 0);
+
+  // Step across the boundary so the ring holds ticks on both sides of it.
+  for (let i = 0; i < 40; i++) client.update(1000 / 60);
+  assert.ok(client.world.tick > 0x10000, 'client should have crossed the boundary');
+
+  const at = 0x10000 - 5;
+  const w = new Writer(64);
+  writeSnapshot(
+    w,
+    at,
+    client.world.tanks.map((t) => ({
+      id: t.id,
+      alive: t.alive,
+      x: t.x,
+      y: t.y,
+      bodyAngle: t.bodyAngle,
+      turretAngle: t.turretAngle,
+    })),
+  );
+  clientT.setEvents({});
+  client.handlePacket('host', w.finish());
+
+  assert.equal(client.snapshotsStale, 0, `snapshot for tick ${at} was rejected as unreachable`);
+  assert.equal(client.snapshotsApplied, 1, 'the snapshot should have been applied');
+});
+
+test('a shell fired just before the wrap is not dated to the far future', () => {
+  // A spawn carries the tick it was fired on, and the client dates the shell
+  // by it. Expand that wrong across the boundary and the shell's self-arm
+  // delay never elapses: it flies forever unable to kill the tank that fired
+  // it, which is a permanently wrong shell rather than one dropped frame.
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  new LoopbackTransport('host', 'Host', net);
+  const client = new MatchClient(cloneWorld(versusWorld(22)), clientT, 'host', 0);
+  client.world.tick = 0x10000 + 5;
+
+  const firedAt = 0x10000 - 5;
+  const w = new Writer(16);
+  writeShellSpawn(w, { shellId: 3, ownerId: 1, x: 12, y: 6, angle: 0, bounces: 1, tick: firedAt });
+  clientT.setEvents({});
+  client.handlePacket('host', w.finish());
+
+  const shell = client.world.shells.find((s) => s.ownerId === 1);
+  assert.ok(shell, 'the spawn should have produced a shell');
+  assert.equal(shell.bornTick, firedAt, `shell dated ${shell.bornTick}, fired at ${firedAt}`);
+});
+
+test('a shell fired just after the wrap is not dated to the distant past', () => {
+  // The mirror case. We normally cross the boundary first, running ten ticks
+  // ahead of the host -- but a stalled frame puts us behind it, and then the
+  // host wraps while we have not. A spawn reading 5 is then ten ticks in our
+  // future, not sixty-five thousand in our past. Date it to the past and the
+  // shell is older than SHELL_MAX_LIFETIME_TICKS the instant it arrives, so it
+  // is culled on the next step: it exists on the host, kills you there, and is
+  // never drawn on your phone.
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  new LoopbackTransport('host', 'Host', net);
+  const client = new MatchClient(cloneWorld(versusWorld(22)), clientT, 'host', 0);
+  client.world.tick = 0x10000 - 5;
+
+  const firedAt = 0x10000 + 5;
+  const w = new Writer(16);
+  writeShellSpawn(w, { shellId: 4, ownerId: 1, x: 12, y: 6, angle: 0, bounces: 1, tick: firedAt });
+  clientT.setEvents({});
+  client.handlePacket('host', w.finish());
+
+  const shell = client.world.shells.find((s) => s.ownerId === 1);
+  assert.ok(shell, 'the spawn should have produced a shell');
+  assert.equal(shell.bornTick, firedAt, `shell dated ${shell.bornTick}, fired at ${firedAt}`);
+
+  client.update(1000 / 60);
+  assert.ok(
+    client.world.shells.some((s) => s.ownerId === 1),
+    'the shell was culled as expired on the very first step',
+  );
+});
+
+test('the tick a round resumes on survives the wrap', () => {
+  // resumeAtTick is a tick, so it is 16 bits on the wire like every other. It
+  // has no consumer today -- the browser banner runs off a wall clock -- but a
+  // countdown drawn from the raw wire value would read "already elapsed" for
+  // every round after the first eighteen minutes, and that trap is much
+  // cheaper to disarm here than to diagnose from a phone.
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  new LoopbackTransport('host', 'Host', net);
+  const client = new MatchClient(cloneWorld(versusWorld(22)), clientT, 'host', 0);
+  client.world.tick = 0x10000 - 6;
+
+  const resumeAt = 0x10000 + 114;
+  const w = new Writer(32);
+  writeRoundOver(w, {
+    winner: 0,
+    resumeAtTick: resumeAt,
+    scores: [{ team: 0, score: 1 }],
+    matchOver: false,
+  });
+  clientT.setEvents({});
+  client.handlePacket('host', w.finish());
+
+  assert.equal(client.lastRound?.resumeAtTick, resumeAt);
+  assert.ok(
+    (client.lastRound?.resumeAtTick ?? 0) > client.world.tick,
+    'the next round must still be in the future',
+  );
+});
+
+test('host accepts an input whose tick has wrapped past its predecessor', () => {
+  // The stale-input guard compares wire ticks. Tick 5 arriving after tick
+  // 65530 is eleven ticks *newer*, not sixty-five thousand older -- and a
+  // naive comparison would reject every input for the next 18 minutes,
+  // freezing the player where they stood.
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 1);
+  const hostT = new LoopbackTransport('host', 'Host', net);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  const host = new MatchHost(versusWorld(), hostT);
+  net.connect('host', 'client');
+  host.addClient('client', 1);
+
+  const mk = (tick: number, moveX: number) => {
+    const w = new Writer(16);
+    writeInput(w, { tick, moveX, moveY: 0, aimX: 0, aimY: 0, fire: false, layMine: false });
+    return w.finish();
+  };
+
+  clientT.send('host', mk(0x10000 - 6, -1), false);
+  net.advance(1);
+  clientT.send('host', mk(5, 1), false);
+  net.advance(1);
+
+  for (let i = 0; i < 30; i++) host.update(1000 / 60);
+  const tank = host.world.tanks.find((t) => t.id === 1)!;
+  assert.ok(
+    Math.abs(tank.bodyAngle) < 0.5,
+    `body angle ${tank.bodyAngle.toFixed(3)} suggests the post-wrap input was discarded as stale`,
   );
 });
 

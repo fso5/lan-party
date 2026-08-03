@@ -356,7 +356,14 @@ export class MatchClient {
       // would re-run during every reconciliation replay and score the same
       // round repeatedly -- which is exactly why match state lives outside
       // WorldState. See rules.ts.
-      this.lastRound = readRoundOver(r);
+      const round = readRoundOver(r);
+      // resumeAtTick is a tick like any other, so it arrives with only its low
+      // 16 bits. Expand it here rather than handing the raw wire value out:
+      // anything drawing an intermission countdown would compare it against a
+      // full clock, and past the first wrap that comparison is always already
+      // true.
+      round.resumeAtTick = this.expandTick(round.resumeAtTick);
+      this.lastRound = round;
     }
   }
 
