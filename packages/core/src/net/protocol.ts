@@ -402,6 +402,55 @@ export function readShellSpawn(r: Reader): WireShellSpawn {
 }
 
 /**
+ * A mine being laid.
+ *
+ * Like a shell spawn, this buys the mine's whole life in one message: it never
+ * moves, and both its arming delay and its fuse are fixed offsets from the tick
+ * it was laid on, so a client that knows where and when can run the rest of it
+ * itself.
+ *
+ * There is no matching explode message, and NetEvent.MineExplode stays
+ * reserved. A mine goes off on its fuse -- identical arithmetic on both sides
+ * -- or when a tank that did not lay it drives into it, and the client is
+ * working from the host's own tank positions, so the worst disagreement is a
+ * tick or two on the trigger. Both sides then converge on the mine being gone,
+ * which is the only state that persists.
+ */
+export interface WireMineSpawn {
+  mineId: number;
+  ownerId: number;
+  x: number;
+  y: number;
+  /** The tick it was laid on -- not the tick this message was sent. */
+  tick: number;
+}
+
+export function writeMineSpawn(w: Writer, m: WireMineSpawn): void {
+  w.u8(MsgType.Event);
+  w.u8(NetEvent.MineSpawn);
+  w.u16(m.tick & 0xffff);
+  w.u8(m.mineId & 0xff);
+  w.u8(m.ownerId & 0x0f);
+  const qx = quantPos(m.x);
+  const qy = quantPos(m.y);
+  w.u8(qx & 0xff);
+  w.u8(((qx >> 8) & 0x0f) | ((qy & 0x0f) << 4));
+  w.u8((qy >> 4) & 0xff);
+}
+
+export function readMineSpawn(r: Reader): WireMineSpawn {
+  const tick = r.u16();
+  const mineId = r.u8();
+  const ownerId = r.u8() & 0x0f;
+  const b0 = r.u8();
+  const b1 = r.u8();
+  const b2 = r.u8();
+  const qx = b0 | ((b1 & 0x0f) << 8);
+  const qy = ((b1 >> 4) & 0x0f) | (b2 << 4);
+  return { tick, mineId, ownerId, x: dequantPos(qx), y: dequantPos(qy) };
+}
+
+/**
  * Match setup.
  *
  * Sent reliably, once, when a client joins. It carries everything needed to

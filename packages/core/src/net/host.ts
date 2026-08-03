@@ -28,7 +28,7 @@ import {
   type MatchRules,
   type MatchState,
 } from '../rules.js';
-import { TICK_HZ } from '../tuning.js';
+import { MINE_ARM_TICKS, TICK_HZ } from '../tuning.js';
 import { emptyInput, EventKind, type TankInput } from '../types.js';
 import {
   MsgType,
@@ -36,6 +36,7 @@ import {
   Reader,
   Writer,
   readInput,
+  writeMineSpawn,
   writeRoundOver,
   writeShellSpawn,
   writeSnapshot,
@@ -303,6 +304,27 @@ export class MatchHost {
         angle: datan2(shell.vy, shell.vx),
         bounces: shell.bouncesLeft,
         tick: this.world.tick,
+      });
+      this.pendingEvents.push(w.finish());
+    }
+
+    // And any mine laid this tick, for the same reason: without this the only
+    // mine a phone can see is its own, and an opponent's kills you off an
+    // empty patch of floor.
+    //
+    // Dated by armTick for the same reason shells are dated by bornTick --
+    // two tanks can lay on the same tick, and pairing MineLaid events to mines
+    // by array position gets that wrong.
+    for (const mine of this.world.mines) {
+      const laidOn = mine.armTick - MINE_ARM_TICKS;
+      if (laidOn !== this.world.tick - 1) continue;
+      const w = new Writer(16);
+      writeMineSpawn(w, {
+        mineId: mine.id & 0xff,
+        ownerId: mine.ownerId,
+        x: mine.x,
+        y: mine.y,
+        tick: laidOn,
       });
       this.pendingEvents.push(w.finish());
     }

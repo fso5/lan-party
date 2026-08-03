@@ -16,6 +16,7 @@ import { MatchClient } from '../src/net/client.js';
 import {
   Writer,
   writeInput,
+  writeMineSpawn,
   writeRoundOver,
   writeShellSpawn,
   writeSnapshot,
@@ -30,6 +31,57 @@ function versusWorld(seed = 42) {
       { team: 1, spawnIndex: 1 },
     ],
   });
+}
+
+/**
+ * The host's own player fires or lays a mine once, on tick 5, and nobody moves.
+ *
+ * Deliberately the *host's* action rather than the client's: a client predicts
+ * its own shots locally, so a test where the client shoots passes whether or
+ * not spawn events work at all. The only thing that proves the wire is the
+ * other direction.
+ */
+function hostActs(what: 'fire' | 'mine', profile = PERFECT_PROFILE, ticks = 90) {
+  const net = new LoopbackNetwork(profile, 5);
+  const hostT = new LoopbackTransport('host', 'Host', net);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+
+  const hostWorld = versusWorld();
+  const host = new MatchHost(hostWorld, hostT);
+  host.localTankId = 0;
+  const client = new MatchClient(cloneWorld(hostWorld), clientT, 'host', 1);
+
+  net.connect('host', 'client');
+  host.addClient('client', 1);
+
+  const stepMs = 1000 / 60;
+  let worstGap = 0;
+  for (let i = 0; i < ticks; i++) {
+    host.setLocalInput({
+      ...emptyInput(),
+      aimX: 0,
+      aimY: 1,
+      fire: what === 'fire' && i === 5,
+      layMine: what === 'mine' && i === 5,
+    });
+    client.setInput(emptyInput());
+    client.update(stepMs);
+    net.advance(stepMs);
+    host.update(stepMs);
+    net.advance(0);
+
+    // Give the spawn a generous window to cross the link before holding the
+    // client to it -- BLE latency plus jitter is a few ticks.
+    if (i < 15) continue;
+    const mine = what === 'fire' ? host.world.shells : host.world.mines;
+    const theirs = what === 'fire' ? client.world.shells : client.world.mines;
+    const h = mine.find((e) => e.ownerId === 0);
+    const c = theirs.find((e) => e.ownerId === 0);
+    if (h && !c) worstGap = Infinity;
+    else if (h && c) worstGap = Math.max(worstGap, Math.hypot(h.x - c.x, h.y - c.y));
+  }
+
+  return { host, client, worstGap };
 }
 
 /** Drive a host and one client for `seconds` of virtual time. */
@@ -139,6 +191,121 @@ test('host discards inputs reordered by jitter', () => {
     Math.abs(tank.bodyAngle) < 0.5,
     `body angle ${tank.bodyAngle.toFixed(3)} suggests the stale input won`,
   );
+});
+
+test('a shell the other player fired stays on our screen', () => {
+  // The whole netcode is in service of this. A spawn arrives several ticks
+  // after the tick it describes, and the next snapshot rewinds past the moment
+  // it landed -- so the client used to delete every shell it did not fire
+  // itself, permanently, because the spawn is sent once and never repeated.
+  // Under the Bluetooth profile that was every shell the opponent fired: still
+  // lethal on the host, never drawn on the phone.
+  const { host, client, worstGap } = hostActs('fire', BLE_PROFILE);
+
+  const h = host.world.shells.find((s) => s.ownerId === 0);
+  assert.ok(h, 'the host should still have its own shell in flight');
+  assert.ok(
+    client.world.shells.some((s) => s.ownerId === 0),
+    "the host's shell is not on the client at all",
+  );
+  assert.ok(
+    worstGap < 0.25,
+    `the shell drifted ${worstGap === Infinity ? 'out of existence' : worstGap.toFixed(3) + ' tiles'} from the host's copy`,
+  );
+});
+
+test('a mine the other player laid is on our screen too', () => {
+  // Mines were never networked at all -- NetEvent.MineSpawn was declared and
+  // nothing wrote it -- so the only mine a phone could see was its own, and an
+  // opponent's killed you off an empty patch of floor.
+  const { host, client } = hostActs('mine', BLE_PROFILE);
+
+  const h = host.world.mines.find((m) => m.ownerId === 0);
+  assert.ok(h, 'the host should still have its mine down');
+  const c = client.world.mines.find((m) => m.ownerId === 0);
+  assert.ok(c, "the host's mine is not on the client at all");
+
+  // A mine never moves, so its position should survive the wire exactly to
+  // quantisation, and both its timers are rebuilt rather than sent -- get the
+  // arithmetic wrong and it arms or blows at a different moment on each phone.
+  assert.ok(Math.hypot(h.x - c.x, h.y - c.y) < 0.02, 'mine position disagrees');
+  assert.equal(c.armTick, h.armTick, 'mine arms at a different tick on the client');
+  assert.equal(c.fuseTick, h.fuseTick, 'mine blows at a different tick on the client');
+});
+
+test('we do not end up with two copies of a mine we laid ourselves', () => {
+  // The client predicts its own mine and the host confirms it. Matched on id
+  // and owner, the same as a shell.
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  new LoopbackTransport('host', 'Host', net);
+  const client = new MatchClient(cloneWorld(versusWorld(22)), clientT, 'host', 0);
+
+  client.world.mines.push({
+    id: 7, ownerId: 0, team: 0, x: 5, y: 5,
+    fuseTick: client.world.tick + 300, armTick: client.world.tick + 45,
+  });
+
+  const w = new Writer(16);
+  writeMineSpawn(w, { mineId: 7, ownerId: 0, x: 5, y: 5, tick: client.world.tick });
+  clientT.setEvents({});
+  client.handlePacket('host', w.finish());
+
+  assert.equal(client.world.mines.filter((m) => m.ownerId === 0).length, 1, 'one mine, not two');
+});
+
+test('a resync does not leave a shell behind to be resurrected', () => {
+  // A resync throws away history and restarts the clock, and it can restart it
+  // *backwards* -- the case that produced it was a client that ran 900 ticks
+  // past a sleeping host. The spawn log is keyed by tick, so anything still in
+  // it can match a tick on the new timeline and put a long-dead shell back in
+  // front of the player.
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  new LoopbackTransport('host', 'Host', net);
+  const world = versusWorld(22);
+  world.tick = 1000;
+  const client = new MatchClient(cloneWorld(world), clientT, 'host', 0);
+  clientT.setEvents({});
+
+  for (let i = 0; i < 40; i++) client.update(1000 / 60);
+
+  const snapshotFor = (tick: number) => {
+    const w = new Writer(64);
+    writeSnapshot(
+      w,
+      tick,
+      client.world.tanks.map((t) => ({
+        id: t.id,
+        alive: t.alive,
+        x: t.x,
+        y: t.y,
+        bodyAngle: t.bodyAngle,
+        turretAngle: t.turretAngle,
+      })),
+    );
+    return w.finish();
+  };
+
+  // The opponent fires, and we fold it in properly.
+  const spawn = new Writer(16);
+  writeShellSpawn(spawn, {
+    shellId: 9, ownerId: 1, x: 12, y: 6, angle: 0, bounces: 1, tick: 1010,
+  });
+  client.handlePacket('host', spawn.finish());
+  assert.equal(client.world.shells.length, 1, 'the spawn should have landed');
+
+  // Then we go deaf for long enough to force a resync back to tick 910.
+  for (let i = 0; i < 30; i++) client.handlePacket('host', snapshotFor(900));
+  assert.ok(client.resyncs > 0, 'the run should have forced a resync');
+  assert.equal(client.world.shells.length, 0, 'a resync drops shells in flight');
+
+  // Now live forward across tick 1010 again on the new timeline, and reconcile
+  // across it. Nothing should come back.
+  for (let i = 0; i < 120; i++) client.update(1000 / 60);
+  client.handlePacket('host', snapshotFor(1000));
+
+  assert.equal(client.world.shells.length, 0, 'a shell from the abandoned timeline came back');
 });
 
 test('client stays converged across the 16-bit tick wraparound', () => {

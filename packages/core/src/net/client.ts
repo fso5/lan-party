@@ -25,13 +25,14 @@
 
 import { cloneWorld, step, type WorldState } from '../sim.js';
 import { dcos, dsin, wrapAngle } from '../math.js';
-import { TICK_HZ } from '../tuning.js';
-import { emptyInput, type TankInput } from '../types.js';
+import { MINE_ARM_TICKS, MINE_FUSE_TICKS, TICK_HZ } from '../tuning.js';
+import { emptyInput, type Mine, type Shell, type TankInput } from '../types.js';
 import {
   MsgType,
   NetEvent,
   Reader,
   Writer,
+  readMineSpawn,
   readRoundOver,
   readShellSpawn,
   readSnapshot,
@@ -112,6 +113,12 @@ export class MatchClient {
   snapshotsStale = 0;
   resyncs = 0;
   private consecutiveStale = 0;
+
+  /**
+   * Entities the host spawned, kept for as long as a rewind could reach them.
+   * See `replaySpawns` for why this has to exist.
+   */
+  private spawnLog: { kind: 'shell' | 'mine'; tick: number; entity: Shell | Mine }[] = [];
 
   constructor(
     initial: WorldState,
@@ -265,10 +272,94 @@ export class MatchClient {
     // described the live tick there is nothing after it to replay.
     this.world = rewound;
     if (idx === -1) return;
+    this.replayFrom(idx);
+  }
+
+  /**
+   * Re-simulate from a history entry up to the present, rewriting the stored
+   * worlds as it goes so a later rewind lands on the corrected timeline.
+   */
+  private replayFrom(idx: number): void {
     for (let i = idx; i < this.history.length; i++) {
       const h = this.history[i];
+      // Before the state at this tick is recorded, put back anything the host
+      // told us was born on it. See `spawnLog`.
+      this.replaySpawns(h.tick);
       h.world = cloneWorld(this.world);
       step(this.world, new Map([[this.localTankId, h.input]]));
+    }
+  }
+
+  /**
+   * Fold a spawn into the timeline at the tick it actually happened.
+   *
+   * The alternative -- dropping the entity into the live world -- is what this
+   * used to do, and it loses the entity outright. A spawn message travels for
+   * the link's one-way latency, so by the time it lands the client is several
+   * ticks past the tick it describes; the next snapshot then rewinds to a
+   * world recorded before the message arrived, and replaying our own input
+   * cannot re-create a shell somebody else fired. Measured on the loopback: at
+   * 45ms, the Bluetooth profile, not one shell fired by the other player
+   * survived to be drawn, while every one of them was still lethal on the
+   * host. Below about 34ms the rewind happened not to reach back far enough
+   * and it worked by luck.
+   *
+   * Rewinding to the spawn's own tick and replaying forward also puts the
+   * entity where the host has it rather than where it started, which matters
+   * for a shell: at BLE latency, inserting it live leaves it a fifth of a tile
+   * behind for the rest of its flight.
+   *
+   * Returns false if the tick is outside our history, in which case the caller
+   * should just add it live -- the same thing that happens on a zero-latency
+   * link, where there is nothing to rewind to.
+   */
+  private rewindForSpawn(tick: number): boolean {
+    const idx = this.history.findIndex((h) => h.tick === tick);
+    if (idx === -1) return false;
+    this.world = cloneWorld(this.history[idx].world);
+    this.replayFrom(idx);
+    return true;
+  }
+
+  /**
+   * Re-create the entities the host spawned on `tick`, if the rewind lost them.
+   *
+   * A rewind restores a world we cloned before the spawn message arrived, and
+   * replaying input cannot bring back a shell somebody else fired -- input only
+   * describes our own thumb. So without this, every reconciliation deletes
+   * every shell and mine that came from an event, permanently: the spawn is
+   * sent once and never repeated.
+   *
+   * That is not a corner case. The rewind reaches back by roughly the link's
+   * one-way latency, and a spawn lands in the world at that same distance
+   * ahead of the tick being corrected -- so past about 34ms one-way the first
+   * snapshot after a spawn always predates it. Measured on the loopback: at
+   * 45ms, which is the Bluetooth profile, not one shell fired by the other
+   * player survived to be drawn. They were all still lethal on the host.
+   */
+  private replaySpawns(tick: number): void {
+    for (const s of this.spawnLog) {
+      if (s.tick !== tick) continue;
+      if (s.kind === 'shell') {
+        if (this.world.shells.some((x) => x.id === s.entity.id)) continue;
+        this.world.shells.push({ ...(s.entity as Shell) });
+      } else {
+        if (this.world.mines.some((x) => x.id === s.entity.id)) continue;
+        this.world.mines.push({ ...(s.entity as Mine) });
+      }
+    }
+  }
+
+  /**
+   * Record a spawn so a later rewind can put it back, and forget the ones no
+   * rewind can reach any more -- once a spawn is older than our whole history
+   * ring, every world we could rewind to already contains it.
+   */
+  private logSpawn(kind: 'shell' | 'mine', tick: number, entity: Shell | Mine): void {
+    this.spawnLog.push({ kind, tick, entity: { ...entity } });
+    const oldest = this.history.length ? this.history[0].tick : this.world.tick;
+    if (this.spawnLog.length > 1) {
+      this.spawnLog = this.spawnLog.filter((s) => s.tick >= oldest);
     }
   }
 
@@ -295,6 +386,9 @@ export class MatchClient {
     this.world.shells.length = 0;
     this.world.tick = tick + CLIENT_LEAD_TICKS;
     this.history.length = 0;
+    // The log describes a timeline we just abandoned, and there is no history
+    // left for a rewind to reach anyway.
+    this.spawnLog.length = 0;
     this.consecutiveStale = 0;
     this.resyncs++;
   }
@@ -328,7 +422,8 @@ export class MatchClient {
       // ever make.
       const owner = this.world.tanks.find((t) => t.id === s.ownerId);
       const speed = this.shellSpeedFor(owner?.kind ?? 0);
-      this.world.shells.push({
+      const bornOn = this.expandTick(s.tick);
+      const shell: Shell = {
         id: s.shellId,
         ownerId: s.ownerId,
         team: owner?.team ?? 1,
@@ -338,9 +433,35 @@ export class MatchClient {
         vy: dsin(s.angle) * speed,
         radius: 0.12,
         bouncesLeft: s.bounces,
-        bornTick: this.expandTick(s.tick),
+        bornTick: bornOn,
         selfArmDelay: 8,
-      });
+      };
+      this.logSpawn('shell', bornOn, shell);
+      if (!this.rewindForSpawn(bornOn)) this.world.shells.push(shell);
+    } else if (kind === NetEvent.MineSpawn) {
+      const m = readMineSpawn(r);
+
+      // Same dedupe as a shell, for the same reason: we predicted our own, and
+      // an id is only eight bits, so a stranger's mine can share the byte.
+      if (this.world.mines.some((x) => (x.id & 0xff) === m.mineId && x.ownerId === m.ownerId)) {
+        return;
+      }
+
+      // Both timers are fixed offsets from the tick it was laid on, so this is
+      // the whole mine. Nothing further is sent about it.
+      const laidOn = this.expandTick(m.tick);
+      const owner = this.world.tanks.find((t) => t.id === m.ownerId);
+      const mine: Mine = {
+        id: m.mineId,
+        ownerId: m.ownerId,
+        team: owner?.team ?? 1,
+        x: m.x,
+        y: m.y,
+        fuseTick: laidOn + MINE_FUSE_TICKS,
+        armTick: laidOn + MINE_ARM_TICKS,
+      };
+      this.logSpawn('mine', laidOn, mine);
+      if (!this.rewindForSpawn(laidOn)) this.world.mines.push(mine);
     } else if (kind === NetEvent.TankKilled) {
       r.u16();
       const victim = r.u8();

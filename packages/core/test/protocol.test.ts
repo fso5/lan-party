@@ -6,15 +6,19 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   MAX_QUANT_POS,
+  MsgType,
+  NetEvent,
   Reader,
   TruncatedPacketError,
   Writer,
   dequantPos,
   quantPos,
   MAX_LOBBY_SLOTS,
+  readMineSpawn,
   readShellSpawn,
   readSnapshot,
   writeInput,
+  writeMineSpawn,
   writeShellSpawn,
   writeSnapshot,
 } from '../src/net/protocol.js';
@@ -229,4 +233,30 @@ test('every shell profile and player slot fits the bits the wire gives it', () =
   r.u8();
   r.u8();
   assert.equal(readShellSpawn(r).bounces, 0, 'an over-wide bounce count wraps rather than failing');
+});
+
+test('a mine spawn round-trips, including the two ends of the arena', () => {
+  // x and y share a byte, four bits of each in opposite nibbles, which is the
+  // easiest place in the whole format to transpose. A mine at (2.5, 1.5) and
+  // one at (1.5, 2.5) pack to byte patterns that a swap maps onto each other,
+  // so the corners are what actually catch it.
+  for (const [x, y] of [
+    [2.5, 1.5],
+    [1.5, 2.5],
+    [21.5, 1.5],
+    [0.25, 13.75],
+    [31.5, 31.5],
+  ]) {
+    const w = new Writer();
+    writeMineSpawn(w, { mineId: 200, ownerId: 5, x, y, tick: 4321 });
+    const r = new Reader(w.finish());
+    assert.equal(r.u8(), MsgType.Event);
+    assert.equal(r.u8(), NetEvent.MineSpawn);
+    const back = readMineSpawn(r);
+    assert.equal(back.mineId, 200);
+    assert.equal(back.ownerId, 5);
+    assert.equal(back.tick, 4321);
+    assert.ok(Math.abs(back.x - x) < 1 / 128, `x ${x} came back as ${back.x}`);
+    assert.ok(Math.abs(back.y - y) < 1 / 128, `y ${y} came back as ${back.y}`);
+  }
 });
