@@ -468,6 +468,27 @@ export class MatchHost {
     // in it -- and carrying an id forward would retire whoever inherits it.
     this.abandoned.clear();
 
+    // So do the action counts, for the same reason and with a sharper edge.
+    //
+    // A debt outstanding when the round ended -- a shot asked for on the tick
+    // its tank died, which the simulation could never spend -- is fired the
+    // moment the new round makes that tank alive again. Measured: a shell out
+    // of a spawn point a hundred and seventy ticks into a round nobody had
+    // touched the trigger in.
+    //
+    // The marks have to go too, and that is the commoner case. Embedders build
+    // a fresh client for each round, because MatchStart is what tells them the
+    // new world -- so the client's counter restarts at zero while ours still
+    // holds the old value, and the difference between them is read as shots
+    // owed. Setting the mark back to "unset" makes the first packet of the
+    // round establish it again instead.
+    for (const slot of this.clients.values()) {
+      slot.lastFireSeq = -1;
+      slot.lastMineSeq = -1;
+      slot.owedShots = 0;
+      slot.owedMines = 0;
+    }
+
     this.onRoundStart?.(this.world, this.match.round);
   }
 

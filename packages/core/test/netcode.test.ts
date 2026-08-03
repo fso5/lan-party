@@ -275,6 +275,88 @@ test('a client that went quiet does not come back with a magazine to empty', () 
   assert.ok(fired.size >= 1, 'but it should still fire');
 });
 
+/** A host that rebuilds its world each round, driven by hand-written inputs. */
+function hostAcrossRounds() {
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 1);
+  const hostT = new LoopbackTransport('host', 'Host', net);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  const host = new MatchHost(versusWorld(), hostT);
+  host.roundBuilder = () => versusWorld();
+  net.connect('host', 'client');
+  host.addClient('client', 1);
+
+  const send = (t: number, fireSeq: number) => {
+    const w = new Writer(16);
+    writeInput(w, {
+      tick: t, moveX: 0, moveY: 0, aimX: 0, aimY: 1, fire: false, layMine: false, fireSeq,
+    });
+    clientT.send('host', w.finish(), false);
+    net.advance(1);
+  };
+
+  /**
+   * Step `n` ticks and count the shells born for tank 1.
+   *
+   * `after` gates it on the round having moved past a given number, for the
+   * case where the interesting window is the *next* round rather than this
+   * one. Left at zero it counts everything, which is what you want once the
+   * round has already turned over before the call.
+   */
+  const tickCountingShots = (n: number, after = 0) => {
+    let fired = 0;
+    for (let i = 0; i < n; i++) {
+      host.update(1000 / 60);
+      if (host.match.round <= after) continue;
+      fired += host.world.shells.filter(
+        (s) => s.ownerId === 1 && s.bornTick === host.world.tick - 1,
+      ).length;
+    }
+    return fired;
+  };
+
+  return { host, send, tickCountingShots };
+}
+
+test('a shot owed when the round ended is not fired into the next one', () => {
+  // The debt is spent as soon as the simulation will take it, and a dead tank
+  // will not. So a shot asked for on the tick its tank died sits there through
+  // the intermission and goes off the moment the next round makes that tank
+  // alive again -- out of a spawn point, in a round nobody has touched the
+  // trigger in yet. Measured at a hundred and seventy-nine ticks in.
+  const { host, send, tickCountingShots } = hostAcrossRounds();
+
+  send(1, 0);
+  for (let i = 0; i < 2; i++) host.update(1000 / 60);
+
+  // Killed, which both blocks the shot and ends the round.
+  killTank(host.world, host.world.tanks.find((t) => t.id === 1)!, 0);
+  send(5, 1);
+
+  // Only the next round counts: the shot is legitimately owed in this one.
+  assert.equal(tickCountingShots(400, host.match.round), 0, 'a shot carried into the next round');
+});
+
+test('a client that restarts its count each round does not spray on spawn', () => {
+  // The commoner half. An embedder builds a fresh client per round, because
+  // MatchStart is what hands it the new world -- so the client's counter goes
+  // back to zero while the host still holds the old mark, and the difference
+  // reads as shots owed. Capped at two, so this is two shells out of a spawn
+  // point at the start of every round after the first.
+  const { host, send, tickCountingShots } = hostAcrossRounds();
+
+  send(1, 5); // several shots into the first round
+  for (let i = 0; i < 2; i++) host.update(1000 / 60);
+
+  killTank(host.world, host.world.tanks.find((t) => t.id === 1)!, 0);
+  for (let i = 0; i < 200; i++) host.update(1000 / 60);
+  assert.ok(host.match.round > 1, 'the round should have turned over');
+
+  // A later tick, or the host discards this as a packet it has already seen
+  // and the count never reaches the part being tested.
+  send(50, 0); // a brand new client, counting from zero again
+  assert.equal(tickCountingShots(200), 0, 'the restarted count was read as shots owed');
+});
+
 test('the shot count still catches up when it wraps', () => {
   // Three bits on the wire, so it returns to zero every eight shots.
   const { fired, tick, send } = hostWithInputs();
