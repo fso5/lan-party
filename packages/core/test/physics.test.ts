@@ -260,3 +260,50 @@ test('every versus arena gives all four spawns the same start', async () => {
     );
   }
 });
+
+/**
+ * Every tank in a map must be able to reach every other one.
+ *
+ * A map where somebody is walled off from the fight is unplayable, and it is
+ * invisible reading the rows: an arena is drawn as text, and a wall closing a
+ * pocket looks the same as one that does not. The player it happens to drives
+ * around alone until everyone else finishes without them.
+ *
+ * Reachability, not coverage. Three of the eight maps have open cells no tank
+ * can stand in -- The Moat has eighteen, being the island inside its moat --
+ * and that is deliberate: shells fly over holes, so an island a tank cannot
+ * enter is a bank-shot feature rather than a mistake. Asserting every open cell
+ * is reachable would forbid it.
+ */
+test('every start in every map can reach every other start', async () => {
+  const { loadArena, MISSIONS, VERSUS_MAPS } = await import('../src/maps/index.js');
+  const { TANK_RADIUS } = await import('../src/tuning.js');
+
+  for (const map of [...MISSIONS, ...VERSUS_MAPS]) {
+    const a = loadArena(map);
+    const starts = [...a.spawns, ...a.enemies];
+    assert.ok(starts.length >= 2, `${map.name} should have something to compare`);
+
+    const key = (x: number, y: number) => Math.floor(y) * a.width + Math.floor(x);
+    const seen = new Set<number>();
+    const stack: [number, number][] = [[Math.floor(starts[0].x), Math.floor(starts[0].y)]];
+    while (stack.length) {
+      const [x, y] = stack.pop()!;
+      if (x < 0 || y < 0 || x >= a.width || y >= a.height) continue;
+      if (seen.has(key(x, y))) continue;
+      // The centre of the cell, which is where a tank sits when it is there.
+      if (!a.canTankOccupy(x + 0.5, y + 0.5, TANK_RADIUS)) continue;
+      seen.add(key(x, y));
+      stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+    }
+
+    const stranded = starts.filter((s) => !seen.has(key(s.x, s.y)));
+    assert.equal(
+      stranded.length,
+      0,
+      `${map.name}: ${stranded.length} start(s) walled off from the rest ` +
+        `(${stranded.map((s) => `${s.x},${s.y}`).join(' ')}). Whoever gets that one ` +
+        `drives around alone while the others finish the round.`,
+    );
+  }
+});
