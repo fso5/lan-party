@@ -77,20 +77,53 @@ export function createNativeBleAdapter(): NativeBleAdapterHandle {
    * would corrupt a snapshot instead of dropping it -- so this may only ever
    * grow on hard evidence from a negotiated MTU, never optimistically.
    */
-  let payload = 20;
+  const FLOOR = 20;
+  let payload = FLOOR;
+
+  /**
+   * Who is connected right now, because neither MTU signal names a peer.
+   *
+   * `payloadSize()` takes no argument and the mtu state change carries no peer
+   * id, so both describe "the link" and there is only one link to describe
+   * while a single phone is connected. With two, there is no way to tell whose
+   * MTU just arrived -- and taking the larger of them, which is what this used
+   * to do, hands the phone with the smaller one writes it cannot carry. BLE
+   * truncates an oversized write instead of refusing it, so that is a snapshot
+   * quietly losing its last tank rather than a packet that never came.
+   *
+   * So: one peer, believe what the radio says; more than one, back off to the
+   * floor and fragment. Slower, and it cannot corrupt anything. Doing better
+   * needs the native side to report an MTU per connection, which is a change
+   * to make when there is a radio to check it against.
+   */
+  const live = new Set<PeerId>();
+
+  const trustRadio = (reported: number) => {
+    // No lower bound here on purpose: `payloadSize` already refuses to go
+    // below 18, and a second floor in this line cannot be told apart from the
+    // first by any test.
+    payload = live.size > 1 ? FLOOR : reported;
+  };
 
   const subs = [
     TanksBle.onFrame((e) => frameCb?.(e.peerId, base64ToBytes(e.frame))),
     TanksBle.onPeerFound((e) => foundCb?.({ id: e.peerId, name: e.name, rtt: -1 })),
     TanksBle.onPeerConnected((e) => {
-      payload = Math.max(payload, TanksBle.payloadSize());
+      live.add(e.peerId);
+      trustRadio(TanksBle.payloadSize());
       connectedCb?.({ id: e.peerId, name: e.name, rtt: -1 });
     }),
-    TanksBle.onPeerDisconnected((e) => disconnectedCb?.(e.peerId, e.reason)),
+    TanksBle.onPeerDisconnected((e) => {
+      // Nothing to reset. Two peers means the payload is already at the floor,
+      // and dropping to one does not tell us which one is left or what it
+      // negotiated -- so it stays there until that link says otherwise.
+      live.delete(e.peerId);
+      disconnectedCb?.(e.peerId, e.reason);
+    }),
     TanksBle.onError((e) => errorCb?.({ where: e.where, message: e.message })),
     TanksBle.onStateChange((e) => {
       // A late MTU negotiation can shrink what one write carries; shrink with it.
-      if (e.state === 'mtu' && typeof e.payload === 'number') payload = e.payload;
+      if (e.state === 'mtu' && typeof e.payload === 'number') trustRadio(e.payload);
     }),
   ];
 
