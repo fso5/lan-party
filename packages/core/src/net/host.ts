@@ -79,6 +79,25 @@ const ABANDON_TICKS = TICK_HZ * 10;
  * client we have not heard from for a while should rejoin the fight rather
  * than empty its magazine into the room on the first packet back. Two is one
  * shot in flight plus the one being asked for.
+ *
+ * The cap does drop shots at the extreme, and it is worth knowing why before
+ * anyone raises it. A client predicts its own shells, so its copies are born
+ * on the tick it pressed the button while ours are born when the input reaches
+ * us -- theirs are older, theirs expire first, and its shell allowance frees up
+ * before ours does. Measured on the Bluetooth profile: on roughly two hundred
+ * ticks of a thirty-second run the client had a free slot when we did not. So
+ * a player holding the trigger down asks for shots slightly faster than we can
+ * ever grant them, the debt climbs to the cap, and the excess is lost.
+ *
+ * Whether that matters depends entirely on how the trigger is used. Tapping it
+ * twice a second, which is how the game is actually played, we fire every shot
+ * asked for -- 18 drawn and 18 fired on a perfect link, 22 and 22 over
+ * Bluetooth. Holding it down permanently, which took resurrecting both tanks
+ * every tick to sustain, the client drew 74 and we fired 40.
+ *
+ * Raising the cap would convert those lost shots into late ones, arriving
+ * after the player has stopped asking, and would bring back the magazine
+ * emptying itself on reconnect. Left where it is deliberately.
  */
 const MAX_OWED = 2;
 
@@ -524,7 +543,25 @@ export class MatchHost {
     this.transport.broadcast(buf, false);
   }
 
-  /** State a late-joining client needs. */
+  /**
+   * A copy of the live world. Nothing calls this, and the name oversells it.
+   *
+   * It is not what a late-joining client needs, and reaching for it is how
+   * someone will conclude that mid-match joining is solved. A joiner is handed
+   * `MatchStart` -- map id, seed, roster -- and rebuilds the world from those,
+   * which reproduces the arena as it was authored, not as it now stands. So it
+   * arrives with every destroyed block back in place and no mines on the
+   * ground, and nothing ever corrects either: snapshots carry tanks and
+   * nothing else, and the events that reported that damage were sent once,
+   * before it was listening.
+   *
+   * A WorldState cannot cross the wire, so this does not close that gap; it
+   * would need fields on `MatchStart` for the terrain and the mines. Left
+   * unbuilt on purpose. The only host that seats players today does it once,
+   * at the start of a round, so nobody can join mid-match to be wrong about
+   * the arena -- and building a protocol for a path that does not exist yet
+   * means guessing at what it needs.
+   */
   snapshotForJoin(): WorldState {
     return cloneWorld(this.world);
   }
