@@ -111,6 +111,53 @@ await new Promise(r => setTimeout(r, 800));
 const failures = [];
 const check = (cond, msg) => { if (!cond) failures.push(msg); };
 
+/*
+ * Does a shot fired on one phone appear on the other?
+ *
+ * Nothing above this asks. The suite watched tanks converge and the scoreboard
+ * render, both of which stayed true through a stretch where a client deleted
+ * every shell it had not fired itself on the next reconciliation -- so the
+ * opponent's shells were lethal and invisible and this run was green.
+ *
+ * Sampled over a window rather than once, because a shell is short-lived: it
+ * can hit a wall a few frames after it is drawn, and a single snapshot taken
+ * at the wrong moment would make this flap.
+ */
+const weapons = async (p) => p.evaluate(() => ({
+  me: window.__net?.client?.localTankId ?? null,
+  shells: (window.__state?.world?.shells ?? []).map((s) => s.ownerId),
+  mines: (window.__state?.world?.mines ?? []).map((m) => m.ownerId),
+}));
+
+const idA = (await weapons(pages[0])).me;
+const idB = (await weapons(pages[1])).me;
+
+let aFiredSeenByB = 0;
+let aMinedSeenByB = 0;
+let aFiredSeenByA = 0;
+let aMinedSeenByA = 0;
+
+await pages[0].keyboard.press('Space'); // one mine, which sits still for five seconds
+for (let i = 0; i < 24; i++) {
+  if (i % 4 === 0) await pages[0].keyboard.press('Enter'); // and a shot every ~400ms
+  await pages[0].waitForTimeout(100);
+  const [wa, wb] = [await weapons(pages[0]), await weapons(pages[1])];
+  aFiredSeenByA = Math.max(aFiredSeenByA, wa.shells.filter((o) => o === idA).length);
+  aFiredSeenByB = Math.max(aFiredSeenByB, wb.shells.filter((o) => o === idA).length);
+  aMinedSeenByA = Math.max(aMinedSeenByA, wa.mines.filter((o) => o === idA).length);
+  aMinedSeenByB = Math.max(aMinedSeenByB, wb.mines.filter((o) => o === idA).length);
+}
+
+console.log(
+  `A drives tank ${idA}, B drives tank ${idB}; ` +
+  `A's shells seen — on A ${aFiredSeenByA}, on B ${aFiredSeenByB}; ` +
+  `A's mines — on A ${aMinedSeenByA}, on B ${aMinedSeenByB}`,
+);
+check(aFiredSeenByA > 0, 'A never drew its own shell, so the rest of this proves nothing');
+check(aFiredSeenByB > 0, "A's shells never reached B — lethal on the host, invisible on the other phone");
+check(aMinedSeenByA > 0, 'A never laid its own mine');
+check(aMinedSeenByB > 0, "A's mine never reached B");
+
 const snap = async (p) => p.evaluate(() => ({
   status: document.getElementById('net-status').textContent,
   roundsVisible: !document.getElementById('rounds').hidden,

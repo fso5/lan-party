@@ -582,6 +582,11 @@ window.addEventListener('keydown', (e) => {
     input.seatFire[1] = true;
     input.fireLatch = true;
   }
+  // And the mine, for exactly the same reason. It had the latch on the touch
+  // button but not on the key, so a quick tap of the spacebar was dropped
+  // whenever it fell between two frames -- reliably at 60fps if you tap the
+  // way you would tap a button.
+  if (k === ' ') input.mineLatch = true;
   if (k === 't') state.showTrajectory = !state.showTrajectory;
   if (k === 'g') state.showDebug = !state.showDebug;
   if (!net.client) {
