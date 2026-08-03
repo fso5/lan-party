@@ -48,6 +48,11 @@ export class NativeTcpServer implements TcpServer {
     const native = TanksLanNative;
     if (!native) throw new Error('hosting over WiFi needs the Android app');
 
+    // Drop anything still attached from a previous start. Without this a
+    // second start -- tapping "Start hosting" twice, or a screen that
+    // remounts -- leaves both sets live and hands core every packet twice.
+    this.removeSubs();
+
     // Subscribe before listening. A phone can connect between bind and
     // subscribe, and that connection would arrive with nobody listening for
     // it -- a player who joined and is invisible.
