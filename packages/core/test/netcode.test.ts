@@ -410,6 +410,73 @@ test('holding the trigger down does not buy extra shots on the host', () => {
   );
 });
 
+test('players are numbered from zero, in roster order, ahead of every bot', () => {
+  // Both embedders seat people by arithmetic on this and nothing else. The app
+  // hands its first client `tankId = 1` and takes the host's own tank as
+  // `tanks[0].id`; the browser rebuilds the roster in the order MatchStart
+  // listed it and trusts the ids to line up. Neither asks core what it did.
+  //
+  // So a change here that looks harmless -- creating bots first, starting the
+  // counter at one, grouping players by team -- seats every client in somebody
+  // else's tank, and it does it silently: the match runs, the tanks move, and
+  // each player is driving a stranger. `roundBuilder`'s own docstring names
+  // this as the failure it fears and there was nothing holding it.
+  const arena = loadArena(VERSUS_MAPS[0]);
+  const world = createWorld({
+    arena,
+    seed: 42,
+    players: [
+      { team: 3, spawnIndex: 2 },
+      { team: 0, spawnIndex: 0 },
+      { team: 3, spawnIndex: 1 },
+    ],
+    bots: [
+      { kind: TankKind.Grey, team: 90, spawnIndex: 3 },
+      { kind: TankKind.Teal, team: 91, spawnIndex: 4 },
+    ],
+  });
+
+  const players = world.tanks.filter((t) => t.kind === TankKind.Player);
+  assert.deepEqual(
+    players.map((t) => t.id),
+    [0, 1, 2],
+    'players take the first ids, counting from zero',
+  );
+
+  // Deliberately not sorted by team: the roster's order is the contract, and
+  // grouping by team is the plausible refactor that would break it.
+  assert.deepEqual(
+    players.map((t) => t.team),
+    [3, 0, 3],
+    'and in the order the roster gave them, not tidied',
+  );
+
+  const bots = world.tanks.filter((t) => t.kind !== TankKind.Player);
+  assert.deepEqual(bots.map((t) => t.id), [3, 4], 'bots come after, never interleaved');
+
+  // The same roster twice must produce the same ids, or a player keeps their
+  // seat in round one and inherits somebody else's in round two.
+  const again = createWorld({
+    arena,
+    seed: 99,
+    players: [
+      { team: 3, spawnIndex: 2 },
+      { team: 0, spawnIndex: 0 },
+      { team: 3, spawnIndex: 1 },
+    ],
+    bots: [{ kind: TankKind.Grey, team: 90, spawnIndex: 3 }],
+  });
+  assert.deepEqual(
+    again.tanks.filter((t) => t.kind === TankKind.Player).map((t) => [t.id, t.team]),
+    [
+      [0, 3],
+      [1, 0],
+      [2, 3],
+    ],
+    'a rebuilt roster must hand everyone back the seat they had',
+  );
+});
+
 test('a client never invents a shell for a tank it does not control', () => {
   // The host sends a spawn for every shell fired in the match, the bots'
   // included -- and the client is running those same bots in its own
