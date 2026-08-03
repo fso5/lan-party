@@ -123,6 +123,15 @@ export class MatchClient {
   /** Deaths the host reported, kept for the same window and the same reason. */
   private deathLog: { tick: number; victim: number }[] = [];
 
+  /**
+   * Shots and mines our own simulation has actually produced, counted so the
+   * host can tell how many it still owes us. See WireInput.fireSeq -- input is
+   * sent unreliably, and a dropped shot is the one thing a later packet cannot
+   * make good on its own.
+   */
+  private fireSeq = 0;
+  private mineSeq = 0;
+
   constructor(
     initial: WorldState,
     private transport: Transport,
@@ -184,10 +193,38 @@ export class MatchClient {
     // replaced by the next one 16ms later, and the host reuses the last one it
     // has, so retransmitting stale intent would be worse than dropping it.
     const w = new Writer(16);
-    writeInput(w, { tick: this.world.tick, ...input });
+    writeInput(w, {
+      tick: this.world.tick,
+      ...input,
+      fireSeq: this.fireSeq,
+      mineSeq: this.mineSeq,
+    });
     this.transport.send(this.hostId, w.finish(), false);
 
+    // Count what this step actually produced, not what the thumb asked for:
+    // our own cooldown has already had its say, so the host is being told
+    // "I have fired this many", not "I would like to fire".
+    //
+    // The live step only. A replay re-runs these same ticks and would count
+    // every shot again, and the host would owe us a barrage that never
+    // happened.
     step(this.world, new Map([[this.localTankId, input]]), this.localTankId);
+
+    // Look for an entity born on the tick just stepped, the same test the host
+    // uses. Comparing array lengths instead looks equivalent and is not: a
+    // shell can be created while another expires in the same step, leaving the
+    // count unchanged and the shot uncounted.
+    const born = this.world.tick - 1;
+    if (this.world.shells.some((x) => x.ownerId === this.localTankId && x.bornTick === born)) {
+      this.fireSeq = (this.fireSeq + 1) & 7;
+    }
+    if (
+      this.world.mines.some(
+        (x) => x.ownerId === this.localTankId && x.armTick - MINE_ARM_TICKS === born,
+      )
+    ) {
+      this.mineSeq = (this.mineSeq + 1) & 7;
+    }
   }
 
   /**

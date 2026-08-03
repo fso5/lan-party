@@ -195,6 +195,139 @@ test('host discards inputs reordered by jitter', () => {
   );
 });
 
+/** Drive a host with hand-written input packets and count what tank 1 fires. */
+function hostWithInputs() {
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 1);
+  const hostT = new LoopbackTransport('host', 'Host', net);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  const host = new MatchHost(versusWorld(), hostT);
+  net.connect('host', 'client');
+  host.addClient('client', 1);
+
+  const fired = new Set<number>();
+  const tick = (n: number) => {
+    for (let i = 0; i < n; i++) {
+      host.update(1000 / 60);
+      for (const s of host.world.shells) if (s.ownerId === 1) fired.add(s.id);
+    }
+  };
+  const send = (t: number, fireSeq: number) => {
+    const w = new Writer(16);
+    writeInput(w, {
+      tick: t, moveX: 0, moveY: 0, aimX: 0, aimY: 1, fire: false, layMine: false, fireSeq,
+    });
+    clientT.send('host', w.finish(), false);
+    net.advance(1);
+  };
+
+  return { host, fired, tick, send };
+}
+
+test('a shot survives the input packet that carried it being dropped', () => {
+  // Input is sent unreliably, and for the sticks that is right: a lost sample
+  // is superseded by the next one 16ms later. A shot is not a continuous
+  // quantity, so a lost one is simply gone -- while the client has already
+  // drawn the shell. Measured on the Bluetooth profile before this: ten of
+  // every 360 fire intents never arrived.
+  //
+  // Here the client fires twice and only the second packet gets through. The
+  // count it carries is what makes the first shot recoverable.
+  const { fired, tick, send } = hostWithInputs();
+
+  send(1, 0); // the mark
+  tick(5);
+  send(10, 2); // two shots later; the packet saying "one" never arrived
+  tick(60);
+
+  assert.equal(fired.size, 2, 'both shots should have been fired, not just the one we heard about');
+});
+
+test('the host does not keep re-firing from an input it has already used', () => {
+  // The other half, and the more damaging one: the host reuses a client's last
+  // input every tick until a newer one arrives, so a `fire` bit left standing
+  // in it produced a fresh shot every time the cooldown expired. Those shells
+  // are real, they hit people, and the player who supposedly fired them never
+  // saw them leave. In a minute of play the host fired 25 shots for a tank
+  // whose own screen showed 18.
+  const { fired, tick, send } = hostWithInputs();
+
+  send(1, 0);
+  tick(5);
+  send(10, 1); // exactly one shot asked for
+  tick(240); // four seconds of silence, twenty cooldowns' worth
+
+  assert.equal(fired.size, 1, 'one shot was asked for, so one shot is what should exist');
+});
+
+test('a client that went quiet does not come back with a magazine to empty', () => {
+  // A phone whose WiFi dropped for a few seconds reappears having fired
+  // several times. Owing all of them would have its tank spray the room the
+  // moment it reconnects, at a cadence nobody was ever holding the trigger
+  // for. Two is enough to cover the one in flight and the one being asked for.
+  const { fired, tick, send } = hostWithInputs();
+
+  send(1, 0);
+  tick(5);
+  send(10, 5); // five shots' worth of silence
+  tick(240);
+
+  assert.ok(fired.size <= 2, `fired ${fired.size} shots at once on reconnect`);
+  assert.ok(fired.size >= 1, 'but it should still fire');
+});
+
+test('the shot count still catches up when it wraps', () => {
+  // Three bits on the wire, so it returns to zero every eight shots.
+  const { fired, tick, send } = hostWithInputs();
+
+  send(1, 7);
+  tick(5);
+  send(10, 0); // 7 -> 0 is one shot, not seven backwards
+  tick(60);
+
+  assert.equal(fired.size, 1, 'a wrap must read as one shot forward');
+});
+
+test('holding the trigger down does not buy extra shots on the host', () => {
+  // The count has to be of shots the client's own simulation produced, not of
+  // ticks the thumb was down. Counting intent looks identical while the
+  // trigger is held -- both sides fire at their cooldown -- and comes apart
+  // the moment it is released, with the host still owing shots nobody asked
+  // for and firing them into an empty room.
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 5);
+  const hostT = new LoopbackTransport('host', 'Host', net);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  const host = new MatchHost(versusWorld(), hostT);
+  host.localTankId = 0;
+  const client = new MatchClient(cloneWorld(host.world), clientT, 'host', 1);
+  net.connect('host', 'client');
+  host.addClient('client', 1);
+
+  const createdByClient = () => client.world.nextEntityId - startedAt;
+  const startedAt = client.world.nextEntityId;
+  const hostFired = new Set<number>();
+  const stepMs = 1000 / 60;
+
+  // Thirty ticks holding it down, then two seconds off the trigger.
+  for (let i = 0; i < 150; i++) {
+    client.setInput({ ...emptyInput(), aimX: 0, aimY: 1, fire: i < 30 });
+    host.setLocalInput(emptyInput());
+    client.update(stepMs);
+    net.advance(stepMs);
+    host.update(stepMs);
+    net.advance(0);
+    for (const s of host.world.shells) if (s.ownerId === 1) hostFired.add(s.id);
+  }
+
+  // The client only ever creates entities for its own tank -- see the spawn
+  // authority passed to step() -- so its id counter is exactly what it fired.
+  assert.ok(createdByClient() > 0, 'the client should have fired something');
+  assert.equal(
+    hostFired.size,
+    createdByClient(),
+    `host fired ${hostFired.size} for a tank whose own screen showed ${createdByClient()}`,
+  );
+});
+
 test('a client never invents a shell for a tank it does not control', () => {
   // The host sends a spawn for every shell fired in the match, the bots'
   // included -- and the client is running those same bots in its own

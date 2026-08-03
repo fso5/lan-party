@@ -251,6 +251,27 @@ export interface WireInput {
   aimY: number;
   fire: boolean;
   layMine: boolean;
+  /**
+   * How many shots the client believes it has fired, modulo 8.
+   *
+   * The `fire` bit alone is not enough, and the reason is the one place where
+   * the "a lost input is replaced by the next one 16ms later" argument does
+   * not hold. That is true of the sticks: they are a continuous quantity and
+   * the next sample supersedes the lost one. A shot is a discrete event, so a
+   * dropped packet does not get superseded -- it is simply gone, while the
+   * client has already drawn the shell. Measured on the Bluetooth profile: the
+   * client held a shell the host had never fired on 22% of ticks, for up to
+   * two seconds at a time, which is a shell's whole life.
+   *
+   * A count repeated in every packet heals itself. The host compares it with
+   * what it has applied and fires the difference, so the shot survives as long
+   * as any one of the next eight inputs arrives -- and at 60Hz, with shots at
+   * least twelve ticks apart, that is seconds of total silence before it could
+   * ever be ambiguous.
+   */
+  fireSeq?: number;
+  /** The same, for mines. */
+  mineSeq?: number;
 }
 
 export function writeInput(w: Writer, input: WireInput): void {
@@ -264,7 +285,14 @@ export function writeInput(w: Writer, input: WireInput): void {
   w.i8(Math.round(clampUnit(input.moveY) * 127));
   w.i8(Math.round(clampUnit(input.aimX) * 127));
   w.i8(Math.round(clampUnit(input.aimY) * 127));
-  w.u8((input.fire ? 1 : 0) | (input.layMine ? 2 : 0));
+  // Two flags and two three-bit counters, all inside the byte the flags
+  // already occupied -- the input frame does not grow.
+  w.u8(
+    (input.fire ? 1 : 0) |
+      (input.layMine ? 2 : 0) |
+      (((input.fireSeq ?? 0) & 7) << 2) |
+      (((input.mineSeq ?? 0) & 7) << 5),
+  );
 }
 
 export function readInput(r: Reader): WireInput {
@@ -282,6 +310,8 @@ export function readInput(r: Reader): WireInput {
     aimY,
     fire: (flags & 1) !== 0,
     layMine: (flags & 2) !== 0,
+    fireSeq: (flags >> 2) & 7,
+    mineSeq: (flags >> 5) & 7,
   };
 }
 

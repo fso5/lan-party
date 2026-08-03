@@ -72,6 +72,22 @@ const INPUT_STALE_TICKS = 20;
  */
 const ABANDON_TICKS = TICK_HZ * 10;
 
+/**
+ * How far behind a client's action count we are, given what we last applied.
+ *
+ * Modular, because the count is three bits on the wire, and capped, because a
+ * client we have not heard from for a while should rejoin the fight rather
+ * than empty its magazine into the room on the first packet back. Two is one
+ * shot in flight plus the one being asked for.
+ */
+const MAX_OWED = 2;
+
+export function catchUp(lastSeq: number, seq: number, owed: number): number {
+  if (lastSeq < 0) return 0; // First packet: nothing owed, just take the mark.
+  const delta = (seq - lastSeq) & 7;
+  return Math.min(owed + delta, MAX_OWED);
+}
+
 interface ClientSlot {
   peerId: PeerId;
   tankId: number;
@@ -79,6 +95,12 @@ interface ClientSlot {
   lastInputTick: number;
   /** Highest tick seen from this client, for reordering. */
   highestTick: number;
+  /** Last fire/mine count applied from this client, or -1 before the first. */
+  lastFireSeq: number;
+  lastMineSeq: number;
+  /** Shots and mines this client has produced that we have not yet. */
+  owedShots: number;
+  owedMines: number;
 }
 
 export class MatchHost {
@@ -169,6 +191,10 @@ export class MatchHost {
       lastInput: emptyInput(),
       lastInputTick: 0,
       highestTick: -1,
+      lastFireSeq: -1,
+      lastMineSeq: -1,
+      owedShots: 0,
+      owedMines: 0,
     });
   }
 
@@ -241,10 +267,22 @@ export class MatchHost {
       moveY: input.moveY,
       aimX: input.aimX,
       aimY: input.aimY,
-      fire: input.fire,
-      layMine: input.layMine,
+      // Firing is driven by the counters below, not by this bit. The bit says
+      // "the trigger is down right now", which is the wrong question when the
+      // packet carrying the shot may simply not have arrived.
+      fire: false,
+      layMine: false,
     };
     slot.lastInputTick = this.world.tick;
+
+    // How many shots has this client produced that we have not? A count rather
+    // than an edge, so a dropped input costs nothing: the next one carries the
+    // same total. Capped, because a client that has been silent for a while
+    // should rejoin the fight, not empty its magazine into the room.
+    slot.owedShots = catchUp(slot.lastFireSeq, input.fireSeq ?? 0, slot.owedShots);
+    slot.owedMines = catchUp(slot.lastMineSeq, input.mineSeq ?? 0, slot.owedMines);
+    slot.lastFireSeq = input.fireSeq ?? 0;
+    slot.lastMineSeq = input.mineSeq ?? 0;
   }
 
   /**
@@ -270,7 +308,15 @@ export class MatchHost {
     const inputs = new Map<number, TankInput>();
     for (const slot of this.clients.values()) {
       const age = this.world.tick - slot.lastInputTick;
-      inputs.set(slot.tankId, age > INPUT_STALE_TICKS ? emptyInput() : slot.lastInput);
+      const base = age > INPUT_STALE_TICKS ? emptyInput() : slot.lastInput;
+      // Spend one owed action per tick. The simulation still has the last word
+      // -- its cooldown may refuse -- so the debt is only cleared below, when a
+      // shell or mine actually appeared.
+      inputs.set(slot.tankId, {
+        ...base,
+        fire: slot.owedShots > 0,
+        layMine: slot.owedMines > 0,
+      });
     }
     // The host's own tank has no network round trip -- its input applies on the
     // very tick it was produced, which is the one genuine advantage of hosting.
@@ -289,6 +335,19 @@ export class MatchHost {
     // Identify them by bornTick rather than by walking ShellFired events: two
     // tanks can fire on the same tick, and pairing events to shells by array
     // position gets that wrong.
+    // Clear a client's debt only when the shot really happened. If our own
+    // cooldown refused it, it stays owed and goes out on a later tick.
+    for (const slot of this.clients.values()) {
+      if (slot.owedShots > 0 &&
+          this.world.shells.some((s) => s.ownerId === slot.tankId && s.bornTick === this.world.tick - 1)) {
+        slot.owedShots--;
+      }
+      if (slot.owedMines > 0 &&
+          this.world.mines.some((m) => m.ownerId === slot.tankId && m.armTick - MINE_ARM_TICKS === this.world.tick - 1)) {
+        slot.owedMines--;
+      }
+    }
+
     for (const shell of this.world.shells) {
       if (shell.bornTick !== this.world.tick - 1) continue;
       // Note the position we send is post-movement: step() advances a new
