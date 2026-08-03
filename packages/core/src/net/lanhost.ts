@@ -139,8 +139,38 @@ export class LanHost {
     });
   }
 
+  /**
+   * Begin listening, falling back to any free port if the preferred one is
+   * taken.
+   *
+   * 8080 is memorable and needs no privileges, which is why it is the default
+   * -- but a phone is a whole computer and something else may already be on
+   * it. Measured: the bind throws `EADDRINUSE`, the host screen shows "listen
+   * EADDRINUSE: address already in use 0.0.0.0:8080", and there is no way to
+   * choose a different port from a phone. Hosting is simply impossible until
+   * the player finds and kills whatever is squatting.
+   *
+   * An ephemeral port is worse to read out -- "colon four one seven two nine"
+   * against "colon eight zero eight zero" -- and enormously better than not
+   * playing. It only happens when the nice number is unavailable, and the URL
+   * is on screen either way.
+   *
+   * The first error is what surfaces if the retry fails too. That one names
+   * the port somebody chose; the second names a port nobody asked for.
+   */
   async start(): Promise<number> {
-    this.port = await this.tcp.start(this.port);
+    try {
+      this.port = await this.tcp.start(this.port);
+    } catch (err) {
+      // Retrying 0 with 0 would just fail the same way, and the failure is
+      // then about something other than the port being taken.
+      if (this.port === 0) throw err;
+      try {
+        this.port = await this.tcp.start(0);
+      } catch {
+        throw err;
+      }
+    }
     this.started = true;
     return this.port;
   }
@@ -151,8 +181,16 @@ export class LanHost {
     await this.tcp.stop();
   }
 
-  /** The URL to read out. Null until an address exists to put in it. */
+  /**
+   * The URL to read out. Null until there is a server behind it.
+   *
+   * `started` matters as much as the address. Without that check this answered
+   * with a perfectly plausible URL after `start()` had thrown -- a port nothing
+   * was listening on, which is the same dead end as the wrong interface and
+   * looks just as convincing.
+   */
   get joinUrl(): string | null {
+    if (!this.started) return null;
     const ip = this.tcp.getIpAddress();
     return ip ? `http://${ip}:${this.port}` : null;
   }

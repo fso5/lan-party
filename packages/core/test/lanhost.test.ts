@@ -657,3 +657,73 @@ test('carrier-grade NAT alone can lose it', () => {
     '10.1.1.1',
   );
 });
+
+/*
+ * The port already being taken must not stop the party.
+ *
+ * 8080 is memorable and unprivileged, which is why it is the default -- but a
+ * phone is a whole computer and something else may already be on it. Measured
+ * before changing anything: the bind throws `EADDRINUSE`, the host screen
+ * shows "listen EADDRINUSE: address already in use 0.0.0.0:8080", and there is
+ * no way to pick a different port from a phone. Hosting is impossible until
+ * the player finds and kills the squatter.
+ */
+test('a taken port falls back to a free one rather than failing to host', async () => {
+  class Squatted implements TcpServer {
+    handlers!: TcpConnectionHandlers;
+    tried: number[] = [];
+    async start(port: number) {
+      this.tried.push(port);
+      if (port === DEFAULT_LAN_PORT) throw new Error('EADDRINUSE: address already in use');
+      return 41729; // what the OS hands back for an ephemeral request
+    }
+    async stop() {}
+    send() {}
+    close() {}
+    setHandlers(h: TcpConnectionHandlers) { this.handlers = h; }
+    getIpAddress() { return '192.168.43.1'; }
+  }
+
+  const tcp = new Squatted();
+  const host = new LanHost(tcp, { page: PAGE });
+  const port = await host.start();
+
+  assert.deepEqual(tcp.tried, [DEFAULT_LAN_PORT, 0], 'it should ask for the nice number first');
+  assert.equal(port, 41729);
+  assert.equal(host.joinUrl, 'http://192.168.43.1:41729', 'the URL must name the port it got');
+  assert.ok(host.isRunning);
+});
+
+test('when the fallback fails too, the error names the port somebody chose', async () => {
+  // The second failure is about a port nobody asked for, so it explains
+  // nothing. Whatever went wrong with 8080 is the useful message.
+  class Broken implements TcpServer {
+    handlers!: TcpConnectionHandlers;
+    async start(port: number): Promise<number> {
+      throw new Error(port === DEFAULT_LAN_PORT ? 'in use: 8080' : 'something else entirely');
+    }
+    async stop() {}
+    send() {}
+    close() {}
+    setHandlers(h: TcpConnectionHandlers) { this.handlers = h; }
+    getIpAddress() { return '192.168.43.1'; }
+  }
+
+  const host = new LanHost(new Broken(), { page: PAGE });
+  await assert.rejects(() => host.start(), /in use: 8080/);
+  assert.equal(host.isRunning, false);
+  assert.equal(host.joinUrl, null, 'a host that never started has no URL to read out');
+});
+
+test('there is no URL before hosting starts', async () => {
+  // `joinUrl` used to answer from the address alone, so it produced a
+  // perfectly plausible URL for a port nothing was listening on -- the same
+  // dead end as reading out the wrong interface, and just as convincing.
+  const tcp = new FakeTcp();
+  const host = new LanHost(tcp, { page: PAGE });
+  assert.equal(host.joinUrl, null);
+  await host.start();
+  assert.equal(host.joinUrl, `http://192.168.43.1:${DEFAULT_LAN_PORT}`);
+  await host.stop();
+  assert.equal(host.joinUrl, null, 'and none once hosting has stopped');
+});

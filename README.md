@@ -70,6 +70,9 @@ No internet, no accounts, nothing installed on the iPhones.
    used as a local network.
 2. Open Tanks! → **Host over WiFi** → **Start hosting**.
 3. It shows a URL, something like `http://192.168.43.1:8080`. Read it out.
+   (If something else on the phone already has port 8080, it quietly picks
+   another one and shows that instead — so read out whatever is on screen
+   rather than what you expect.)
 
 **On every other phone, iPhone included:**
 
@@ -162,7 +165,7 @@ what `net/websocket.ts` is for, and it is why Bluetooth is not the only route.
 
 ```
 npm install
-npm test  --workspace @tanks/core      # 143 tests, headless
+npm test  --workspace @tanks/core      # 146 tests, headless
 npm test  --workspace @tanks/app       # 28 tests
 npm run build --workspace @tanks/proto # -> packages/proto/dist/tanks-proto.html
 npm run smoke --workspace @tanks/proto # drives the built page in a real browser
