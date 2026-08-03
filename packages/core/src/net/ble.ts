@@ -103,8 +103,24 @@ export class BleFramer {
   /** peerId -> messageId -> fragments received so far. */
   private pending = new Map<PeerId, Map<number, (Uint8Array | undefined)[]>>();
 
-  constructor(private payloadSize: number = BLE_SAFE_MTU - FRAME_HEADER_BYTES) {
-    if (this.payloadSize < 8) throw new Error(`BLE payload size ${this.payloadSize} is unusably small`);
+  /**
+   * A function, not a number, when the caller has a link that renegotiates.
+   *
+   * A BLE MTU is agreed after the connection is up, so anything that reads it
+   * once -- at construction, which is necessarily before any phone has
+   * connected -- captures the conservative default and keeps it for the life
+   * of the match. That is not a small loss: it cut every message into 18-byte
+   * pieces on a link that had agreed to carry 183, ten times the writes and
+   * ten times the header, on the one budget this whole protocol is shaped
+   * around.
+   */
+  constructor(private payload: number | (() => number) = BLE_SAFE_MTU - FRAME_HEADER_BYTES) {}
+
+  /** Checked here rather than in the constructor, which a function outruns. */
+  private get payloadSize(): number {
+    const n = typeof this.payload === 'function' ? this.payload() : this.payload;
+    if (n < 8) throw new Error(`BLE payload size ${n} is unusably small`);
+    return n;
   }
 
   /** Split a message into wire frames. */
@@ -225,7 +241,10 @@ export class BleTransport implements Transport {
   private peers = new Map<PeerId, Peer>();
 
   constructor(private adapter: BleAdapter) {
-    this.framer = new BleFramer(adapter.payloadSize);
+    // Read on every fragment, not captured here: this constructor runs before
+    // any phone has connected, so the value at this instant is always the
+    // conservative default and never the one the link went on to agree.
+    this.framer = new BleFramer(() => adapter.payloadSize);
 
     adapter.onFrame((from, frame) => {
       const message = this.framer.reassemble(from, frame);

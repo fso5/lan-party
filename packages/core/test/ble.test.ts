@@ -99,6 +99,95 @@ test('framer refuses a message too large to fragment', () => {
   assert.throws(() => f.fragment(new Uint8Array(16 * 129)), /fragments/);
 });
 
+test('an MTU agreed after connecting reaches the fragmenter', () => {
+  // A BLE MTU is negotiated once the link is up, which is necessarily after
+  // the transport was built. Reading the adapter's payload size once, in the
+  // constructor, therefore captures the conservative default and keeps it for
+  // the whole match: measured at ten fragments for a 180-byte message on a
+  // link that had agreed to carry it in one. Ten times the writes and ten
+  // times the header on the budget this protocol is shaped around, and
+  // nothing anywhere reports it -- the transport goes on advertising the
+  // larger size it is not using.
+  let payload = 18;
+  const sent: Uint8Array[] = [];
+  // An array rather than a nullable binding: assigning through a callback does
+  // not tell the compiler the value is set, and it narrows to null.
+  const connected: ((p: Peer) => void)[] = [];
+
+  const adapter: BleAdapter = {
+    get payloadSize() {
+      return payload;
+    },
+    startAdvertising: async () => {},
+    stopAdvertising: async () => {},
+    startScanning: async () => {},
+    stopScanning: async () => {},
+    connect: async () => {},
+    disconnect: async () => {},
+    sendFrame: (_to, frame) => sent.push(frame),
+    onFrame: () => {},
+    onPeerConnected: (cb) => {
+      connected.push(cb);
+    },
+    onPeerDisconnected: () => {},
+  };
+
+  const transport = new BleTransport(adapter);
+  const message = new Uint8Array(180);
+
+  transport.send('p1', message, false);
+  assert.equal(sent.length, 10, 'before anything is negotiated it should fragment at the floor');
+
+  sent.length = 0;
+  payload = 183;
+  connected[0]({ id: 'p1', name: 'p1', rtt: -1 });
+  transport.send('p1', message, false);
+  assert.equal(sent.length, 1, 'once the link has agreed a bigger write, one fragment');
+
+  // And back down again, because a late renegotiation can shrink it.
+  sent.length = 0;
+  payload = 40;
+  transport.send('p1', message, false);
+  assert.equal(sent.length, 5, 'a shrinking MTU has to be followed too');
+});
+
+test('a live payload size below the BLE minimum is refused, not fragmented around', () => {
+  // Without this the message still fails, but as "needs 180 fragments, max
+  // 128" -- which points at the message rather than at the radio that just
+  // reported something impossible.
+  const f = new BleFramer(() => 4);
+  assert.throws(() => f.fragment(new Uint8Array(180)), /unusably small/);
+});
+
+test('the size the transport advertises is the one it fragments against', () => {
+  // These come from the same place now. When they did not, `maxPayload` said a
+  // message was acceptable and `fragment` then refused it for needing more
+  // than 128 fragments -- a message rejected by the layer that had just
+  // approved it.
+  let payload = 18;
+  const adapter = {
+    get payloadSize() {
+      return payload;
+    },
+    startAdvertising: async () => {},
+    stopAdvertising: async () => {},
+    startScanning: async () => {},
+    stopScanning: async () => {},
+    connect: async () => {},
+    disconnect: async () => {},
+    sendFrame: () => {},
+    onFrame: () => {},
+    onPeerConnected: () => {},
+    onPeerDisconnected: () => {},
+  } satisfies BleAdapter;
+
+  const transport = new BleTransport(adapter);
+  for (payload of [18, 40, 183]) {
+    assert.equal(transport.maxPayload, transport.singleWritePayload * 128);
+    assert.doesNotThrow(() => new BleFramer(() => payload).fragment(new Uint8Array(transport.maxPayload)));
+  }
+});
+
 /**
  * A fake radio.
  *
