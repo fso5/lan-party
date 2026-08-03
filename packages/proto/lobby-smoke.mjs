@@ -690,6 +690,46 @@ for (const [i, p] of pages.entries()) {
         );
       }
     }
+
+    /*
+     * And can they still shoot?
+     *
+     * Firing is a count, not a flag: the client tells the host how many shots
+     * it has produced and the host fires the difference, so that a shot lost
+     * with its packet is not lost for good. Both ends of that reset at a round
+     * boundary -- the host clears the mark it was holding, and the browser
+     * builds a fresh client whose count starts again at zero. Get either half
+     * wrong and the player cannot fire at all for the rest of the match, or
+     * spawns shooting. Core covers both over a loopback; nothing had ever
+     * driven the pair through a round change in a browser.
+     *
+     * Only the first of those two is checked here, and deliberately. A count
+     * carried across the boundary is spent the moment the tank is alive again,
+     * so by the time this runs -- after waiting for every client to follow the
+     * host into the new round -- those shells have expired and sampling for
+     * them reports nothing either way. That half stays in the core tests,
+     * which can look at the tick it happens on.
+     */
+    const shooter = NAMES[0];
+    const shooterTank = expectedTeam.get(shooter).tankId;
+
+    for (let i = 0; i < 6; i++) {
+      await pages[0].keyboard.press('Enter');
+      await pages[0].waitForTimeout(120);
+    }
+
+    const fired = await new Promise((resolve) => {
+      const deadline = Date.now() + 4000;
+      const poll = () => {
+        if (match.world.shells.some((s) => s.ownerId === shooterTank)) return resolve(true);
+        if (Date.now() > deadline) return resolve(false);
+        setTimeout(poll, 50);
+      };
+      poll();
+    });
+    check(fired, `${shooter} could not fire in round two`);
+    console.log(`round two: ${shooter} fired and the host has the shell`);
+
     console.log(`round two: host round=${match.match.round}, both clients followed with their teams intact`);
   }
 }
