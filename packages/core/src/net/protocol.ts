@@ -571,7 +571,21 @@ export enum LobbyOp {
   SetReady = 5,
 }
 
-/** Roster ceiling. Eight tanks is also the snapshot budget's limit. */
+/**
+ * Roster ceiling. Eight tanks is also the snapshot budget's limit.
+ *
+ * This is what the *wire* can carry, and it is not the number of people who
+ * can play. Every versus map ships four spawn points -- Crossfire, Pillars and
+ * The Moat, all four -- so a roster of eight seats twice as many players as
+ * any map can place. Which of the two numbers is wrong is a design decision
+ * that has not been made: cap the lobby at four, or give the maps four more
+ * spawns each.
+ *
+ * Until it is, read this as an upper bound on the encoding rather than a
+ * promise about seats, and take the real limit from the arena. The Bluetooth
+ * seating path in packages/proto/game.js does exactly that and refuses the
+ * fifth player.
+ */
 export const MAX_LOBBY_SLOTS = 8;
 
 /**

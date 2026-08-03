@@ -75,6 +75,30 @@ test('a roster carries more than two teams', () => {
   assert.equal(new Set(back.slots.map((s) => s.team)).size, MAX_LOBBY_SLOTS);
 });
 
+test('no map has more spawn points than the roster can carry', () => {
+  /*
+   * The direction of this mismatch that the protocol cannot survive.
+   *
+   * Today every versus map has four spawns against a roster ceiling of eight,
+   * so the slack is all one way and the open question is whether to cap the
+   * lobby or add spawns. Adding them is one of the two answers, and the moment
+   * a map goes past eight the roster silently cannot describe the match: slots
+   * are dropped on the wire, and the players holding them are seated into a
+   * game nobody else can see them in.
+   *
+   * So this does not take a side on the seat count. It pins the one bound that
+   * is not a matter of taste -- whatever the maps grow to, the encoding has to
+   * be able to say it.
+   */
+  for (const mission of VERSUS_MAPS) {
+    const arena = loadArena(mission);
+    assert.ok(
+      arena.spawns.length <= MAX_LOBBY_SLOTS,
+      `${mission.name} has ${arena.spawns.length} spawns, over the ${MAX_LOBBY_SLOTS}-slot roster`,
+    );
+  }
+});
+
 test('a full roster fits one BLE write', () => {
   // Lobby traffic is reliable and fragmentable, so this is not fatal -- but a
   // roster that needs fragmenting turns every team tap into a multi-packet
