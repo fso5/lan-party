@@ -132,6 +132,21 @@ const weapons = async (p) => p.evaluate(() => ({
 const idA = (await weapons(pages[0])).me;
 const idB = (await weapons(pages[1])).me;
 
+/*
+ * Not checked here: whether the two screens agree about who is alive.
+ *
+ * It looks like the obvious next assertion and it is worthless. Both clients
+ * run the same deterministic simulation over the same shells, so they arrive
+ * at the same deaths on their own -- with the host's TankKilled event thrown
+ * away entirely, and with snapshots forbidden from applying `alive` at all,
+ * the two screens still agreed. Tried both as mutations; neither turned this
+ * suite red.
+ *
+ * So an alive comparison here would read like coverage of the death path and
+ * be measuring the physics instead. What actually guards that path is in
+ * netcode.test.ts, where the client can be isolated from its own simulation.
+ */
+
 let aFiredSeenByB = 0;
 let aMinedSeenByB = 0;
 let aFiredSeenByA = 0;
@@ -146,6 +161,7 @@ for (let i = 0; i < 24; i++) {
   aFiredSeenByB = Math.max(aFiredSeenByB, wb.shells.filter((o) => o === idA).length);
   aMinedSeenByA = Math.max(aMinedSeenByA, wa.mines.filter((o) => o === idA).length);
   aMinedSeenByB = Math.max(aMinedSeenByB, wb.mines.filter((o) => o === idA).length);
+
 }
 
 console.log(
