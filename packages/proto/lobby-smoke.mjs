@@ -483,6 +483,29 @@ await pages[0].waitForTimeout(600);
 const afterReady = await read(pages[0]);
 check(afterReady.ready === 'Ready', `ready did not round-trip (button says "${afterReady.ready}")`);
 
+/*
+ * And the button must not still hold focus.
+ *
+ * A pointer click leaves focus on the button, so the next Enter re-activates
+ * it. In the lobby that means the Enter you press to fire also un-readies you
+ * or re-sends a team change -- and once the match starts the panel is hidden,
+ * so the control being re-triggered is invisible. The header and footer buttons
+ * were already guarded against exactly this; the lobby's were not, because they
+ * are built when a roster arrives and a load-time binding never saw them.
+ */
+{
+  // `||` not `??`: body's id is an empty string, not null, so `??` would report
+  // the blank rather than falling through to the tag name.
+  const focused = await pages[0].evaluate(
+    () => document.activeElement?.id || document.activeElement?.tagName || null,
+  );
+  check(
+    focused !== 'btn-ready',
+    'the ready button kept focus after a tap, so Enter would re-press it instead of firing',
+  );
+  console.log(`focus after the ready tap: ${focused}`);
+}
+
 // And every other browser must see it, since the roster is broadcast to all of
 // them. With three clients this is the first time a broadcast has had to reach
 // more than one socket.
@@ -713,22 +736,65 @@ for (const [i, p] of pages.entries()) {
     const shooter = NAMES[0];
     const shooterTank = expectedTeam.get(shooter).tankId;
 
-    for (let i = 0; i < 6; i++) {
-      await pages[0].keyboard.press('Enter');
-      await pages[0].waitForTimeout(120);
+    /*
+     * Press and watch at the same time, rather than pressing six times and then
+     * looking.
+     *
+     * The first version pressed six times over 720ms and only then opened a
+     * four-second poll. It passed locally and went red in CI once, and I could
+     * not reproduce it: eleven local runs, three of them under enough CPU
+     * contention to halve the frame rate, all fired. Instrumenting the host to
+     * log every birth and death of Alpha's shell says why the obvious theory is
+     * wrong -- the shell appears 30-150ms after the first press and is still
+     * there three seconds later, so it is not being born and dying inside the
+     * blind window. The intermission is over too; the check above already
+     * waited for the host to reach round two.
+     *
+     * So the cause is still unknown, and this does not claim to have fixed it.
+     * What it does is stop the check being fragile in the two ways it was:
+     * presses now span two seconds instead of 720ms, so a transient that eats
+     * the first shot has many more chances to clear, and the world is sampled
+     * between every press rather than only after the last one. If it goes red
+     * again the diagnostics below say which half broke instead of costing
+     * another round of guessing.
+     */
+    let fired = false;
+    for (let i = 0; i < 40 && !fired; i++) {
+      if (i % 4 === 0) await pages[0].keyboard.press('Enter');
+      await pages[0].waitForTimeout(50);
+      fired = match.world.shells.some((s) => s.ownerId === shooterTank);
     }
 
-    const fired = await new Promise((resolve) => {
-      const deadline = Date.now() + 4000;
-      const poll = () => {
-        if (match.world.shells.some((s) => s.ownerId === shooterTank)) return resolve(true);
-        if (Date.now() > deadline) return resolve(false);
-        setTimeout(poll, 50);
-      };
-      poll();
-    });
     check(fired, `${shooter} could not fire in round two`);
-    console.log(`round two: ${shooter} fired and the host has the shell`);
+    if (fired) {
+      console.log(`round two: ${shooter} fired and the host has the shell`);
+    } else {
+      /*
+       * Say which half broke. The client not drawing its own shell means the
+       * press never became a shot in the browser -- a dead tank, a page that
+       * never got the key, a client not stepping. Drawing one the host never
+       * receives means the count-based fire handshake lost it across the round
+       * boundary. Those need opposite fixes and a bare "could not fire" cannot
+       * tell them apart, which is what made the first red build expensive.
+       */
+      const why = await pages[0].evaluate((id) => {
+        const w = window.__state?.world;
+        const me = w?.tanks.find((t) => t.id === id);
+        return {
+          clientDrewAShell: !!w && w.shells.some((s) => s.ownerId === id),
+          clientShells: w?.shells.length ?? null,
+          alive: me?.alive ?? null,
+          clientTick: w?.tick ?? null,
+          focused: document.activeElement?.id || document.activeElement?.tagName || null,
+          lobbyHidden: document.getElementById('match-lobby')?.hidden ?? null,
+        };
+      }, shooterTank);
+      console.error(
+        `round two: ${shooter} never fired. client=${JSON.stringify(why)} ` +
+          `host={tick:${match.world.tick},shells:${match.world.shells.length},` +
+          `alive:${match.world.tanks.filter((t) => t.alive).length}}`,
+      );
+    }
 
     console.log(`round two: host round=${match.match.round}, both clients followed with their teams intact`);
   }

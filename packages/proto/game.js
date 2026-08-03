@@ -714,12 +714,24 @@ document.getElementById('btn-traj').addEventListener('click', (e) => {
  * re-activates whichever button was last touched -- pressing Enter to fire
  * would toggle 2P back off. Drop focus after pointer-driven clicks, but keep it
  * for real keyboard activation (detail === 0) so tabbing still works.
+ *
+ * The lobby's buttons need this as much as the header's and were missed. You
+ * tap a team, you tap Ready, the match starts -- and the first time you press
+ * Enter to shoot, you also re-send a team change or un-ready yourself, because
+ * that button still has focus behind the hidden panel.
  */
 for (const btn of document.querySelectorAll('header button, footer button')) {
   btn.addEventListener('click', (e) => {
     if (e.detail > 0) e.currentTarget.blur();
   });
 }
+
+// Delegated, because the team buttons do not exist until a roster arrives and
+// binding at load time would miss every one of them.
+document.getElementById('match-lobby').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (btn && e.detail > 0) btn.blur();
+});
 
 const STICK_RANGE = 55;
 
