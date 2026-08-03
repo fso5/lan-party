@@ -611,6 +611,10 @@ for (const [i, p] of pages.entries()) {
    * the host's own team is what keeps this correct whatever the lobby chose --
    * and it is the only side that can win a round by the host dying.
    */
+  // Where this block's failures start, so its closing line can report what
+  // actually happened instead of asserting the happy path. See below.
+  const failuresBefore = failures.length;
+
   const hostTeamId = world.tanks[0].team;
   const clientTeamId = [...expectedTeam.values()].map((v) => v.team).find((t) => t !== hostTeamId);
   const roundSeed = (round) => seed + round * 7919;
@@ -796,7 +800,21 @@ for (const [i, p] of pages.entries()) {
       );
     }
 
-    console.log(`round two: host round=${match.match.round}, both clients followed with their teams intact`);
+    /*
+     * Only claim this if it happened.
+     *
+     * `check` records a failure and returns, so execution reaches here whether
+     * the clients followed or not -- and printing the happy sentence anyway is
+     * how the first red build came to say Alpha both fired and could not fire
+     * in the same log. The same pattern was fixed in smoke.mjs and again in
+     * the fire check above; this was the last one left in this file.
+     */
+    const broke = failures.length - failuresBefore;
+    console.log(
+      broke === 0
+        ? `round two: host round=${match.match.round}, both clients followed with their teams intact`
+        : `round two: host round=${match.match.round}, ${broke} check(s) failed -- see the summary below`,
+    );
   }
 }
 
