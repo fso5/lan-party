@@ -432,23 +432,26 @@ export class MatchClient {
     if (kind === NetEvent.ShellSpawn) {
       const s = readShellSpawn(r);
       /*
-       * Do not double-add a shell our own prediction already created.
+       * Our own shot is already on screen -- we predicted it the moment the
+       * thumb went down, which is the whole point. This is the host confirming
+       * it, not a second shell.
        *
-       * Matched on owner as well as id, because the id on the wire is only the
-       * low eight bits and a stranger's shell can land on the same byte. The
-       * shells this can legitimately duplicate are the ones we predicted, and
-       * we only ever predict our own -- so anyone else's spawn is never a
-       * duplicate, whatever byte it arrives with.
+       * Matched on the owner alone, deliberately. It used to compare entity
+       * ids too, and that never worked outside a test that handed both sides
+       * the same one: the host allocates an id for every shell in the match
+       * and we allocate only for our own, so the two counters part company
+       * within seconds and every shot we fired arrived looking unfamiliar. In
+       * a minute of play that left three or four extra copies of our own
+       * shells in flight.
        *
-       * Dropping a spawn is not cosmetic: clients simulate shells locally from
-       * this event, so a shell dropped here exists on the host, kills you
-       * there, and is never drawn on your phone.
+       * We can be this blunt because we only ever predict for ourselves -- see
+       * the spawn authority passed to step(). Anybody else's spawn is never a
+       * duplicate, so nothing else can be swallowed here. And dropping a spawn
+       * that was not a duplicate is not cosmetic: clients simulate shells
+       * locally from this event, so one lost here exists on the host, kills
+       * you there, and is never drawn on your phone.
        */
-      if (
-        this.world.shells.some((x) => (x.id & 0xff) === s.shellId && x.ownerId === s.ownerId)
-      ) {
-        return;
-      }
+      if (s.ownerId === this.localTankId) return;
 
       // The whole trajectory follows from here. This is the payoff for the
       // deterministic physics: ten bytes buys every bounce this shell will
@@ -474,11 +477,9 @@ export class MatchClient {
     } else if (kind === NetEvent.MineSpawn) {
       const m = readMineSpawn(r);
 
-      // Same dedupe as a shell, for the same reason: we predicted our own, and
-      // an id is only eight bits, so a stranger's mine can share the byte.
-      if (this.world.mines.some((x) => (x.id & 0xff) === m.mineId && x.ownerId === m.ownerId)) {
-        return;
-      }
+      // Same as a shell, for the same reason: our own is already down, and
+      // matching it by id cannot work when the two sides number independently.
+      if (m.ownerId === this.localTankId) return;
 
       // Both timers are fixed offsets from the tick it was laid on, so this is
       // the whole mine. Nothing further is sent about it.

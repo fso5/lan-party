@@ -359,8 +359,10 @@ test('a mine the other player laid is on our screen too', () => {
 });
 
 test('we do not end up with two copies of a mine we laid ourselves', () => {
-  // The client predicts its own mine and the host confirms it. Matched on id
-  // and owner, the same as a shell.
+  // The client predicts its own mine and the host confirms it. Matched on the
+  // owner alone, the same as a shell, and tested with the ids deliberately
+  // disagreeing -- which is the only thing that ever happens in a real match,
+  // because the two sides number entities independently.
   const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
   const clientT = new LoopbackTransport('client', 'Client', net);
   new LoopbackTransport('host', 'Host', net);
@@ -372,7 +374,7 @@ test('we do not end up with two copies of a mine we laid ourselves', () => {
   });
 
   const w = new Writer(16);
-  writeMineSpawn(w, { mineId: 7, ownerId: 0, x: 5, y: 5, tick: client.world.tick });
+  writeMineSpawn(w, { mineId: 51, ownerId: 0, x: 5, y: 5, tick: client.world.tick });
   clientT.setEvents({});
   client.handlePacket('host', w.finish());
 
@@ -1079,6 +1081,68 @@ test('a spawn is not dropped just because its low byte is taken', () => {
   const theirs = client.world.shells.filter((s) => s.ownerId === 1);
   assert.equal(mine.length, 1, 'our own predicted shell is untouched');
   assert.equal(theirs.length, 1, 'and the opponent’s shell exists on our phone too');
+});
+
+test('the host confirming our own shot does not become a second shell', () => {
+  // The case the old dedupe could not handle, and the one that actually
+  // happens: the ids disagree. The host allocates an id for every shell in the
+  // match and we allocate only for the ones we predict, so within seconds of
+  // play the two counters are nowhere near each other -- measured at 32 on the
+  // host against 12 on the client. Matching on the id therefore failed every
+  // time, and every shot we fired was drawn twice.
+  const world = versusWorld(22);
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  new LoopbackTransport('host', 'Host', net);
+  const client = new MatchClient(cloneWorld(world), clientT, 'host', 0);
+
+  // Our prediction, numbered by us.
+  client.world.shells.push({
+    id: 11, ownerId: 0, team: 0, x: 5, y: 5, vx: 1, vy: 0,
+    radius: 0.12, bouncesLeft: 1, bornTick: client.world.tick, selfArmDelay: 8,
+  });
+
+  // The host's confirmation of that same shot, numbered by the host.
+  const w = new Writer(16);
+  writeShellSpawn(w, {
+    shellId: 47, ownerId: 0, x: 5, y: 5, angle: 0, bounces: 1, tick: client.world.tick,
+  });
+  clientT.setEvents({});
+  client.handlePacket('host', w.finish());
+
+  assert.equal(
+    client.world.shells.filter((s) => s.ownerId === 0).length,
+    1,
+    'one shell, not two -- the ids differ and always will',
+  );
+});
+
+test('suppressing our own does not swallow somebody else’s', () => {
+  // The guard is on the owner alone now, so it must not reach any further than
+  // that. A dropped spawn is the expensive direction: that shell exists on the
+  // host, kills you there, and is never drawn on your phone.
+  const world = versusWorld(22);
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  new LoopbackTransport('host', 'Host', net);
+  const client = new MatchClient(cloneWorld(world), clientT, 'host', 0);
+
+  // We hold a shell of our own numbered 7 ...
+  client.world.shells.push({
+    id: 7, ownerId: 0, team: 0, x: 5, y: 5, vx: 1, vy: 0,
+    radius: 0.12, bouncesLeft: 1, bornTick: client.world.tick, selfArmDelay: 8,
+  });
+
+  // ... and the opponent's shell arrives carrying the same byte.
+  const w = new Writer(16);
+  writeShellSpawn(w, {
+    shellId: 7, ownerId: 1, x: 12, y: 6, angle: 0, bounces: 1, tick: client.world.tick,
+  });
+  clientT.setEvents({});
+  client.handlePacket('host', w.finish());
+
+  assert.equal(client.world.shells.filter((s) => s.ownerId === 1).length, 1, 'theirs must land');
+  assert.equal(client.world.shells.filter((s) => s.ownerId === 0).length, 1, 'and ours is untouched');
 });
 
 test('our own predicted shell is still not added twice', () => {
