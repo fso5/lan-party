@@ -113,9 +113,47 @@ jobs:
       # type at the checked-in debug keystore, so the output is signed with APK
       # Signature Scheme v2 -- enough to sideload. A real key is only needed for
       # Play Store distribution.
+      #
+      # The retry is for exactly one failure and deliberately refuses to cover
+      # anything else. Gradle installs the NDK on demand during this step, and
+      # on 6b55d26 that download arrived corrupt:
+      #
+      #   java.util.zip.ZipException: Archive is not a ZIP archive
+      #   "Install NDK (Side by side) 27.1.12297006" failed.
+      #
+      # on a commit that changed one test file. A red main here is not cosmetic
+      # -- this step is what puts an installable APK on the release, so a
+      # transient CDN failure means the phone download goes stale until someone
+      # notices and retriggers it by hand.
+      #
+      # So: retry that string, and fail immediately on anything else. A blanket
+      # `retry twice` would turn a real, reproducible build failure into twenty
+      # minutes of waiting before reporting the same thing, and would quietly
+      # paper over a flake that deserved investigating. If a second signature
+      # shows up, add it here by name rather than widening the match.
       - name: Build the APK
         working-directory: packages/app/android
-        run: ./gradlew assembleRelease --no-daemon
+        run: |
+          set -o pipefail
+          for attempt in 1 2; do
+            if ./gradlew assembleRelease --no-daemon 2>&1 | tee build.log; then
+              exit 0
+            fi
+            if ! grep -q 'Archive is not a ZIP archive' build.log; then
+              echo "::error::Build failed for a reason a retry will not fix."
+              exit 1
+            fi
+            echo "::warning::Corrupt SDK download on attempt ${attempt}. Clearing it and retrying."
+            # Guarded so an unset variable cannot turn this into `rm -rf /ndk`.
+            # Best-effort anyway: the retry most likely succeeds because the
+            # second download is not corrupt, not because of the clearing.
+            for root in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}"; do
+              [ -n "$root" ] && rm -rf "$root/ndk"
+            done
+            true
+          done
+          echo "::error::The SDK download was corrupt twice running."
+          exit 1
 
       # Ship the single-file web build next to the APK. It is 105 KB against the
       # APK's 55 MB, which matters when the whole point is getting this onto a
