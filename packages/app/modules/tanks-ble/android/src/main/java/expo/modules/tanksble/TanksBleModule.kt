@@ -253,8 +253,14 @@ class TanksBleModule : Module() {
         subscribers[id] = device
         sendEvent("onPeerConnected", mapOf("peerId" to id, "name" to (safeName(device) ?: id)))
       } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-        subscribers.remove(id)
-        sendEvent("onPeerDisconnected", mapOf("peerId" to id, "reason" to "status $status"))
+        // Same rule as the central side: announce a departure only for someone
+        // who was actually here. A device can reach DISCONNECTED without ever
+        // having been a subscriber -- a connection that drops before it
+        // subscribes -- and core should not be told a player left who never
+        // arrived.
+        if (subscribers.remove(id) != null) {
+          sendEvent("onPeerDisconnected", mapOf("peerId" to id, "reason" to "status $status"))
+        }
       }
     }
 
@@ -376,14 +382,32 @@ class TanksBleModule : Module() {
     }
   }
 
+  /**
+   * Leaving on purpose, and saying so.
+   *
+   * The JS side learns a peer is gone from `onPeerDisconnected` and from
+   * nothing else -- `bleAdapter` drops it from `live` and tells core there. So
+   * a departure that emits no event leaves core sending to somebody who is not
+   * there, and leaves `live` overstating the room, which pins the frame size to
+   * the 20-byte floor for the rest of the match.
+   *
+   * `close()` immediately after `disconnect()` is widely held to suppress the
+   * state-change callback, and I have no radio here to settle it. So this does
+   * not depend on the answer: the event is emitted here, and the callback path
+   * below only emits when it was the one that removed the entry. Exactly one
+   * event per departure whichever way the platform behaves, which is the point
+   * -- the previous shape could emit none or two depending on it.
+   */
   @SuppressLint("MissingPermission")
   private fun disconnect(peerId: String) {
     try {
-      connections.remove(peerId)?.let {
-        it.disconnect()
-        it.close()
-      }
+      val gatt = connections.remove(peerId)
       rxCharacteristics.remove(peerId)
+      if (gatt != null) {
+        gatt.disconnect()
+        gatt.close()
+        sendEvent("onPeerDisconnected", mapOf("peerId" to peerId, "reason" to "left"))
+      }
     } catch (e: Throwable) {
       fail("disconnect", e)
     }
@@ -400,10 +424,15 @@ class TanksBleModule : Module() {
         // renegotiating mid-match.
         gatt.requestMtu(DESIRED_MTU)
       } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-        connections.remove(id)
+        // Only the remover announces it. If `disconnect()` already took this
+        // entry out and said so, this callback -- should the platform deliver
+        // it after close() -- must not say it again.
+        val wasLive = connections.remove(id) != null
         rxCharacteristics.remove(id)
         gatt.close()
-        sendEvent("onPeerDisconnected", mapOf("peerId" to id, "reason" to "status $status"))
+        if (wasLive) {
+          sendEvent("onPeerDisconnected", mapOf("peerId" to id, "reason" to "status $status"))
+        }
       }
     }
 
