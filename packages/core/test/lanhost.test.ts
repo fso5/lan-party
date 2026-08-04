@@ -586,6 +586,31 @@ test('a phone with nothing but cellular gets no URL at all', () => {
   );
 });
 
+test('two addresses the scoring cannot separate resolve the same way every time', () => {
+  /*
+   * Found by mutation: `score > best.score` and `score >= best.score` behave
+   * identically across every other test here, because nothing else ties.
+   *
+   * This is not a claim that the first one is the right answer -- when a phone
+   * has its hotspot up and is also on a house network, both are 192.168 with
+   * unremarkable names and the scoring genuinely cannot tell which one the
+   * players are on. It is a claim that the answer does not move. Somebody is
+   * reading this URL out loud to four people; tapping Host again and getting
+   * the other address is a worse failure than getting the same wrong one
+   * twice, because the second time nobody believes the screen.
+   *
+   * If a real tie-break is ever found, this test should change rather than be
+   * deleted -- what must not happen is the order drifting because a comparison
+   * was flipped while tidying up.
+   */
+  const tied = [
+    { name: 'wlan0', address: '192.168.1.50' },
+    { name: 'eth0', address: '192.168.7.20' },
+  ];
+  assert.equal(pickHostAddress(tied), '192.168.1.50');
+  assert.equal(pickHostAddress([...tied].reverse()), '192.168.7.20');
+});
+
 test('USB tethering is a real local network and is not thrown away', () => {
   // `usb0`/`rndis0` sit next to the cellular interfaces alphabetically and in
   // spirit, and are the opposite thing: a cable to a device that can reach
