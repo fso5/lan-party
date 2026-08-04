@@ -31,12 +31,20 @@
 #    so a command that was already failing reports every mutation as caught --
 #    including ones that in fact survived. So the command is run once against
 #    the pristine file first, and a verdict is refused if that does not pass.
-#    Set MUTATE_SKIP_BASELINE=1 to skip it when you have just run it yourself.
+#
+# 4. THE COMMAND READS THIS FILE. Passing on clean source is not enough: a test
+#    glob that matches nothing makes node print "tests 0" and exit 0, so every
+#    mutation under it comes back SURVIVED. So the file is replaced with
+#    something unparseable and the command must fail. If it does not, it never
+#    loaded the file, and no verdict about it means anything.
+#
+#    Set MUTATE_SKIP_CHECKS=1 to skip 3 and 4 when you have just run them.
 #
 # Exit code is the mutation's verdict, not the command's:
 #   0  the command failed, so the mutation was caught  (what you want)
 #   1  the command passed, so nothing covers this
 #   3  the command fails on unmutated source -- fix the command, no verdict
+#   4  the command ignores this file entirely -- fix the command, no verdict
 #   9  the text was not found -- the mutation never applied, result meaningless
 
 set -u
@@ -90,7 +98,7 @@ echo "=== $LABEL ==="
 # Nothing about the mutated file is trusted here: the baseline runs against
 # the pristine copy, then the mutation is reapplied. Costs one extra run of
 # the command, which is worth strictly more than a confident wrong answer.
-if [ "${MUTATE_SKIP_BASELINE:-0}" != "1" ]; then
+if [ "${MUTATE_SKIP_CHECKS:-${MUTATE_SKIP_BASELINE:-0}}" != "1" ]; then
   cp "$BACKUP" "$FILE"
   if ! ( eval "$COMMAND" ) >/dev/null 2>&1; then
     echo "--- BASELINE FAILED: the command does not pass on unmutated source ---"
@@ -99,6 +107,29 @@ if [ "${MUTATE_SKIP_BASELINE:-0}" != "1" ]; then
     echo "    package is the usual cause."
     exit 3
   fi
+
+  # Property 4: THE COMMAND EXERCISES THIS FILE.
+  #
+  # Passing on clean source is not enough. `npx tsx --test test/*.test.ts` run
+  # from the repo root matches no files, so node reports "tests 0" and exits 0
+  # -- and every mutation under it comes back SURVIVED. That is the opposite
+  # failure to property 3 and the more insidious one: a false alarm sends you
+  # writing tests for behaviour that was already covered.
+  #
+  # A syntax error is the one edit guaranteed to be noticed by anything that
+  # actually loads the file. If the command still passes with this file
+  # unparseable, it never read it, and no verdict about it is worth having.
+  printf '!!!mutate.sh sensitivity probe -- not valid source!!!\n' > "$FILE"
+  if ( eval "$COMMAND" ) >/dev/null 2>&1; then
+    cp "$BACKUP" "$FILE"
+    echo "--- INSENSITIVE: the command passes with $FILE syntactically broken ---"
+    echo "    So it never loads that file, and SURVIVED would mean nothing."
+    echo "    Usual causes: a glob that matched no test files (node exits 0 on"
+    echo "    'tests 0'), the wrong package, or a build step that is not rerun."
+    exit 4
+  fi
+  cp "$BACKUP" "$FILE"
+
   python3 - "$FILE" "$OLD" "$NEW" <<'PY' || exit 9
 import sys
 path, old, new = sys.argv[1], sys.argv[2], sys.argv[3]
