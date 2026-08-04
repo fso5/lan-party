@@ -1276,6 +1276,74 @@ test('a client whose clock falls behind the host resyncs instead of drifting', (
  * them around a maze if a pair left, and if everyone remaining is on one team
  * the round cannot end at all.
  */
+test('a silent client stops driving rather than holding the stick down', () => {
+  /*
+   * Found by mutation: raising INPUT_STALE_TICKS from 20 to a million broke
+   * nothing, so the host repeating a vanished client's last input for ever was
+   * untested.
+   *
+   * The two timeouts around this are easy to confuse. ABANDON_TICKS destroys
+   * the tank of someone who has genuinely gone, ten seconds later, and is
+   * covered below. This is the much shorter one, and it is about the ordinary
+   * case rather than the sad one: input is sent unreliably, so a handful of
+   * dropped packets is normal and the host is right to keep applying the last
+   * stick position across a gap that small. What it must not do is keep
+   * applying it indefinitely -- a phone that drops out mid-turn leaves its
+   * tank driving across the map on a stick nobody is holding, for the whole
+   * ten seconds before the tank is retired.
+   *
+   * Measured as movement rather than as a flag, because that is the part a
+   * player sees.
+   */
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 1);
+  const hostT = new LoopbackTransport('host', 'Host', net);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  const host = new MatchHost(versusWorld(), hostT);
+  net.connect('host', 'client');
+  host.addClient('client', 1);
+
+  /*
+   * Driving away from the near wall, which the first version of this did not.
+   *
+   * It sent moveX: +1 from a spawn about two tiles from the right-hand edge,
+   * so the tank stopped either way -- on the timeout if the timeout worked, on
+   * the wall if it did not -- and raising INPUT_STALE_TICKS to a million left
+   * the test green. It needs somewhere to keep going for "it kept going" to be
+   * observable at all.
+   */
+  const w = new Writer(16);
+  writeInput(w, {
+    tick: 1, moveX: -1, moveY: 0, aimX: -1, aimY: 0, fire: false, layMine: false,
+  });
+  clientT.send('host', w.finish(), false);
+  net.advance(1);
+
+  const tank = () => host.world.tanks.find((t) => t.id === 1)!;
+
+  // Ten ticks in, well inside the stale window: it should be moving.
+  const startX = tank().x;
+  for (let i = 0; i < 10; i++) host.update(1000 / 60);
+  const movedWhileFresh = Math.abs(tank().x - startX);
+  assert.ok(
+    movedWhileFresh > 0.01,
+    `the tank should still be driving 10 ticks in, but moved ${movedWhileFresh}`,
+  );
+
+  // Now just past the threshold, and measured immediately after it rather than
+  // a hundred ticks later -- by then a tank driving on stale input has crossed
+  // the map and found a wall, and stopped for the wrong reason.
+  for (let i = 0; i < 15; i++) host.update(1000 / 60);
+  const settled = tank().x;
+  for (let i = 0; i < 20; i++) host.update(1000 / 60);
+
+  assert.ok(
+    Math.abs(tank().x - settled) < 0.01,
+    `the tank kept driving on stale input: moved ${Math.abs(tank().x - settled).toFixed(3)} tiles ` +
+      `over 20 ticks with the client silent`,
+  );
+  assert.ok(tank().alive, 'this is the stale-input timeout, not the abandon one');
+});
+
 test('a departed player’s tank is retired, and the round can end', () => {
   const world = versusWorld(11);
   const net = new LoopbackNetwork(PERFECT_PROFILE, 3);

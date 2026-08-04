@@ -40,6 +40,17 @@
 #
 #    Set MUTATE_SKIP_CHECKS=1 to skip 3 and 4 when you have just run them.
 #
+# KNOWN LIMIT, and it is not guarded: if the command builds, "caught" can mean
+# the compiler objected rather than a test failing. core's tsconfig sets
+# noUnusedLocals, so deleting the one use of a constant reports "caught" purely
+# because the constant is now unused -- which says nothing about coverage. It
+# cost me a wrong conclusion: `const base = age > INPUT_STALE_TICKS ? ... ` was
+# "caught" that way while setting the same constant to a million survived, two
+# behaviourally identical mutations with opposite verdicts. When a mutation
+# could plausibly change what compiles, prefer one that cannot -- change a
+# value rather than remove a use -- or read the command's output rather than
+# just its exit code.
+#
 # Exit code is the mutation's verdict, not the command's:
 #   0  the command failed, so the mutation was caught  (what you want)
 #   1  the command passed, so nothing covers this
