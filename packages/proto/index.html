@@ -156,11 +156,31 @@
     overflow: hidden;
   }
 
+  /*
+   * Keep the bars out from under the notch and the home indicator.
+   *
+   * The viewport meta says `viewport-fit=cover`, which is what stops iOS
+   * letterboxing the page in black -- but it does that by extending the page
+   * *under* the hardware, and until now nothing pulled the content back out.
+   * On an iPhone held landscape the notch takes a strip off one side and the
+   * home indicator sits across the bottom, which is precisely where the footer
+   * puts Fire and Mine. Half of why this game is a web page at all is that an
+   * iPhone can join without an App Store account; shipping it with the fire
+   * button under the home bar would waste that.
+   *
+   * `max()` rather than plain `env()` so the existing padding still wins on
+   * every device with no insets, which is all of them except this one case. A
+   * browser too old to know `env()` throws the whole declaration away and
+   * keeps the shorthand above it, so this cannot make anything worse.
+   */
   header {
     display: flex;
     align-items: center;
     gap: 1.25rem;
     padding: 0.6rem 0.9rem;
+    padding-top: max(0.6rem, env(safe-area-inset-top));
+    padding-left: max(0.9rem, env(safe-area-inset-left));
+    padding-right: max(0.9rem, env(safe-area-inset-right));
     background: var(--panel);
     border-bottom: 1px solid var(--hairline);
     flex-wrap: wrap;
@@ -371,6 +391,11 @@
     align-items: center;
     gap: 0.5rem;
     padding: 0.5rem 0.9rem;
+    /* The bar with Fire and Mine on it. See the note above `header`: on an
+       iPhone this edge is where the home indicator lives. */
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+    padding-left: max(0.9rem, env(safe-area-inset-left));
+    padding-right: max(0.9rem, env(safe-area-inset-right));
     background: var(--panel);
     border-top: 1px solid var(--hairline);
     font-size: 0.68rem;
@@ -503,15 +528,34 @@
   /* A phone held sideways is ~390px tall. The arena has to stay legible --
      seeing every bank shot coming is the whole game -- so the chrome gets out
      of the way rather than the board shrinking. */
+  /*
+   * A phone held landscape is about 390px tall, so this block is the one that
+   * actually runs on the device the safe-area insets are for -- and it sets
+   * `padding` with the shorthand, which resets the longhands above and threw
+   * the insets away. The first version of that fix was inert on precisely the
+   * hardware it was written for, which is worse than not having written it:
+   * the rule was there to read and did nothing.
+   */
   @media (max-height: 460px) {
-    header { padding: 0.35rem 0.6rem; gap: 0.7rem; }
+    header {
+      padding: 0.35rem 0.6rem;
+      padding-top: max(0.35rem, env(safe-area-inset-top));
+      padding-left: max(0.6rem, env(safe-area-inset-left));
+      padding-right: max(0.6rem, env(safe-area-inset-right));
+      gap: 0.7rem;
+    }
     .title { font-size: 0.8rem; }
     .stat dt { font-size: 0.5rem; }
     .stat dd { font-size: 0.8rem; }
     .stats { gap: 0.7rem; }
     button { padding: 0.2rem 0.45rem; font-size: 0.66rem; }
-    footer { padding: 0.3rem 0.6rem; }
-    #debug { bottom: 0.3rem; font-size: 0.6rem; }
+    footer {
+      padding: 0.3rem 0.6rem;
+      padding-bottom: max(0.3rem, env(safe-area-inset-bottom));
+      padding-left: max(0.6rem, env(safe-area-inset-left));
+      padding-right: max(0.6rem, env(safe-area-inset-right));
+    }
+    #debug { bottom: max(0.3rem, env(safe-area-inset-bottom)); font-size: 0.6rem; }
   }
 </style>
 
