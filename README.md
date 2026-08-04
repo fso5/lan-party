@@ -244,6 +244,19 @@ its fetch handler changes nothing either, because the page is one
 self-contained file and the navigate fallback serves the only request there
 is.
 
+The `visibilitychange` retry in `game.js` is a third, and the reason is
+different: it is not that breaking it changes nothing, it is that the harness
+cannot reach the condition. The handler exists because iOS throttles a
+backgrounded tab's timers to almost nothing, so the backoff alone can leave
+somebody watching "reconnecting" for seconds after unlocking their phone.
+Reproducing that needs a genuinely backgrounded page with throttled timers,
+which Playwright does not do — dispatching the event by hand from a visible
+page tests the four lines of the handler against a state no phone is ever in.
+So it is deliberately unverified rather than covered by something that only
+looks like a test. What *is* covered is the ladder underneath it: a dropped
+client comes back in about 600ms, and a mutation pinning the backoff to its
+5-second ceiling is caught.
+
 `mp` runs the authoritative host in Node and serves the page; open the printed
 URL on two phones and they play each other. Everything above the transport is
 what will run over Bluetooth -- same `MatchHost`, same `MatchClient`, same wire

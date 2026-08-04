@@ -340,14 +340,41 @@ async function waitFor(what, predicate, ms = 15_000) {
   const bravoPeer = bravo && peerBySlot.get(bravo.slotId);
   check(!!bravoPeer, 'Bravo should be seated before being dropped');
   if (bravoPeer) {
+    const droppedAt = Date.now();
     tcp.close(bravoPeer);
     await waitFor('Bravo to drop out of the roster', () => roster.slots.length === NAMES.length);
     await waitFor('Bravo to reconnect on its own', () => roster.slots.length === NAMES.length + 1);
+    const backAfter = Date.now() - droppedAt;
     check(
       roster.slots.some((s) => s.name === 'Bravo'),
       'Bravo must come back by itself rather than needing a reload',
     );
-    console.log('after drop + reconnect:', JSON.stringify(roster.slots.map((s) => `${s.name}=t${s.team}`)));
+
+    /*
+     * And comes back quickly, not on the long end of the backoff.
+     *
+     * Found by mutation: replacing the whole backoff expression with
+     * RECONNECT_MAX left this block green, because "reconnected eventually"
+     * is all it asked and the wait allows fifteen seconds. The ladder is
+     * 500ms doubling to a 5s ceiling, and which rung the first retry lands on
+     * is the entire difference between a blink and somebody deciding the game
+     * is broken and reloading the page -- on a phone, a connection dropping is
+     * routine enough that the screen sleeping does it.
+     *
+     * The bound is loose on purpose. It is not asserting 500ms; it is
+     * asserting that the first retry is nearer the bottom of the ladder than
+     * the top, which is the property that survives someone retuning either
+     * constant.
+     */
+    check(
+      backAfter < 2500,
+      'a dropped client retries from the bottom of the backoff, not the top',
+      `back after ${backAfter}ms (first rung is 500ms, ceiling is 5000ms)`,
+    );
+    console.log(
+      `after drop + reconnect (${backAfter}ms):`,
+      JSON.stringify(roster.slots.map((s) => `${s.name}=t${s.team}`)),
+    );
     // Let the roster broadcast settle on both pages before the team tap.
     await pages[0].waitForTimeout(400);
   }
