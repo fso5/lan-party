@@ -172,6 +172,7 @@ npm run smoke --workspace @tanks/proto # drives the built page in a real browser
 npm run mp:smoke    --workspace @tanks/proto  # two browsers against a real host
 npm run lobby:smoke --workspace @tanks/proto  # the lobby, teams, and a round change
 npm run pwa:check   --workspace @tanks/proto  # the installed app, with the network cut
+npm run smoke:all   --workspace @tanks/proto  # all four of the above, ~60s
 npm run serve --workspace @tanks/proto  # single-player, serve on your LAN
 npm run mp    --workspace @tanks/proto  # multiplayer: host + serve on your LAN
 ```
@@ -231,6 +232,16 @@ One limit is not guarded. If the command builds, "caught" can mean the compiler
 objected rather than a test failing; `noUnusedLocals` means deleting the sole
 use of a constant is "caught" for reasons having nothing to do with coverage.
 Prefer mutations that change a value over ones that remove a use.
+
+Neither is a second one, which is why `smoke:all` exists. A verdict is only
+ever about the command it was given, and there are four browser suites — so
+"SURVIVED" against one of them means nothing more than that you picked the
+wrong one. That happened four times in a single afternoon: the spacebar mine
+looked uncovered under `smoke` and is caught by `mp:smoke`; the host-quiet
+hint looked uncovered under `mp:smoke` and is caught by `lobby:smoke`. Run
+mutations against `smoke:all` and a survivor is a real survivor. Where a test
+here was added for a survivor, the claim was confirmed by deleting that test
+and watching the mutation survive all four again.
 
 A harness that cannot tell *the code survived* from *I changed nothing* — or
 from *I ran nothing* — manufactures confidence in tests that do not have it,
