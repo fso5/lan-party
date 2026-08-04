@@ -380,6 +380,29 @@ const afterTap = await tank();
 check(afterTap.alive, 'the player is alive for the tap-to-fire check');
 check(afterTap.shells > beforeTap.shells, 'a tap on the right half fires', `shells ${beforeTap.shells} -> ${afterTap.shells}`);
 
+/*
+ * ...and stops. One tap is one shot, not the trigger held down.
+ *
+ * Found by mutation: dropping `input.fireLatch = false` from gatherInput()
+ * survived this whole suite and the multiplayer one. The latch exists because
+ * a quick tap can go down and up between two frames, so it has to outlive the
+ * keyup -- but it is meant to be spent on the next frame that reads it. Left
+ * set, `inp.fire` is true for ever after the first shot and the tank empties
+ * its magazine and keeps refilling it, which is about as visible as a bug
+ * gets and had nothing watching for it.
+ *
+ * Sampled over a window rather than checked once, because a single shell dies
+ * on a wall within a second and a snapshot taken after that looks identical to
+ * the healthy case. What separates them is whether new ones keep appearing:
+ * held fire pins the count at MAX_SHELLS_PER_TANK (5), a tap never exceeds 1.
+ */
+let peak = 0;
+for (let i = 0; i < 20; i++) {
+  peak = Math.max(peak, (await tank()).shells);
+  await phone.waitForTimeout(100);
+}
+check(peak <= 2, 'one tap fires one shell, not a stream', `peak own shells in flight: ${peak}`);
+
 // The Mine button is the only way to lay one without a keyboard.
 await freshRound();
 const beforeMine = await tank();
@@ -388,6 +411,23 @@ await phone.waitForTimeout(300);
 const afterMine = await tank();
 check(afterMine.alive, 'the player is alive for the mine check');
 check(afterMine.mines > beforeMine.mines, 'the Mine button lays a mine', `mines ${beforeMine.mines} -> ${afterMine.mines}`);
+
+/*
+ * And one tap lays one mine. Same latch, same hole: dropping
+ * `input.mineLatch = false` survived every suite here too.
+ *
+ * The margin is narrower than the shell version because a tank may only have
+ * MAX_MINES_PER_TANK (2) out at once, so a stuck latch shows up as 2 rather
+ * than as a magazine emptying. Still unambiguous: nothing a single tap can do
+ * puts a second mine on the floor, and a mine sits there for five seconds, so
+ * the window comfortably covers the cooldown that would produce one.
+ */
+let minePeak = 0;
+for (let i = 0; i < 20; i++) {
+  minePeak = Math.max(minePeak, (await tank()).mines);
+  await phone.waitForTimeout(100);
+}
+check(minePeak <= 1, 'one tap lays one mine, not a trail', `peak own mines: ${minePeak}`);
 
 await phone.screenshot({ path: SCRATCH + '/shot-touch.png' });
 
