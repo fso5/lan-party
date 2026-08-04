@@ -5,6 +5,7 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.IOException
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
@@ -48,11 +49,25 @@ class TanksLanModule : Module() {
 
     AsyncFunction("start") { port: Int ->
       if (running) return@AsyncFunction boundPort()
-      val socket = ServerSocket(port)
-      // Otherwise a host stopped and restarted within the TIME_WAIT window --
-      // which is exactly what "start, realise the hotspot is off, stop, start
-      // again" looks like -- fails to bind for no reason the player can see.
+
+      // Bound in two steps so SO_REUSEADDR is set while it is still defined to
+      // mean something. `ServerSocket(port)` binds inside the constructor, and
+      // Java documents setReuseAddress *after* a bind as undefined behaviour;
+      // this order is the specified one.
+      //
+      // Not a bug fix, and worth saying so rather than letting the next reader
+      // assume it was. Measured on a JVM rather than reasoned about: on Linux
+      // SO_REUSEADDR already defaults to true for a ServerSocket, and rebinding
+      // a port still held in TIME_WAIT succeeds with the flag never set at all.
+      // Android is Linux, so the old form almost certainly worked -- by default
+      // rather than by the line that claimed to arrange it.
+      //
+      // The scenario it protects is still the likeliest first use of this
+      // screen: start, notice the hotspot is off, stop, turn it on, start
+      // again. That path should not rest on a default nobody checked.
+      val socket = ServerSocket()
       socket.reuseAddress = true
+      socket.bind(InetSocketAddress(port))
       server = socket
       running = true
 
