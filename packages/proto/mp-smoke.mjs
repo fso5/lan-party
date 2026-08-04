@@ -212,6 +212,46 @@ for (const [label, s] of [['A', a], ['B', c]]) {
 console.log('scoreboard A:', JSON.stringify(a.chips), 'label', a.roundLabel);
 console.log('scoreboard B:', JSON.stringify(c.chips), 'label', c.roundLabel);
 
+/*
+ * The connection numbers have to be the real ones.
+ *
+ * smoke.mjs already checks the readout opens and carries a live tick, but it
+ * runs solo, where there is no MatchClient and the netcode half is absent by
+ * design -- its comment says so. So `snap`, `stale`, `reconcile`, `resync` and
+ * `err` were displayed by code nothing had ever read. Replacing the whole
+ * snap/stale fragment with a hardcoded zero survived every suite.
+ *
+ * That is worse than an untested feature. The README points somebody at these
+ * numbers for exactly the situation where nothing else is available -- a
+ * hotspot, two phones, no laptop -- and tells them zero snapshots means
+ * nothing is arriving from the host. A readout stuck at zero would send them
+ * chasing a network that is working perfectly well.
+ *
+ * Only `snap` is asserted to have moved, and the rest are left alone because
+ * they are not stable enough to assert either way. A healthy local run here
+ * reads `snap 132 stale 2 reconcile 5 resync 0 err 0.000` -- so stale and
+ * reconcile are small but not zero, and pinning either direction would be
+ * pinning scheduler noise. Snapshots applied is the one that cannot be zero
+ * while a client is visibly playing, which is what makes it worth asserting.
+ */
+{
+  const readout = async (p) => {
+    await p.click('#btn-build');
+    await p.waitForTimeout(250);
+    const text = await p.locator('#debug').textContent();
+    await p.click('#btn-build');
+    return text ?? '';
+  };
+  const text = await readout(pages[0]);
+  console.log('client A diagnostics:', JSON.stringify(text));
+  check(/snap \d+/.test(text), `the readout carries the netcode numbers, got "${text}"`);
+  const applied = Number(text.match(/snap (\d+)/)?.[1] ?? 0);
+  check(
+    applied > 0,
+    `a seated client has applied snapshots, but the readout says ${applied}`,
+  );
+}
+
 for (const e of errors) failures.push('console error: ' + e);
 
 await b.close();
