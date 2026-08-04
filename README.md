@@ -197,15 +197,43 @@ tools/mutate.sh <file> "<command>" "<old text>" "<new text>" ["label"]
 ```
 
 Breaks something on purpose, runs the command, and puts the file back. Exit 0
-means the mutation was caught, 1 means nothing covers it, and 9 means the text
-was not found so the run proves nothing.
+means the mutation was caught and 1 means nothing covers it. The rest are
+refusals rather than verdicts: 9 means the text was not found, 3 means the
+command already fails without any mutation, and 4 means the command never reads
+the file at all.
 
-That last one is the whole reason this is a script rather than a one-liner.
-Every mutation here started as a `perl -0pi -e s///`, and a pattern that
-matched nothing failed silently — reporting that the code had survived when
-nothing had been changed. Two map checks "survived" that way before the
-miscounted pattern turned up. A harness that cannot tell *the code survived*
-from *I changed nothing* manufactures confidence in tests that do not have it,
+Those three are the whole reason this is a script rather than a one-liner, and
+each was added after it had already produced a wrong answer.
+
+**9** came first. Every mutation here started as a `perl -0pi -e s///`, and a
+pattern that matched nothing failed silently — reporting that the code had
+survived when nothing had been changed. Two map checks "survived" that way
+before the miscounted pattern turned up.
+
+**3** is the same disease pointing the other way. "Caught" is inferred from the
+command failing, so a command that was already failing reports every mutation
+as caught. A test path written relative to `packages/core` while standing in
+the repo root does it, and one of those false positives was hiding a mutation
+that had genuinely survived. So the command is run once against the pristine
+file first, and a verdict is refused unless that passes.
+
+**4** is the nastiest, because it fabricates the alarming answer rather than
+the reassuring one. `npx tsx --test test/*.test.ts` from the repo root matches
+no files, so node prints `tests 0` and exits 0 — and every mutation under it
+comes back SURVIVED. Four of them did, across three files, before the pattern
+was obvious; three of the four are caught when the command is pointed at the
+right directory. A false *survived* is worse than a false *caught*: it sends
+you writing tests for behaviour that was already covered. So the file is also
+replaced with something unparseable, and the command must fail — anything that
+genuinely loads the file will.
+
+One limit is not guarded. If the command builds, "caught" can mean the compiler
+objected rather than a test failing; `noUnusedLocals` means deleting the sole
+use of a constant is "caught" for reasons having nothing to do with coverage.
+Prefer mutations that change a value over ones that remove a use.
+
+A harness that cannot tell *the code survived* from *I changed nothing* — or
+from *I ran nothing* — manufactures confidence in tests that do not have it,
 which is worse than not checking.
 
 Most tests in this repo have been through it. A few things genuinely are not
