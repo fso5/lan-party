@@ -720,13 +720,32 @@ for (const [i, p] of pages.entries()) {
      * reads 1 -- because which label sits beside it is the team-naming
      * question and not this check's business.
      */
-    const chips = await pages[0].evaluate(() =>
-      [...document.querySelectorAll('#scoreboard li')].map((li) => li.textContent),
-    );
-    console.log('client scoreboard after round one:', JSON.stringify(chips));
+    const hud = await pages[0].evaluate(() => ({
+      chips: [...document.querySelectorAll('#scoreboard li')].map((li) => li.textContent),
+      roundLabel: document.getElementById('round-label').textContent,
+    }));
+    console.log('client HUD after round one:', JSON.stringify(hud));
     check(
-      chips.some((c) => / 1$/.test(c)),
-      `the client's scoreboard should show the won round, got ${JSON.stringify(chips)}`,
+      hud.chips.some((c) => / 1$/.test(c)),
+      `the client's scoreboard should show the won round, got ${JSON.stringify(hud.chips)}`,
+    );
+
+    /*
+     * And the round number agrees with the host's.
+     *
+     * The client keeps its own counter -- `net.round += 1` on each RoundOver
+     * -- rather than being told the number, so it can drift from the host
+     * without anything going wrong loudly. Advancing it by two survived all
+     * four suites: mp-smoke matches the label against /^(Round \d+|Final)$/,
+     * which any number satisfies, and the check above this one reads the
+     * host's own `match.round`.
+     *
+     * A player watching "Round 3" during round two has no way to tell which
+     * of the two is lying, and the scoreboard beside it would look wrong too.
+     */
+    check(
+      hud.roundLabel === `Round ${match.match.round}`,
+      `the client shows "${hud.roundLabel}" while the host is on round ${match.match.round}`,
     );
 
     // The clients have to follow. A client that misses the new MatchStart sits
