@@ -148,6 +148,104 @@ test('server frames are never masked', () => {
   assert.deepEqual(f.subarray(2), Uint8Array.from([9, 9, 9]));
 });
 
+test('arbitrary framings survive arbitrary chunk boundaries', () => {
+  // The tests around this one each pin a single case: a fragmented message, a
+  // one-byte feed, a two-byte length header. Every one of them is a case
+  // someone thought of. This is the same decoder driven across two thousand
+  // combinations of them at once -- messages split into continuation frames,
+  // a ping injected mid-message, payloads either side of the 126-byte header
+  // boundary, and the whole byte stream cut at random offsets including one
+  // byte at a time.
+  //
+  // Seeded, so a failure is a fixed byte stream someone can step through
+  // rather than something that happened once on a Tuesday.
+  //
+  // Four mutations were tried against it. Three -- losing the fragmented
+  // message's opcode, a control frame cancelling the message it interrupted,
+  // reading only one frame per chunk -- were caught here and by a hand-written
+  // test as well, so on those this adds nothing. The fourth was not caught
+  // anywhere else: dropping `this.fragments = []` after a message completes,
+  // which leaves the first fragmented message's bytes glued to the front of
+  // the second. Nothing in the suite sent two fragmented messages down one
+  // decoder, so nothing noticed.
+  //
+  // That is the same failure the BLE framer actually had -- one message's
+  // remains delivered as part of the next -- found in the transport underneath
+  // this one on the same day. Worth stating plainly: the reason this test is
+  // here is that reassemblers get this wrong, twice now.
+  let s = 12345;
+  const rnd = () => ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const ri = (n: number) => Math.floor(rnd() * n);
+
+  const masked = (payload: Uint8Array, opcode: WsOpcode, fin: boolean): Uint8Array => {
+    const mask = Uint8Array.from([ri(256), ri(256), ri(256), ri(256)]);
+    const len = payload.length;
+    const header = len < 126 ? 2 : 4;
+    const out = new Uint8Array(header + 4 + len);
+    out[0] = (fin ? 0x80 : 0) | opcode;
+    if (len < 126) out[1] = 0x80 | len;
+    else {
+      out[1] = 0x80 | 126;
+      new DataView(out.buffer).setUint16(2, len, false);
+    }
+    out.set(mask, header);
+    for (let i = 0; i < len; i++) out[header + 4 + i] = payload[i] ^ mask[i & 3];
+    return out;
+  };
+
+  let fragmented = 0;
+  for (let trial = 0; trial < 2000; trial++) {
+    const wire: number[] = [];
+    const expected: { opcode: WsOpcode; data: number[] }[] = [];
+
+    for (let m = 0; m < 1 + ri(4); m++) {
+      const size = ri(3) === 0 ? 126 + ri(200) : ri(40);
+      const body = Uint8Array.from({ length: size }, () => ri(256));
+      const opcode = ri(4) === 0 ? WsOpcode.Text : WsOpcode.Binary;
+      const pieces = ri(3) === 0 ? 1 + ri(3) : 1;
+
+      if (pieces === 1) {
+        wire.push(...masked(body, opcode, true));
+      } else {
+        fragmented++;
+        const cut = Math.floor(size / pieces);
+        for (let p = 0; p < pieces; p++) {
+          const to = p === pieces - 1 ? size : (p + 1) * cut;
+          wire.push(
+            ...masked(
+              body.subarray(p * cut, to),
+              p === 0 ? opcode : WsOpcode.Continuation,
+              p === pieces - 1,
+            ),
+          );
+          // A control frame is legal between the fragments of a message, and
+          // has to come out ahead of the message it interrupted.
+          if (p === 0 && ri(2) === 0) {
+            const ping = Uint8Array.from([1, 2, 3]);
+            wire.push(...masked(ping, WsOpcode.Ping, true));
+            expected.push({ opcode: WsOpcode.Ping, data: [...ping] });
+          }
+        }
+      }
+      expected.push({ opcode, data: [...body] });
+    }
+
+    const dec = new WsDecoder();
+    const got: { opcode: WsOpcode; data: number[] }[] = [];
+    const bytes = Uint8Array.from(wire);
+    for (let at = 0; at < bytes.length; ) {
+      const take = 1 + ri(ri(4) === 0 ? 1 : 24);
+      for (const msg of dec.push(bytes.subarray(at, at + take))) {
+        got.push({ opcode: msg.opcode, data: [...msg.data] });
+      }
+      at += take;
+    }
+
+    assert.deepEqual(got, expected, `trial ${trial} decoded differently`);
+  }
+  assert.ok(fragmented > 500, `the fragmenting path must be exercised, got ${fragmented}`);
+});
+
 test('an unmasked client frame is refused', () => {
   const unmasked = Uint8Array.from([0x82, 0x02, 0xaa, 0xbb]);
   assert.throws(() => new WsDecoder().push(unmasked), WsProtocolError);
