@@ -614,6 +614,43 @@ await phone.screenshot({ path: SCRATCH + '/shot-portrait.png' });
 
 check(phoneErrors.length === 0, 'no console errors on the phone page', phoneErrors.join(' | '));
 
+/*
+ * The canvas does not follow a phone's pixel ratio all the way up.
+ *
+ * `resize()` caps the backing store at 2x, and removing that cap survived
+ * every check in this file -- because every context above runs at ratio 1,
+ * where the cap has nothing to do. Real phones are 2x and 3x. At 3x the canvas
+ * would be 9x the pixels of a 1x screen instead of 4x, more than doubling what
+ * has to be filled every frame, and this game's whole claim is that it feels
+ * right in the hand.
+ *
+ * Its own context rather than raising the ratio on the phone above: the touch
+ * checks there are reasoned in physical pixels -- the Fire button once came
+ * out 19x10 of them -- and that reasoning holds because CSS pixels and device
+ * pixels coincide at 1x. Changing it under them would quietly move the ground
+ * they stand on.
+ */
+const hidpi = await b.newContext({
+  viewport: { width: 844, height: 390 },
+  deviceScaleFactor: 3,
+  hasTouch: true,
+  isMobile: true,
+});
+const hidpiPage = await hidpi.newPage();
+await hidpiPage.goto(PAGE);
+await hidpiPage.waitForTimeout(600);
+const scaled = await hidpiPage.evaluate(() => {
+  const cv = document.getElementById('arena');
+  return { dpr: devicePixelRatio, backing: cv.width, css: Math.round(cv.getBoundingClientRect().width) };
+});
+check(scaled.dpr === 3, 'the high-density context really reports 3x', JSON.stringify(scaled));
+check(
+  scaled.backing <= scaled.css * 2 + 1,
+  'the canvas backing store is capped at 2x whatever the screen claims',
+  `dpr ${scaled.dpr}, ${scaled.css} CSS px wide -> ${scaled.backing} device px`,
+);
+await hidpi.close();
+
 await b.close();
 
 console.log(failures.length ? `\n${failures.length} FAILED: ${failures.join(', ')}` : '\nall checks passed');
