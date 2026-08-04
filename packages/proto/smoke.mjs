@@ -326,6 +326,40 @@ await send('touchEnd', []);
 await phone.waitForTimeout(250);
 
 /*
+ * A thumb's worth of movement is enough to drive.
+ *
+ * The drag above travels 72px, past the stick's whole 55px range, so it says
+ * nothing about how little is needed. Raising the drive stick's 6px threshold
+ * to 60 survived every suite on the strength of that one long drag -- and a
+ * tank that refuses to move for any normal thumb is the control scheme not
+ * working. Measured on the way in: 12px moves 0.454 tiles, 20px moves 0.756,
+ * 40px moves 1.513. Twenty is comfortably live and far enough above 6 that
+ * the threshold itself stays free to tune.
+ *
+ * There is deliberately no matching check that a *tiny* drag does nothing. I
+ * wrote one, and it could not be made to fail: a 4px hold moves 0.000 tiles
+ * with the page's deadzone removed entirely, because what actually rejects it
+ * is core's own `moveLen > 0.15` gate in sim.ts, and removing *that* still
+ * only produces drift below any threshold this check could honestly use. It
+ * asserted something true for structural reasons no mutation reaches, which
+ * is decoration rather than a test.
+ */
+{
+  await freshRound();
+  const before = await tank();
+  await send('touchStart', pts(LEFT.x, LEFT.y, 8));
+  for (let i = 0; i < 6; i++) {
+    await send('touchMove', pts(LEFT.x + 20, LEFT.y, 8));
+    await phone.waitForTimeout(50);
+  }
+  await phone.waitForTimeout(300);
+  await send('touchEnd', []);
+  const moved = (await tank()).x - before.x;
+  console.log(`  20px drag moved ${moved.toFixed(3)} tiles`);
+  check(moved > 0.3, 'a small thumb movement drives the tank', `moved ${moved.toFixed(3)} tiles`);
+}
+
+/*
  * A long drag is aiming, not firing -- the game is bank shots, and a turret you
  * cannot line up without taking the shot is the wrong game.
  *
