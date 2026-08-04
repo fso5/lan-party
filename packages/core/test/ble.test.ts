@@ -94,6 +94,106 @@ test('framer bounds its buffers against abandoned messages', () => {
   assert.deepEqual(out, msg, 'framer must still work after many abandoned messages');
 });
 
+test('a stale fragment is not spliced into the message that reuses its id', () => {
+  // The message id is one byte, so it repeats every 256 sends -- seventeen
+  // seconds at snapshot rate. Before this was fixed, an abandoned message's
+  // surviving fragments were still buffered under that id when it came round,
+  // and the two messages were handed up as one: 18 bytes of the old snapshot
+  // and 10 bytes of the new, indistinguishable from a real one.
+  //
+  // Sender and receiver are separate framers here because that is how the
+  // stack runs -- the host fragments, the client reassembles.
+  const sender = new BleFramer(18);
+  const receiver = new BleFramer(18);
+
+  const old = Uint8Array.from({ length: 28 }, () => 0xaa);
+  const fresh = Uint8Array.from({ length: 28 }, () => 0xbb);
+
+  const framesOld = sender.fragment(old);
+  assert.equal(framesOld.length, 2, 'the message under test has to fragment');
+  assert.equal(receiver.reassemble('peer', framesOld[0]), null);
+  // framesOld[1] is lost, leaving the first fragment behind.
+
+  // Roll the id all the way round. Only one of the 255 is delivered, which is
+  // the whole margin the fix needs and worth stating as such: a message
+  // arriving between two fragments proves the first was abandoned.
+  //
+  // The limit, since it cannot be tested away: if every one of the 255 were
+  // lost too, the receiver's entire input would be a first fragment under id
+  // 0 and a last fragment under id 0, which is byte-identical to a legitimate
+  // pair. Nothing can separate them without a wider id, and a wider id costs a
+  // byte of every frame on a 20-byte budget to insure against 255 consecutive
+  // total losses on a link that would be dead anyway.
+  for (let i = 0; i < 255; i++) {
+    const filler = sender.fragment(new Uint8Array(1));
+    if (i === 120) receiver.reassemble('peer', filler[0]);
+  }
+
+  const framesFresh = sender.fragment(fresh);
+  assert.equal(framesFresh[0][0], framesOld[0][0], 'the ids must actually collide');
+  // This time the *first* fragment is the one lost.
+  const out = receiver.reassemble('peer', framesFresh[1]);
+
+  assert.equal(out, null, 'a message missing its first fragment must be dropped, not completed');
+});
+
+test('a whole message abandons a half-assembled one from the same peer', () => {
+  // What makes the id-reuse fix airtight rather than merely narrow: fragments
+  // of one message are written back to back, so anything complete arriving
+  // between them proves the held message is never finishing.
+  const f = new BleFramer(18);
+  const big = Uint8Array.from({ length: 28 }, () => 0xaa);
+  const small = Uint8Array.from({ length: 8 }, () => 0xcc);
+
+  const framesBig = f.fragment(big);
+  const framesSmall = f.fragment(small);
+  assert.equal(framesSmall.length, 1);
+
+  assert.equal(f.reassemble('peer', framesBig[0]), null);
+  assert.deepEqual(f.reassemble('peer', framesSmall[0]), small, 'the whole message arrives intact');
+  assert.equal(
+    f.reassemble('peer', framesBig[1]),
+    null,
+    'the interrupted message must not complete afterwards',
+  );
+});
+
+test('the message after an abandoned one still arrives whole', () => {
+  // The direction that matters more than any of the dropping: on a link that
+  // loses a fragment, the *next* fragmented message has to be unaffected. A
+  // reassembler that held on to the wreckage of the last one would take the
+  // rest of the match down with it.
+  const f = new BleFramer(18);
+  const lost = Uint8Array.from({ length: 46 }, () => 0xaa);
+  const good = Uint8Array.from({ length: 46 }, (_, i) => i);
+
+  const framesLost = f.fragment(lost);
+  assert.equal(framesLost.length, 3);
+  f.reassemble('peer', framesLost[0]);
+  f.reassemble('peer', framesLost[1]);
+  // framesLost[2] never arrives.
+
+  const framesGood = f.fragment(good);
+  let out: Uint8Array | null = null;
+  for (const fr of framesGood) out = f.reassemble('peer', fr);
+  assert.deepEqual(out, good, 'a clean message must not inherit the last one’s failure');
+});
+
+test('a fragment of another message does not complete the one being held', () => {
+  // The same proof by a different route: the interleaving frame is itself a
+  // fragment rather than a whole message.
+  const f = new BleFramer(18);
+  const a = Uint8Array.from({ length: 28 }, () => 0xaa);
+  const b = Uint8Array.from({ length: 28 }, () => 0xbb);
+
+  const fa = f.fragment(a);
+  const fb = f.fragment(b);
+
+  assert.equal(f.reassemble('peer', fa[0]), null);
+  assert.equal(f.reassemble('peer', fb[1]), null, 'b is missing its own first fragment');
+  assert.equal(f.reassemble('peer', fa[1]), null, 'a was abandoned and must not complete');
+});
+
 test('framer refuses a message too large to fragment', () => {
   const f = new BleFramer(16);
   assert.throws(() => f.fragment(new Uint8Array(16 * 129)), /fragments/);

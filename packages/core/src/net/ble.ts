@@ -97,11 +97,34 @@ export const BLE_SAFE_MTU = 180;
  *
  * That caps a message at 128 fragments, ~22KB at our MTU, far more than
  * anything the protocol sends.
+ *
+ * ## One message at a time, per peer
+ *
+ * The message id is eight bits, so it comes round again every 256 sends -- at
+ * 15 snapshots a second, every seventeen seconds. That is short enough to
+ * matter: a message that lost a fragment leaves its surviving fragments
+ * behind, and if they are still buffered when the id repeats, the fragments of
+ * the new message land in the same slots and the two are handed up as one.
+ * Measured, not theorised: an 18-byte-payload framer spliced 18 bytes of an
+ * abandoned message onto 10 bytes of a fresh one and returned it as a complete
+ * 28-byte snapshot. Half a frame of new tank positions and half a frame of
+ * old, and nothing downstream can tell.
+ *
+ * So reassembly holds exactly one message per peer, and anything that is not a
+ * continuation of it throws it away. Fragments of a message are written back
+ * to back on one connection, so anything arriving in between -- a whole
+ * single-frame message, or the start of a different one -- proves the held
+ * message was abandoned. That makes id reuse unreachable rather than
+ * unlikely, because the 255 messages in between each clear the slot.
+ *
+ * The cost is that a message whose *first* fragment is lost is dropped on the
+ * spot instead of at its last fragment. It was already unrecoverable; this
+ * only stops it holding a slot on the way to being discarded.
  */
 export class BleFramer {
   private nextMessageId = 0;
-  /** peerId -> messageId -> fragments received so far. */
-  private pending = new Map<PeerId, Map<number, (Uint8Array | undefined)[]>>();
+  /** peerId -> the one message currently being reassembled from that peer. */
+  private pending = new Map<PeerId, { id: number; parts: (Uint8Array | undefined)[] }>();
 
   /**
    * A function, not a number, when the caller has a link that renegotiates.
@@ -158,35 +181,39 @@ export class BleFramer {
     const last = (frame[1] & 0x80) !== 0;
     const payload = frame.subarray(FRAME_HEADER_BYTES);
 
-    if (last && index === 0) return payload.slice();
-
-    let byPeer = this.pending.get(from);
-    if (!byPeer) {
-      byPeer = new Map();
-      this.pending.set(from, byPeer);
+    if (last && index === 0) {
+      // A whole message in one frame, which is nearly all of them. It also
+      // settles anything half-assembled from this peer: fragments go out back
+      // to back, so a complete message arriving between them means the earlier
+      // one is never finishing.
+      this.pending.delete(from);
+      return payload.slice();
     }
 
-    let parts = byPeer.get(id);
-    if (!parts) {
-      parts = [];
-      byPeer.set(id, parts);
-      // A partial message whose remaining fragments were dropped would sit here
-      // forever. Message ids roll over every 256 sends, so bound the buffer
-      // rather than tracking timers we would have to drive from somewhere.
-      if (byPeer.size > 8) {
-        const oldest = byPeer.keys().next().value;
-        if (oldest !== undefined) byPeer.delete(oldest);
-      }
+    if (index === 0) {
+      this.pending.set(from, { id, parts: [payload.slice()] });
+      return null;
     }
-    parts[index] = payload.slice();
+
+    const open = this.pending.get(from);
+    if (!open || open.id !== id) {
+      // A continuation with nothing to continue: this message's first fragment
+      // was lost, so it cannot be rebuilt however many of the rest arrive. Drop
+      // it, and drop whatever was held -- a fragment of a different message is
+      // the same proof that the held one was abandoned.
+      this.pending.delete(from);
+      return null;
+    }
+    open.parts[index] = payload.slice();
 
     if (!last) return null;
 
     // Last fragment seen: we know the count, so check we have all of them.
+    this.pending.delete(from);
     const total = index + 1;
     let size = 0;
     for (let i = 0; i < total; i++) {
-      const p = parts[i];
+      const p = open.parts[i];
       if (!p) return null; // a fragment was lost; drop the whole message
       size += p.length;
     }
@@ -194,10 +221,9 @@ export class BleFramer {
     const out = new Uint8Array(size);
     let offset = 0;
     for (let i = 0; i < total; i++) {
-      out.set(parts[i]!, offset);
-      offset += parts[i]!.length;
+      out.set(open.parts[i]!, offset);
+      offset += open.parts[i]!.length;
     }
-    byPeer.delete(id);
     return out;
   }
 
@@ -267,15 +293,26 @@ export class BleTransport implements Transport {
    * Largest message callers may send.
    *
    * Reported as the fragmentable maximum rather than the per-write MTU, so
-   * callers are not forced to think about fragments. The host still checks its
-   * snapshots against the single-write size, because a snapshot that needs two
-   * writes can tear across a frame boundary.
+   * callers are not forced to think about fragments.
+   *
+   * An earlier version of this comment said the host checks snapshots against
+   * the single-write size instead, on the grounds that a snapshot needing two
+   * writes could tear across a frame boundary. It did not -- `MatchHost` has
+   * only ever checked `maxPayload` -- and the tear it feared was a real
+   * property of the framer, which is now fixed there rather than worked around
+   * here. See BleFramer. Crossing a frame boundary is ordinary.
    */
   get maxPayload(): number {
     return this.adapter.payloadSize * 128;
   }
 
-  /** Payload that fits one BLE write, with no fragmentation. */
+  /**
+   * Payload that fits one BLE write, with no fragmentation.
+   *
+   * Nothing in the send path consults this -- it is here so tests can state
+   * what actually fits a write, which is the number that decides whether the
+   * hot path fragments at all.
+   */
   get singleWritePayload(): number {
     return this.adapter.payloadSize;
   }

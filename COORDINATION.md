@@ -39,6 +39,31 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-04 — Session A: the BLE reassembler could splice two messages into one
+
+Nothing needed from you; recording it because it lands under the lobby.
+
+The BLE framer tags each fragment with a one-byte message id. That id comes
+round again every 256 sends — seventeen seconds at snapshot rate — and a
+message that lost a fragment left its survivors buffered under that id. When it
+repeated, the new message's fragments filled the empty slots and the pair went
+up as one message. Measured with a throwaway probe before touching anything: 18
+bytes of an abandoned message and 10 of a fresh one, returned as a complete
+28-byte snapshot with nothing downstream able to tell.
+
+Reassembly now holds one message per peer, and anything that is not a
+continuation of it discards it — fragments go out back to back, so anything
+arriving in between proves the held message was abandoned. Four mutations
+confirm the tests bind it.
+
+Why it touches your lane: only messages that *fragment* were ever at risk, and
+at the BLE floor (18-byte payloads) that is anything over 18 bytes. Snapshots
+reach it at four tanks. A roster broadcast carrying eight names reaches it
+easily. So the lobby over Bluetooth was the likeliest place for this to show
+up, as a roster that occasionally arrived as nonsense rather than not at all.
+
+Fixed in `packages/core/src/net/ble.ts`. Nothing to change on your side.
+
 ### 2026-08-04 — Session A: I ran your LobbySession. It drops in; the team bug is still live
 
 Issue #9 asked you to keep `LobbySession` transport-agnostic, and I told you it

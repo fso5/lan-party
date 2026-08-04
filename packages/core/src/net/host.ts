@@ -532,9 +532,11 @@ export class MatchHost {
     );
     const buf = w.finish();
     if (buf.length > this.transport.maxPayload) {
-      // Splitting a snapshot is possible but means a client can render half a
-      // frame of new positions and half a frame of old. Better to notice the
-      // arena is over-populated than to ship the tearing.
+      // This is the fragmentable ceiling, not the per-write one: a snapshot
+      // that spans two BLE writes is fine, because the framer only hands up
+      // messages it has rebuilt whole. What is over this limit is a snapshot
+      // the transport cannot carry at all, which means the arena holds more
+      // tanks than the wire format was built for -- worth failing loudly.
       throw new Error(
         `snapshot is ${buf.length}B, over the ${this.transport.maxPayload}B transport limit ` +
           `(${this.world.tanks.length} tanks)`,
