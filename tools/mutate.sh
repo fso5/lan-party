@@ -60,6 +60,21 @@
 
 set -u
 
+# Bound every run of the command.
+#
+# A mutation can hang rather than fail: dropping the FIN bit from outbound
+# WebSocket frames leaves the peer waiting for a continuation that never comes,
+# and the suite sat there for over ten minutes before anything killed it. The
+# restore trap did hold on the eventual SIGTERM, so the file came back -- but
+# an unbounded command can still wedge a whole batch of mutations behind it.
+# A hang is a failure for our purposes: the tests did not pass.
+MUTATE_TIMEOUT=${MUTATE_TIMEOUT:-300}
+run_command() {
+  # `bash -c` rather than a subshell, because `timeout` needs a real process to
+  # signal. Isolation from a `cd` in the command is preserved either way.
+  timeout "$MUTATE_TIMEOUT" bash -c "$COMMAND"
+}
+
 if [ "$#" -lt 4 ]; then
   sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
@@ -111,7 +126,7 @@ echo "=== $LABEL ==="
 # the command, which is worth strictly more than a confident wrong answer.
 if [ "${MUTATE_SKIP_CHECKS:-${MUTATE_SKIP_BASELINE:-0}}" != "1" ]; then
   cp "$BACKUP" "$FILE"
-  if ! ( eval "$COMMAND" ) >/dev/null 2>&1; then
+  if ! run_command >/dev/null 2>&1; then
     echo "--- BASELINE FAILED: the command does not pass on unmutated source ---"
     echo "    Any verdict from it would be meaningless. Check the command runs"
     echo "    from this directory ($(pwd)) -- a test path relative to the wrong"
@@ -131,7 +146,7 @@ if [ "${MUTATE_SKIP_CHECKS:-${MUTATE_SKIP_BASELINE:-0}}" != "1" ]; then
   # actually loads the file. If the command still passes with this file
   # unparseable, it never read it, and no verdict about it is worth having.
   printf '!!!mutate.sh sensitivity probe -- not valid source!!!\n' > "$FILE"
-  if ( eval "$COMMAND" ) >/dev/null 2>&1; then
+  if run_command >/dev/null 2>&1; then
     cp "$BACKUP" "$FILE"
     echo "--- INSENSITIVE: the command passes with $FILE syntactically broken ---"
     echo "    So it never loads that file, and SURVIVED would mean nothing."
@@ -153,7 +168,7 @@ PY
 fi
 
 # In a subshell, so a `cd` in the command cannot follow us back out.
-if ( eval "$COMMAND" ); then
+if run_command; then
   echo "--- SURVIVED: nothing catches this ---"
   exit 1
 fi
