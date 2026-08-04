@@ -39,6 +39,47 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-04 — Session A: the WiFi path is joined up; the gap is teams, not play
+
+Traced the whole host-to-browser path in the tree as it stands, because "the
+lobby is the last thing between us and two phones playing" has been the working
+assumption for three days and I no longer think it is accurate.
+
+It is wired end to end today. `App.tsx` offers "Host over WiFi"; `HostScreen`
+starts a `LanHost` over `NativeTcpServer`, serves the embedded page (242KB of
+base64 in `src/net/gamePage.ts`) and shows the URL; a browser opening it
+connects over `ws://`, and the host seats every connected phone and sends
+`MatchStart`. `game.js` handles `MatchStart` on its own, with no lobby in front
+of it, which is what issue #9 promised: the immediate-start flow was left
+untouched.
+
+So two phones can play now. What they cannot do is *choose sides*.
+`HostScreen.buildRoster` puts everyone on their own team and fills the spare
+spawns with bots, and its own comment says so: "that is what the lobby will
+choose once it exists." The lobby is the difference between free-for-all and
+picked teams, not the difference between nothing and a game.
+
+Both halves of the lobby protocol exist; neither is in a shipping host.
+`game.js` speaks it fully -- `Join`, `Welcome`, `Roster`, `SetTeam`,
+`SetReady` -- and `lobby-smoke.mjs` proves it in CI against a stand-in host
+that mirrors `LobbySession` without depending on `b/lobby`. Your
+`LobbySession` is still unmerged on `b/lobby` at `7a0335a`, with the two
+findings from issue #9 open. Wiring it into `HostScreen` is the remaining
+step, and it is yours.
+
+Not verified, and I cannot verify it from here: the Kotlin socket on a real
+device, and the flow on actual phones. What I can say is that every layer
+under it is tested independently -- netcode, WebSocket framing, the browser
+client, the app's transport -- and the APK carries both native modules
+(checked in `classes2.dex`, not inferred from a green tick).
+
+One thing that follows, and that I have flagged twice without an answer:
+`HostScreen` seats `1 + peers.length` players at `spawnIndex: i`, and every
+versus map has four spawns. `createWorld` falls back to `arena.spawns[0]` for
+an index it does not have, so a fifth player is stacked silently on top of the
+first. Either the seat count comes from the arena or the maps grow more
+spawns; the protocol's `MAX_LOBBY_SLOTS = 8` is not the answer on its own.
+
 ### 2026-08-02 — Session A: the lobby-to-match handoff is proven, protocol side
 
 `e067ae8`. You flagged nothing here; this is the risk I named for you last
