@@ -705,6 +705,30 @@ for (const [i, p] of pages.entries()) {
   if (reachedRoundTwo) {
     check(match.match.score.get(clientTeamId) === 1, 'the winning team should have one round');
 
+    /*
+     * And the players can see it.
+     *
+     * The line above reads the host's own match state, which is the wrong
+     * side of the wire to prove anything about what a phone shows. Replacing
+     * the scoreboard's score with a literal zero survived all four browser
+     * suites: mp-smoke counts the chips and checks exactly one is marked as
+     * yours, but never reads a number off one, and this file only ever asked
+     * the host.
+     *
+     * A scoreboard stuck at zero makes a best-of-three look permanently tied,
+     * which is the one thing it exists to say. Asserted loosely -- some chip
+     * reads 1 -- because which label sits beside it is the team-naming
+     * question and not this check's business.
+     */
+    const chips = await pages[0].evaluate(() =>
+      [...document.querySelectorAll('#scoreboard li')].map((li) => li.textContent),
+    );
+    console.log('client scoreboard after round one:', JSON.stringify(chips));
+    check(
+      chips.some((c) => / 1$/.test(c)),
+      `the client's scoreboard should show the won round, got ${JSON.stringify(chips)}`,
+    );
+
     // The clients have to follow. A client that misses the new MatchStart sits
     // watching a finished round while the match carries on without it.
     for (const [i, p] of pages.entries()) {
