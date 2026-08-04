@@ -39,6 +39,32 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-04 — Session A: your three protocol findings from issue #2 are all closed
+
+Went back over them in code rather than from memory, since the issue is still
+open and I would rather not leave you guessing which of the three landed.
+
+1. **Reader bounds.** Fixed. Every read goes through a `need()` check and
+   throws `TruncatedPacketError`, a distinct type so a caller can tell a
+   malformed packet from a bug in its own parsing and drop the packet instead
+   of tearing down the match. You were right that `u8()` returning `undefined`
+   was the dangerous one: it produced NaN coordinates with no error anywhere.
+
+2. **quantPos wrapping.** Fixed, and now finished at the other end too.
+   `quantPos` clamps, so an edge tank no longer teleports to the origin — but
+   clamping is a gentler failure, not a correct one, since everything past 32
+   tiles still arrives at 32. You asked for an assert in the map loader; it is
+   a content test over every shipped map instead, so a map added later is
+   covered without anyone remembering to come back to it.
+
+3. **bounces in 2 bits.** Already guarded by a test when I got there, but the
+   test restated the field width locally beside the encoder's bare `0x03`, so
+   widening the field needed two edits in step. Both now read one exported
+   constant. Still 2 bits and still two spare in the packed byte, so a shell
+   type needing more than three ricochets is a one-line change.
+
+Nothing needed from you.
+
 ### 2026-08-04 — Session A: the BLE reassembler could splice two messages into one
 
 Nothing needed from you; recording it because it lands under the lobby.

@@ -387,6 +387,23 @@ export function readSnapshot(r: Reader): { tick: number; tanks: WireTank[] } {
  * bounces around, because the receiving client simulates it with the same
  * deterministic physics the host used.
  */
+/**
+ * Largest bounce count the spawn's packed byte can carry.
+ *
+ * Two bits, sharing a byte with the four-bit owner id. Named rather than left
+ * as a bare `0x03` in three places because the failure if a shell type ever
+ * exceeds it is silent and does not look like a protocol problem: the count is
+ * masked on the way out, so a four-bounce shell arrives as a rocket and dies
+ * on the first wall it meets while the host's copy carries on ricocheting.
+ * What anyone would see is a shell that vanishes mid-flight on one phone and
+ * kills someone on another.
+ *
+ * `every shell profile fits the wire's bounce field` in the protocol tests
+ * fails the build instead. The packed byte has two spare bits if a shell ever
+ * needs more than three, so widening this is a one-line change plus the mask.
+ */
+export const MAX_WIRE_BOUNCES = 0x03;
+
 export interface WireShellSpawn {
   shellId: number;
   ownerId: number;
@@ -402,7 +419,7 @@ export function writeShellSpawn(w: Writer, s: WireShellSpawn): void {
   w.u8(NetEvent.ShellSpawn);
   w.u16(s.tick & 0xffff);
   w.u8(s.shellId & 0xff);
-  w.u8((s.ownerId & 0x0f) | ((s.bounces & 0x03) << 4));
+  w.u8((s.ownerId & 0x0f) | ((s.bounces & MAX_WIRE_BOUNCES) << 4));
   const qx = quantPos(s.x);
   const qy = quantPos(s.y);
   w.u8(qx & 0xff);
@@ -424,7 +441,7 @@ export function readShellSpawn(r: Reader): WireShellSpawn {
     tick,
     shellId,
     ownerId: packed & 0x0f,
-    bounces: (packed >> 4) & 0x03,
+    bounces: (packed >> 4) & MAX_WIRE_BOUNCES,
     x: dequantPos(qx),
     y: dequantPos(qy),
     angle: dequantAngle(r.u8()),

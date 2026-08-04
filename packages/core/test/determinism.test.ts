@@ -16,8 +16,48 @@ import {
   writeShellSpawn,
   readShellSpawn,
   estimateDownstreamBps,
+  quantPos,
+  dequantPos,
+  MAX_QUANT_POS,
   MsgType,
 } from '../src/net/protocol.js';
+
+test('every shipped arena fits inside the position field on the wire', () => {
+  /*
+   * The other session's second finding, from the authoring side.
+   *
+   * `quantPos` clamps now instead of wrapping, so an oversized arena no longer
+   * teleports an edge tank to the origin -- but clamping is not correctness,
+   * only a less violent failure. Everything past 32 tiles still arrives at 32,
+   * so tanks in the far corner of a 40-tile map would pile onto the same spot
+   * on every other phone while moving normally on the host's own screen. They
+   * asked for an assert in the map loader; this is that check, over the maps
+   * actually shipped, so a map added later is covered without anyone
+   * remembering to come back here.
+   *
+   * Strictly inside, not merely equal: a coordinate landing exactly on the
+   * limit cannot be told apart from one past it.
+   */
+  for (const m of [...MISSIONS, ...VERSUS_MAPS]) {
+    const { width, height } = loadArena(m);
+    for (const [axis, extent] of [
+      ['width', width],
+      ['height', height],
+    ] as const) {
+      assert.ok(
+        quantPos(extent) < MAX_QUANT_POS,
+        `map "${m.name}" is ${extent} tiles in ${axis}; the wire's 12-bit position ` +
+          `field stops at ${MAX_QUANT_POS / 128} tiles, so anything beyond it clamps`,
+      );
+      // Stated as the symptom as well as the bound: the far edge has to come
+      // back where it went in.
+      assert.ok(
+        Math.abs(dequantPos(quantPos(extent)) - extent) < 1 / 128,
+        `map "${m.name}": ${axis} ${extent} does not survive the round trip`,
+      );
+    }
+  }
+});
 
 test('deterministic trig matches Math.* within tolerance', () => {
   // We do not need to equal Math.sin -- we need to be close enough that the

@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   MAX_QUANT_POS,
+  MAX_WIRE_BOUNCES,
   MsgType,
   NetEvent,
   Reader,
@@ -227,9 +228,13 @@ test('the published entry point exists and exports runtime values', async () => 
  * Flagged by the other session reading protocol.ts (issue #2, finding 3).
  */
 test('every shell profile and player slot fits the bits the wire gives it', () => {
-  const BOUNCE_BITS = 2;
+  // Read from the source rather than restated here. When this test was written
+  // it carried its own `BOUNCE_BITS = 2` beside the encoder's bare `0x03`, so
+  // widening the field meant editing both -- and editing only the encoder would
+  // have left this test failing a change that was correct, while editing only
+  // the test would have let an over-wide count through to be masked in silence.
+  const maxBounces = MAX_WIRE_BOUNCES;
   const OWNER_BITS = 4;
-  const maxBounces = (1 << BOUNCE_BITS) - 1;
   const maxOwner = (1 << OWNER_BITS) - 1;
 
   for (const [kind, spec] of Object.entries(TANK_SPECS)) {
