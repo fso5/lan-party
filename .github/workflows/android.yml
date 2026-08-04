@@ -162,16 +162,45 @@ jobs:
       # while a UI string with an em dash in it is the other way round.
       # Searching only UTF-16 for a module name returns zero whether or not the
       # module ships. Both encodings, always.
-      - name: Check the JS bundle carries the transport and the netcode
+      - name: Check the APK carries the transport, the netcode and the radio
         run: |
           unzip -p out/tanks.apk assets/index.android.bundle > bundle.hbc
           ls -l bundle.hbc
           python3 - <<'PY'
-          import sys
+          import sys, zipfile
           data = open('bundle.hbc','rb').read()
 
           def find(sym):
               return data.count(sym.encode('utf-8')), data.count(sym.encode('utf-16-le'))
+
+          # The native half, which the JS checks below cannot see.
+          #
+          # These two are autolinked from modules/*/expo-module.config.json, and
+          # nothing in JS references TanksBle yet -- so if autolinking broke, no
+          # JS check would notice and the APK would ship without the radio. The
+          # day the lobby imports bleAdapter, requireNativeModule('TanksBle')
+          # runs at module scope: the class being absent is not a degraded
+          # Bluetooth experience, it is a crash on the import.
+          apk = zipfile.ZipFile('out/tanks.apk')
+          dex = b''.join(apk.read(n) for n in apk.namelist()
+                         if n.startswith('classes') and n.endswith('.dex'))
+          native = {
+              'Lexpo/modules/tankslan/TanksLanModule;': 'the WiFi listening socket',
+              'Lexpo/modules/tanksble/TanksBleModule;': 'the Bluetooth radio',
+          }
+          absent = []
+          for sig, what in native.items():
+              hits = dex.count(sig.encode())
+              print(f"{'ok  ' if hits else 'MISSING'}  {sig:<42} dex hits={hits}  ({what})")
+              if not hits:
+                  absent.append(sig)
+          if absent:
+              print(f"\n{len(absent)} native module(s) missing from the APK's dex: "
+                    f"{', '.join(absent)}")
+              print("Autolinking reads modules/*/expo-module.config.json. Check the "
+                    "class name there still matches the Kotlin package.")
+              sys.exit(1)
+          print()
 
           # Must be reachable from JavaScript or the app cannot host over WiFi
           # and cannot run a match at all.
@@ -180,7 +209,10 @@ jobs:
               'msSinceHostUpdate': "@tanks/core's MatchClient",
               'retireAbandoned': "@tanks/core's MatchHost",
           }
-          # Not yet wired up. Reported so that the day it is, this says so.
+          # Not yet wired up *in JavaScript*. The native classes above are in
+          # the APK either way, so "absent" here means Metro dropped the JS
+          # binding for want of an importer -- the radio is on board and
+          # unreachable, not missing.
           watched = ['TanksBle', 'bleAdapter']
 
           missing = []
@@ -193,7 +225,7 @@ jobs:
 
           for sym in watched:
               u8, u16 = find(sym)
-              state = 'present' if (u8 or u16) else 'absent, as expected'
+              state = 'present' if (u8 or u16) else 'no JS importer yet; native class ships'
               print(f"note      {sym:<20} utf8={u8} utf16={u16}  ({state})")
 
           if missing:
