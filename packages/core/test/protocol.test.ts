@@ -158,8 +158,29 @@ test('positions inside the arena still round-trip within a visual tolerance', ()
  * the entry point package.json advertises, exactly as a consumer would.
  */
 test('the published entry point exists and exports runtime values', async () => {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const pkgRoot = resolve(here, '..', '..');
+  /*
+   * Search upward for the package rather than counting directories.
+   *
+   * `resolve(here, '..', '..')` was right for exactly one layout. Compiled,
+   * this file runs from dist-test/test/ and two levels up is packages/core;
+   * from source it runs from test/ and two levels up is packages/, so
+   * `npx tsx --test test/*.test.ts` failed on a missing packages/package.json.
+   * A red suite for a reason that has nothing to do with the code is worse
+   * than no check, because the obvious way to quiet it is to weaken the test.
+   */
+  let pkgRoot = dirname(fileURLToPath(import.meta.url));
+  for (;;) {
+    try {
+      if (JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8')).name === '@tanks/core') {
+        break;
+      }
+    } catch {
+      // No package.json here, or not readable. Keep climbing.
+    }
+    const up = dirname(pkgRoot);
+    assert.notEqual(up, pkgRoot, 'walked to the filesystem root without finding @tanks/core');
+    pkgRoot = up;
+  }
   const pkg = JSON.parse(readFileSync(join(pkgRoot, 'package.json'), 'utf8'));
 
   const entry = resolve(pkgRoot, pkg.main);
