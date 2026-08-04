@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import { dsin, dcos, datan2, wrapAngle, Rng, PI } from '../src/math.js';
 import { createWorld, step, isMatchOver } from '../src/sim.js';
 import { loadArena, MISSIONS, VERSUS_MAPS } from '../src/maps/index.js';
-import { emptyInput, type TankInput } from '../src/types.js';
+import { Arena } from '../src/map.js';
+import { Tile, emptyInput, type TankInput } from '../src/types.js';
 import {
   Writer,
   Reader,
@@ -261,6 +262,76 @@ test('all shipped arenas are well formed', () => {
       );
     }
   }
+});
+
+test('every shipped arena is walled in', () => {
+  /*
+   * A content check, and only that -- see the sealBorder test below for the
+   * code half. All eight shipped maps are drawn with solid edges already, so
+   * this passes with or without the constructor's safety net. What it catches
+   * is a future map authored with a gap in its border.
+   *
+   * "shell never escapes the arena, at any angle" in physics.test.ts sounds
+   * like it covers this and does not: it builds its own `box(ROOM)` whose
+   * walls are spelled out in its tile data, so it proves the bouncer does not
+   * tunnel through a wall that is definitely there. Nothing checked that the
+   * maps players actually load have one.
+   *
+   * The escape matters in both directions: a shell that leaves the grid is
+   * gone, and a tank that leaves it is somewhere no shot can reach. So this
+   * asks the two questions the simulation asks rather than reading tiles --
+   * shells and tanks are blocked by different sets of them, and a border made
+   * of something a tank may drive over would pass a plain wall check.
+   */
+  for (const m of [...MISSIONS, ...VERSUS_MAPS]) {
+    const arena = loadArena(m);
+    const { width: w, height: h } = arena;
+    for (let x = 0; x < w; x++) {
+      for (const y of [0, h - 1]) {
+        assert.ok(arena.blocksShellAt(x, y), `map "${m.name}": shells pass through border (${x},${y})`);
+        assert.ok(arena.blocksTankAt(x, y), `map "${m.name}": tanks pass through border (${x},${y})`);
+      }
+    }
+    for (let y = 0; y < h; y++) {
+      for (const x of [0, w - 1]) {
+        assert.ok(arena.blocksShellAt(x, y), `map "${m.name}": shells pass through border (${x},${y})`);
+        assert.ok(arena.blocksTankAt(x, y), `map "${m.name}": tanks pass through border (${x},${y})`);
+      }
+    }
+  }
+});
+
+test('an arena authored with an open border gets sealed anyway', () => {
+  /*
+   * The other half, and the one that actually covers the constructor.
+   *
+   * Every shipped map is drawn with solid edges, which is why commenting out
+   * `sealBorder()` survives the whole suite -- the net has nothing to catch
+   * yet. That makes it exactly the kind of code that gets deleted as dead one
+   * day and is missed the next time somebody sketches a map without drawing
+   * the frame. So this hands it a floor with no walls at all.
+   */
+  const w = 6;
+  const h = 5;
+  const open = new Arena({
+    name: 'open',
+    width: w,
+    height: h,
+    tiles: new Array(w * h).fill(Tile.Floor),
+    spawns: [{ x: 2.5, y: 2.5, angle: 0, team: 0 }],
+    enemies: [],
+  });
+
+  for (let x = 0; x < w; x++) {
+    assert.ok(open.blocksShellAt(x, 0), `top border open at ${x}`);
+    assert.ok(open.blocksShellAt(x, h - 1), `bottom border open at ${x}`);
+  }
+  for (let y = 0; y < h; y++) {
+    assert.ok(open.blocksShellAt(0, y), `left border open at ${y}`);
+    assert.ok(open.blocksShellAt(w - 1, y), `right border open at ${y}`);
+  }
+  // And it sealed only the border: the inside is still the floor it was given.
+  assert.equal(open.at(2, 2), Tile.Floor, 'sealing the border filled the interior too');
 });
 
 test('versus maps have four usable spawns for team play', () => {
