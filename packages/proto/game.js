@@ -1244,7 +1244,22 @@ function roundRect(x, y, w, h, r) {
  * trivialise the game -- but it is the fastest way to confirm by eye that the
  * ricochet code does what the tests say it does.
  */
-function drawTrajectory(tank, s) {
+/**
+ * Where this tank's shot would go, as points rather than pixels.
+ *
+ * Split out from the drawing so it can be compared against a shell that was
+ * actually fired. The whole justification for the preview is in the README --
+ * it is offered as the fastest way to confirm by eye that the ricochet code
+ * does what the tests claim -- and a preview that quietly disagreed with the
+ * simulation would refute that in the least visible way possible: it would
+ * still look like a plausible bank shot, and it would still be wrong.
+ *
+ * The step here is 0.2 world units rather than the shell's per-tick distance.
+ * That is deliberate and safe: `stepShell` sweeps, so a coarser step lands on
+ * the same geometry with fewer segments, and drawing wants segments rather
+ * than ticks. `trajectory.test` in smoke.mjs is what keeps that "safe" honest.
+ */
+function trajectoryPath(tank) {
   const spec = TANK_SPECS[tank.kind];
   const muzzle = TANK_RADIUS + spec.shell.radius + 0.02;
   let x = tank.x + dcos(tank.turretAngle) * muzzle;
@@ -1253,18 +1268,12 @@ function drawTrajectory(tank, s) {
   let vy = dsin(tank.turretAngle) * spec.shell.speed;
   let bounces = spec.shell.maxBounces;
 
-  ctx.save();
-  ctx.setLineDash([s * 0.12, s * 0.12]);
-  ctx.lineWidth = Math.max(1.5, s * 0.035);
-  ctx.strokeStyle = css('--aim');
-  ctx.beginPath();
-  ctx.moveTo(x * s, y * s);
-
-  let travelled = 0;
+  const points = [{ x, y }];
   const hits = [];
+  let travelled = 0;
   while (travelled < 24) {
     const r = stepShell(state.world.arena, x, y, vx, vy, spec.shell.radius, bounces, 0.2, false);
-    ctx.lineTo(r.x * s, r.y * s);
+    points.push({ x: r.x, y: r.y });
     for (const b of r.bounces) hits.push(b);
     travelled += Math.hypot(r.x - x, r.y - y) || 0.2;
     x = r.x;
@@ -1274,6 +1283,19 @@ function drawTrajectory(tank, s) {
     bounces = r.bouncesLeft;
     if (r.dead) break;
   }
+  return { points, hits };
+}
+
+function drawTrajectory(tank, s) {
+  const { points, hits } = trajectoryPath(tank);
+
+  ctx.save();
+  ctx.setLineDash([s * 0.12, s * 0.12]);
+  ctx.lineWidth = Math.max(1.5, s * 0.035);
+  ctx.strokeStyle = css('--aim');
+  ctx.beginPath();
+  ctx.moveTo(points[0].x * s, points[0].y * s);
+  for (const p of points.slice(1)) ctx.lineTo(p.x * s, p.y * s);
   ctx.stroke();
   ctx.setLineDash([]);
 
@@ -1681,6 +1703,8 @@ function base64ToBytes(b64) {
 // two clients' worlds against each other.
 window.__state = state;
 window.__net = net;
+// And the aim preview, so a test can check it against a shell really fired.
+window.__trajectoryPath = trajectoryPath;
 
 window.addEventListener('resize', resize);
 

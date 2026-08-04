@@ -429,6 +429,91 @@ for (let i = 0; i < 20; i++) {
 }
 check(minePeak <= 1, 'one tap lays one mine, not a trail', `peak own mines: ${minePeak}`);
 
+/*
+ * The aim preview has to agree with the shell.
+ *
+ * The README offers the trajectory line as the fastest way to confirm by eye
+ * that the ricochet code does what the tests claim. That makes the preview a
+ * measuring instrument, and nothing had ever checked it against the thing it
+ * measures -- pressing `t` and taking a screenshot only proves it drew
+ * something. A preview that disagreed with the simulation would fail in the
+ * least visible way there is: still a plausible-looking bank shot, still
+ * wrong, and wrong precisely while somebody is trusting it to judge the feel.
+ *
+ * It steps at 0.2 world units where the shell moves per tick, so the two are
+ * sampled differently on purpose and cannot be compared point for point. What
+ * must hold is that the shell stays on the drawn line. So: take the preview,
+ * fire, and for each position the shell passes through, measure the distance
+ * to the nearest segment of the line that was drawn before the trigger.
+ */
+console.log('\naim preview:');
+await freshRound();
+
+/*
+ * Aimed diagonally first, and this is the part that matters.
+ *
+ * The first version fired straight ahead, and a straight shot makes the check
+ * vacuous for the thing it was written for: cutting the preview's bounce
+ * budget to zero survived, because the shell never reached a wall inside the
+ * sampled flight and both versions agreed on the one straight segment. Bank
+ * shots are the whole reason the preview exists. Measured before and after:
+ * straight ahead the shell keeps `bouncesLeft: 1` for its entire life.
+ */
+await send('touchStart', pts(RIGHT.x, RIGHT.y, 7));
+await send('touchMove', pts(RIGHT.x + 90, RIGHT.y - 90, 7));
+await phone.waitForTimeout(250);
+await send('touchEnd', []);
+await phone.waitForTimeout(150);
+
+const previewed = await phone.evaluate(() => {
+  const w = window.__state.world;
+  const t = w.tanks.find((t) => t.kind === 0);
+  return { path: window.__trajectoryPath(t).points, turret: t.turretAngle, id: t.id };
+});
+check(previewed.path.length > 2, `the preview should be a path, got ${previewed.path.length} points`);
+
+
+await phone.keyboard.press('Enter');
+const flown = await phone.evaluate(async (ownerId) => {
+  const seen = [];
+  let bounced = false;
+  let last = null;
+  for (let i = 0; i < 240; i++) {
+    const s = window.__state.world.shells.find((s) => s.ownerId === ownerId);
+    if (s) {
+      if (last !== null && s.bouncesLeft < last) bounced = true;
+      last = s.bouncesLeft;
+      seen.push({ x: s.x, y: s.y });
+    } else if (seen.length) break;
+    await new Promise((r) => requestAnimationFrame(r));
+  }
+  return { seen, bounced };
+}, previewed.id);
+
+const distToPath = (p, path) => {
+  let best = Infinity;
+  for (let i = 1; i < path.length; i++) {
+    const a = path[i - 1];
+    const b = path[i];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    const t = len2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2)) : 0;
+    best = Math.min(best, Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy)));
+  }
+  return best;
+};
+
+const strays = flown.seen.map((p) => distToPath(p, previewed.path)).filter((d) => d > 0.25);
+console.log(`  shell sampled at ${flown.seen.length} points, bounced: ${flown.bounced}; ${strays.length} strayed`);
+check(flown.seen.length > 5, `the shell should have been sampled while flying, got ${flown.seen.length} points`);
+check(flown.bounced, 'the sampled shot must actually bank, or this says nothing about ricochets');
+check(
+  strays.length === 0,
+  'the fired shell follows the previewed line',
+  `worst stray ${Math.max(0, ...flown.seen.map((p) => distToPath(p, previewed.path))).toFixed(3)} tiles`,
+);
+
 await phone.screenshot({ path: SCRATCH + '/shot-touch.png' });
 
 /*
