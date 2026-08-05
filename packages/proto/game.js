@@ -14,6 +14,7 @@
 /* global createWorld, step, loadArena, MISSIONS, VERSUS_MAPS, emptyInput,
    isMatchOver, stepShell, dcos, dsin, datan2, TANK_RADIUS, TANK_SPECS,
    TICK_HZ, EventKind, Tile, TankKind, livingTeams, DRAW, MsgType, LobbyOp,
+   DEFAULT_MATCH_SIZE,
    readRoster, writeLobbyJoin, writeLobbySetTeam, writeLobbySetReady, Writer */
 
 const ALL_MAPS = [...MISSIONS, ...VERSUS_MAPS];
@@ -510,7 +511,11 @@ function loadMap(i) {
   const bots = [];
   const kinds = [TankKind.Grey, TankKind.Teal, TankKind.Green];
   if (arena.enemies.length === 0) {
-    for (let s = seats; s < arena.spawns.length; s++) {
+    // Up to a good match, not up to the map's capacity. The maps carry eight
+    // starts so a full lobby has somewhere to stand; that is not a reason to
+    // put seven bots in a solo game.
+    const fillTo = Math.min(DEFAULT_MATCH_SIZE, arena.spawns.length);
+    for (let s = seats; s < fillTo; s++) {
       bots.push({ kind: kinds[(s - seats) % kinds.length], team: 90 + s, spawnIndex: s });
     }
   }
@@ -911,7 +916,10 @@ function hostBluetoothMatch() {
   const players = [{ team: 0, spawnIndex: 0 }];
   const bots = [];
   const kinds = [TankKind.Grey, TankKind.Teal, TankKind.Green];
-  for (let sIdx = 1; sIdx < arena.spawns.length; sIdx++) {
+  // Same cap as couch play, and unlike couch play no smoke reaches this line:
+  // it needs a radio, so it is checked by reading it. Verified by mutation --
+  // removing the cap here is not caught by any of the four browser suites.
+  for (let sIdx = 1; sIdx < Math.min(DEFAULT_MATCH_SIZE, arena.spawns.length); sIdx++) {
     bots.push({ kind: kinds[(sIdx - 1) % kinds.length], team: 90 + sIdx, spawnIndex: sIdx });
   }
 

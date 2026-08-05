@@ -4,8 +4,9 @@ import assert from 'node:assert/strict';
 import { dsin, dcos, datan2, wrapAngle, Rng, PI } from '../src/math.js';
 import { createWorld, step, isMatchOver } from '../src/sim.js';
 import { loadArena, MISSIONS, VERSUS_MAPS } from '../src/maps/index.js';
-import { Arena } from '../src/map.js';
+import { Arena, parseArena } from '../src/map.js';
 import { Tile, emptyInput, type TankInput } from '../src/types.js';
+import { TANK_RADIUS } from '../src/tuning.js';
 import {
   Writer,
   Reader,
@@ -19,8 +20,87 @@ import {
   quantPos,
   dequantPos,
   MAX_QUANT_POS,
+  MAX_LOBBY_SLOTS,
   MsgType,
 } from '../src/net/protocol.js';
+
+test('a full lobby starts on a full set of distinct spawns', () => {
+  /*
+   * The bug this pins was silent and total. Versus maps carried four spawns,
+   * the lobby seats MAX_LOBBY_SLOTS, and `createWorld` falls back to
+   * `spawns[0]` for any seat past the end -- so players five through eight all
+   * started on player one's tile. Measured before the fix: five tanks reading
+   * 2.50,1.50, and still reading it sixty ticks later, because tanks do not
+   * collide with each other so nothing pushed them apart. In free-for-all they
+   * are all enemies of each other, sharing one tile.
+   *
+   * Asserted through `createWorld` rather than by counting `arena.spawns`,
+   * because the count is not the property that matters -- the fallback is what
+   * made a short list dangerous, and only seating a full lobby exercises it.
+   */
+  for (const m of VERSUS_MAPS) {
+    const arena = loadArena(m);
+    const players = Array.from({ length: MAX_LOBBY_SLOTS }, (_, i) => ({
+      team: i,
+      spawnIndex: i,
+    }));
+    const world = createWorld({ arena, players, seed: 1 });
+    assert.equal(world.tanks.length, MAX_LOBBY_SLOTS);
+
+    const seen = new Map<string, number>();
+    world.tanks.forEach((t, i) => {
+      const at = `${t.x},${t.y}`;
+      const first = seen.get(at);
+      assert.equal(
+        first,
+        undefined,
+        `map "${m.name}": seats ${first} and ${i} both start at ${at}`,
+      );
+      seen.set(at, i);
+    });
+
+    // Distinct is not enough on its own -- two spawns a third of a tile apart
+    // would pass that and still be a shared corner in practice.
+    for (let i = 0; i < world.tanks.length; i++) {
+      for (let j = i + 1; j < world.tanks.length; j++) {
+        const d = Math.hypot(world.tanks[i].x - world.tanks[j].x, world.tanks[i].y - world.tanks[j].y);
+        assert.ok(
+          d > TANK_RADIUS * 4,
+          `map "${m.name}": seats ${i} and ${j} start ${d.toFixed(2)} tiles apart`,
+        );
+      }
+    }
+
+    // And every one of them has to be somewhere a tank can be.
+    for (const t of world.tanks) {
+      assert.ok(
+        !arena.blocksTankAt(Math.floor(t.x), Math.floor(t.y)),
+        `map "${m.name}": a spawn sits inside something solid at ${t.x},${t.y}`,
+      );
+    }
+  }
+});
+
+test('spawns are ordered by the digit that authored them, not by scan order', () => {
+  // `createWorld` indexes the spawn array by seat, so this ordering is what
+  // makes "seat 3" mean the tile marked 4. Parse order alone would hand seat 0
+  // whichever start happened to appear first in the text.
+  const arena = new Arena(
+    parseArena('ordering', [
+      '########',
+      '#4....3#',
+      '#......#',
+      '#2....1#',
+      '########',
+    ]),
+  );
+  assert.deepEqual(
+    arena.spawns.map((s) => s.team),
+    [0, 1, 2, 3],
+  );
+  assert.deepEqual(arena.spawns[0], { x: 6.5, y: 3.5, angle: 0, team: 0 });
+  assert.deepEqual(arena.spawns[3], { x: 1.5, y: 1.5, angle: 0, team: 3 });
+});
 
 test('every shipped arena fits inside the position field on the wire', () => {
   /*
@@ -374,12 +454,19 @@ test('an arena authored with an open border gets sealed anyway', () => {
   assert.equal(open.at(2, 2), Tile.Floor, 'sealing the border filled the interior too');
 });
 
-test('versus maps have four usable spawns for team play', () => {
+test('versus maps have a usable spawn for every seat the lobby offers', () => {
+  // Was "exactly 4", which is what the maps carried and what made seats 5-8
+  // stack on seat 1's tile. Pinned to the lobby's own capacity now, so the two
+  // numbers cannot drift apart again: raising MAX_LOBBY_SLOTS without adding
+  // spawns fails here rather than on a phone.
   for (const m of VERSUS_MAPS) {
     const arena = loadArena(m);
-    assert.equal(arena.spawns.length, 4, `versus map "${m.name}" needs exactly 4 spawns`);
+    assert.ok(
+      arena.spawns.length >= MAX_LOBBY_SLOTS,
+      `versus map "${m.name}" has ${arena.spawns.length} spawns for ${MAX_LOBBY_SLOTS} seats`,
+    );
     const teams = new Set(arena.spawns.map((s) => s.team));
-    assert.equal(teams.size, 4, `versus map "${m.name}" spawns must be on 4 distinct teams`);
+    assert.equal(teams.size, arena.spawns.length, `versus map "${m.name}" repeats a spawn team`);
   }
 });
 

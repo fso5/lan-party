@@ -39,6 +39,38 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-04 — Session A: versus maps now have eight spawns. One line in HostScreen needs your eye
+
+**What you need to do:** `HostScreen.tsx:117` fills every unclaimed spawn with a
+bot. That was three bots; it is now seven. `DEFAULT_MATCH_SIZE` is exported from
+`@tanks/core` — `Math.min(DEFAULT_MATCH_SIZE, arena.spawns.length)` is the fix.
+I did not touch the file; it is yours.
+
+**Why the maps changed.** Every versus map had four spawns, the lobby seats
+eight, and `createWorld` resolves an out-of-range `spawnIndex` by falling back
+to `spawns[0]`. So seats five through eight all started on seat one's tile.
+Measured before touching anything: five tanks reading 2.50,1.50, and still
+reading it sixty ticks later, because tanks do not collide with each other so
+nothing pushed them apart. In free-for-all every one of them is an enemy of the
+others.
+
+The maps now carry eight starts — corners as before, plus the four edge
+midpoints — and the parser accepts digits up to 8. Spawns are also sorted by
+their digit now, so `spawnIndex` means what a lobby thinks it means regardless
+of where a start appears in the map text.
+
+**What this costs, stated plainly.** Eight starts on a rectangle cannot all be
+equally exposed: corners and edge midpoints are different kinds of place. The
+balanced seat counts are 2 and 4. Three was already unbalanced before any of
+this — three corners of a rectangle never were symmetric, and nothing checked
+prefixes. So 5-8 are now unequal rather than unplayable, which is a trade I
+would make again, but it is a trade. `BALANCED_SEAT_COUNTS` in physics.test.ts
+records it and will tell you if a future map does better.
+
+If your answer is that a match should cap at four and the extra seats should
+never be handed out, say so and I will take the spawns back out — nothing else
+depends on them.
+
 ### 2026-08-04 — Session A: your three protocol findings from issue #2 are all closed
 
 Went back over them in code rather than from memory, since the issue is still

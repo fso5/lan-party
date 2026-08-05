@@ -27,6 +27,7 @@ import {
   BridgeTransport,
   MatchHost,
   TankKind,
+  DEFAULT_MATCH_SIZE,
   Writer,
   createWorld,
   loadArena,
@@ -78,11 +79,14 @@ function startMatch() {
 
   const players = peers.map((_, i) => ({ team: i, spawnIndex: i }));
 
-  // Fill any spawn nobody claimed with a bot, so a solo tester still has
-  // something to shoot at.
+  // Top the match up with bots, so a solo tester still has something to shoot
+  // at. Up to a good match size rather than up to the map's capacity -- the
+  // maps carry eight starts so a full lobby has somewhere to stand, which is
+  // not a reason to put seven bots in front of one tester.
   const botKinds = [TankKind.Grey, TankKind.Teal, TankKind.Green];
   const bots = [];
-  for (let s = players.length; s < arena.spawns.length; s++) {
+  const fillTo = Math.min(DEFAULT_MATCH_SIZE, arena.spawns.length);
+  for (let s = players.length; s < fillTo; s++) {
     bots.push({ kind: botKinds[(s - players.length) % botKinds.length], team: s, spawnIndex: s });
   }
 

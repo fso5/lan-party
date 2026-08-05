@@ -14,7 +14,6 @@ import {
 import { MatchHost } from '../src/net/host.js';
 import { MatchClient } from '../src/net/client.js';
 import {
-  MAX_LOBBY_SLOTS,
   MsgType,
   NetEvent,
   Writer,
@@ -527,43 +526,6 @@ test('every versus map seats a full house without anybody sharing a spawn', () =
       `${arena.name} put two tanks on the same square with only ${arena.spawns.length} seated`,
     );
   }
-});
-
-test('the lobby will admit more players than any map can seat', () => {
-  // Not an invariant anyone wants -- a characterisation, so the gap cannot be
-  // missed and closing it is a visible edit rather than a silent one.
-  //
-  // MAX_LOBBY_SLOTS is 8 and it is a *protocol* limit: how many rows fit in a
-  // roster message. Every versus map has four spawns. createWorld resolves an
-  // out-of-range spawnIndex by falling back to the first one, so seating a
-  // full lobby stacks five tanks on the same square -- the host and everyone
-  // from the fifth player on. They cannot be told apart on screen and one
-  // shell kills all of them.
-  //
-  // Nothing caps seating by the map: the app derives seats from how many
-  // phones are connected, and the browser's BLE host appends a tank per join.
-  // `arena.spawns.length` is consulted only to decide how many bots to add and
-  // to refuse couch play for more thumbs than seats.
-  const arena = loadArena(VERSUS_MAPS[0]);
-  assert.ok(
-    MAX_LOBBY_SLOTS > arena.spawns.length,
-    'if this now fails, the maps have grown to match the lobby and this test should go',
-  );
-
-  const players = Array.from({ length: MAX_LOBBY_SLOTS }, (_, i) => ({ team: i, spawnIndex: i }));
-  const world = createWorld({ arena, seed: 1, players });
-  const spots = new Map<string, number[]>();
-  for (const t of world.tanks) {
-    const key = `${t.x},${t.y}`;
-    spots.set(key, [...(spots.get(key) ?? []), t.id]);
-  }
-  const stacked = [...spots.values()].filter((ids) => ids.length > 1);
-  assert.equal(stacked.length, 1, 'the overflow all lands on one square');
-  assert.equal(
-    stacked[0].length,
-    MAX_LOBBY_SLOTS - arena.spawns.length + 1,
-    'and it is everyone past the seat count, plus whoever already had that seat',
-  );
 });
 
 test('a client never invents a shell for a tank it does not control', () => {

@@ -205,13 +205,20 @@ export function parseArena(name: string, rows: string[]): ArenaDef {
       if (ch === '#') tiles[i] = Tile.Wall;
       else if (ch === '%') tiles[i] = Tile.Block;
       else if (ch === 'O') tiles[i] = Tile.Hole;
-      else if (ch >= '1' && ch <= '4') {
+      else if (ch >= '1' && ch <= '8') {
         spawns.push({ x: wx, y: wy, angle: 0, team: ch.charCodeAt(0) - 49 });
       } else if (enemyChars[ch] !== undefined) {
         enemies.push({ kind: enemyChars[ch], x: wx, y: wy, angle: 0, team: 1 });
       }
     }
   }
+
+  // Ordered by the digit that authored them, not by where they fall in the
+  // text. `createWorld` indexes this array by `spawnIndex`, so leaving it in
+  // scan order means a map that happens to write '3' above '1' hands seat 0 the
+  // third start -- a silent mismatch between what a lobby shows and where a
+  // player appears, and one that would only ever bite the map authored last.
+  spawns.sort((a, b) => a.team - b.team);
 
   return { name, width, height, tiles, spawns, enemies };
 }

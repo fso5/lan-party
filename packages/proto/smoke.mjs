@@ -232,6 +232,21 @@ const spill = await phone.evaluate(() => {
 check(spill.over <= 1, 'the arena fits the stage that sizes it',
   `canvas ${spill.canvas}px in a ${spill.stage}px stage, ${spill.over}px over`);
 
+/*
+ * The opening screen is a campaign mission, so its three opponents are authored
+ * into the map rather than filled in. Stated because the count is the same 4
+ * either way and it would be easy to read this as covering the bot filling,
+ * which happens only on the versus maps -- see the couch-play check below.
+ */
+const roster = await phone.evaluate(() => ({
+  total: window.__state.world.tanks.length,
+  humans: window.__state.world.tanks.filter((t) => t.kind === 0).length,
+  authored: window.__state.world.tanks.length - window.__state.world.tanks.filter((t) => t.kind === 0).length,
+}));
+check(roster.total === 4 && roster.humans === 1,
+  'the opening mission is one player against its three scripted enemies',
+  `${roster.humans} human(s) and ${roster.authored} enemy/ies`);
+
 const cdp = await ctx.newCDPSession(phone);
 const pts = (x, y, id) => [{ x: Math.round(x), y: Math.round(y), id, radiusX: 1, radiusY: 1, force: 1 }];
 const send = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
@@ -573,9 +588,22 @@ const seats = await phone.evaluate(() => ({
     && getComputedStyle(document.getElementById('seat-hint')).display !== 'none',
   soloHint: getComputedStyle(document.getElementById('touch-hint')).display !== 'none',
   humans: window.__state.world.tanks.filter((t) => t.kind === 0).length,
+  total: window.__state.world.tanks.length,
 }));
 check(seats.attr === '2' && seats.pressed === 'true', 'the 2P button switches to two seats', JSON.stringify(seats));
 check(seats.humans === 2, 'two human tanks are seated', `got ${seats.humans}`);
+/*
+ * The size of the match, not just the number of humans in it.
+ *
+ * This is a versus map, so everyone who is not a seat is a bot the page put
+ * there. It filled every unclaimed spawn, which was four while the maps had
+ * four starts -- and became eight the day they grew to seat a full lobby, so
+ * couch play silently went from two humans and two bots to two and six.
+ * Nothing failed. The game just got harder, on the phone, in the build that
+ * ships.
+ */
+check(seats.total === 4, 'couch play is two seats and two bots, not the whole map',
+  `${seats.humans} human(s) and ${seats.total - seats.humans} bot(s)`);
 // One legend or the other, never both: they describe contradictory controls,
 // and `#seat-hint` was one of the elements the `hidden` bug used to leak.
 check(seats.seatHint && !seats.soloHint, 'couch play shows its own legend and hides the solo one',

@@ -228,36 +228,83 @@ test('swept collision catches a shell that would pass through in one step', () =
  * Missions are deliberately exempt. One player against scripted enemies is
  * asymmetric on purpose.
  */
-test('every versus arena gives all four spawns the same start', async () => {
+/**
+ * Fairness is a property of the starts *in play*, not of the map's whole list.
+ *
+ * This measures both, and the numbers are worth stating rather than hiding
+ * behind a single pass. Seating N players uses spawns 0..N-1, so the balanced
+ * counts are the ones where that prefix is symmetric. Measured on all three
+ * versus maps:
+ *
+ *   2 seats  fair      opposite corners
+ *   3 seats  UNEQUAL   sightlines [2,1,1] -- one corner faces both others
+ *   4 seats  fair      all four corners
+ *   5-8      UNEQUAL   corners and edge midpoints are different kinds of place
+ *
+ * The 3-seat asymmetry predates the extra spawns; three corners of a rectangle
+ * were never symmetric and nothing checked prefixes before. What changed is
+ * that 5-8 are now merely unequal instead of unplayable -- they used to share
+ * one tile, which is worse than any exposure difference.
+ *
+ * Making 5-8 symmetric is not a matter of moving points around: eight starts on
+ * a rectangle fall into two orbits under its symmetries, corners and edges, so
+ * equal exposure needs the maps designed around it rather than the spawns
+ * nudged. Left as it is on purpose, recorded here so a future map can aim at it.
+ */
+const BALANCED_SEAT_COUNTS = [2, 4];
+
+test('every versus arena starts its balanced seat counts equally', async () => {
   const { loadArena, VERSUS_MAPS } = await import('../src/maps/index.js');
+
+  const measure = (a: Awaited<ReturnType<typeof loadArena>>, n: number) => {
+    const inPlay = a.spawns.slice(0, n);
+    return {
+      sightlines: inPlay.map(
+        (s) => inPlay.filter((t) => t !== s && a.hasShellLineOfSight(s.x, s.y, t.x, t.y)).length,
+      ),
+      nearest: inPlay.map((s) =>
+        Math.min(
+          ...inPlay
+            .filter((t) => t !== s)
+            .map((t) => Math.round(Math.hypot(s.x - t.x, s.y - t.y) * 10) / 10),
+        ),
+      ),
+    };
+  };
 
   for (const map of VERSUS_MAPS) {
     const a = loadArena(map);
     assert.ok(a.spawns.length >= 2, `${map.name} needs spawns to compare`);
 
-    const sightlines = a.spawns.map((s) =>
-      a.spawns.filter((t) => t !== s && a.hasShellLineOfSight(s.x, s.y, t.x, t.y)).length,
-    );
-    assert.equal(
-      new Set(sightlines).size,
-      1,
-      `${map.name}: spawns are exposed unequally -- sightlines to other spawns are [${sightlines}]. ` +
-        `Whoever starts in the open loses every round and cannot tell why.`,
-    );
+    for (const n of BALANCED_SEAT_COUNTS) {
+      const { sightlines, nearest } = measure(a, n);
+      assert.equal(
+        new Set(sightlines).size,
+        1,
+        `${map.name} at ${n} seats: spawns are exposed unequally -- sightlines are [${sightlines}]. ` +
+          `Whoever starts in the open loses every round and cannot tell why.`,
+      );
+      // Distance to the nearest neighbour, rounded to a tenth of a tile. Being
+      // closer to the fight than everyone else is the other way a start is
+      // unfair, and it is invisible on the map.
+      assert.equal(
+        new Set(nearest).size,
+        1,
+        `${map.name} at ${n} seats: one spawn starts closer to the fight -- nearest are [${nearest}]`,
+      );
+    }
 
-    // Distance to the nearest neighbour, rounded to a tenth of a tile. Being
-    // closer to the fight than everyone else is the other way a start is
-    // unfair, and it is invisible on the map.
-    const nearest = a.spawns.map((s) =>
-      Math.min(
-        ...a.spawns.filter((t) => t !== s).map((t) => Math.round(Math.hypot(s.x - t.x, s.y - t.y) * 10) / 10),
-      ),
-    );
-    assert.equal(
-      new Set(nearest).size,
-      1,
-      `${map.name}: one spawn starts closer to the fight than the others -- nearest neighbours are [${nearest}]`,
-    );
+    // The claim above has to keep being true, or the comment becomes a lie
+    // about a map somebody has since redesigned. If a count outside the list
+    // becomes symmetric, that is good news and belongs in BALANCED_SEAT_COUNTS.
+    for (let n = 2; n <= a.spawns.length; n++) {
+      if (BALANCED_SEAT_COUNTS.includes(n)) continue;
+      const { sightlines, nearest } = measure(a, n);
+      assert.ok(
+        new Set(sightlines).size > 1 || new Set(nearest).size > 1,
+        `${map.name} at ${n} seats is symmetric after all -- add ${n} to BALANCED_SEAT_COUNTS`,
+      );
+    }
   }
 });
 

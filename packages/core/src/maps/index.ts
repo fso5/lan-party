@@ -126,9 +126,22 @@ export const MISSIONS: Mission[] = [
 ];
 
 /**
- * Multiplayer arenas. These have four spawn points so the same map serves
+ * Multiplayer arenas. Eight spawn points each, so the same map serves
  * free-for-all, 2v2, or any team split -- the lobby decides which spawn each
  * player takes and what team they are on, the map does not.
+ *
+ * Eight because that is what the lobby seats. With four, `createWorld` fell
+ * back to `spawns[0]` for anyone past the fourth and the fifth through eighth
+ * players all started life stacked on the first player's tile -- measured, not
+ * feared: five tanks reading 2.50,1.50 and still reading it sixty ticks later,
+ * because tanks do not collide with each other and so never pushed apart. In
+ * free-for-all every one of them is an enemy of the others.
+ *
+ * 1-4 are the corners, as before. 5-8 are the midpoints of the four edges,
+ * which is the symmetric complement and keeps the closest pair 5.1 tiles
+ * apart. Each was snapped to the nearest tile a tank can actually occupy, so
+ * Pillars' top and bottom starts sit one column off centre around its central
+ * pillar.
  */
 export const VERSUS_MAPS: Mission[] = [
   {
@@ -136,18 +149,18 @@ export const VERSUS_MAPS: Mission[] = [
     name: 'Crossfire',
     rows: [
       '########################',
-      '#.1..................2.#',
+      '#.1.........5........2.#',
       '#......................#',
       '#....%%%......%%%......#',
       '#....%..........%......#',
       '#....%..........%......#',
       '#..........##..........#',
-      '#..........##..........#',
+      '#7.........##.........8#',
       '#......%..........%....#',
       '#......%..........%....#',
       '#......%%%......%%%....#',
       '#......................#',
-      '#.3..................4.#',
+      '#.3.........6........4.#',
       '########################',
     ],
   },
@@ -156,18 +169,18 @@ export const VERSUS_MAPS: Mission[] = [
     name: 'Pillars',
     rows: [
       '########################',
-      '#.1........##........2.#',
+      '#.1........##5.......2.#',
       '#..........##..........#',
       '#...##..........##.....#',
       '#...##..........##.....#',
       '#.......%%%%%%.........#',
       '#......................#',
-      '#......................#',
+      '#7....................8#',
       '#.......%%%%%%.........#',
       '#...##..........##.....#',
       '#...##..........##.....#',
       '#..........##..........#',
-      '#.3........##........4.#',
+      '#.3........##6.......4.#',
       '########################',
     ],
   },
@@ -176,18 +189,18 @@ export const VERSUS_MAPS: Mission[] = [
     name: 'The Moat',
     rows: [
       '########################',
-      '#.1..................2.#',
+      '#.1.........5........2.#',
       '#...OOOOOOOOOOOOOOOO...#',
       '#...O..............O...#',
       '#...O...%%%%%%%%...O...#',
       '#...O...%......%...O...#',
       '#.......%......%.......#',
-      '#.......%......%.......#',
+      '#7......%......%......8#',
       '#...O...%%%%%%%%...O...#',
       '#...O..............O...#',
       '#...OOOOOOOOOOOOOOOO...#',
       '#......................#',
-      '#.3..................4.#',
+      '#.3.........6........4.#',
       '########################',
     ],
   },

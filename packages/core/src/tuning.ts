@@ -31,6 +31,21 @@ export const MINE_BLAST_RADIUS = 1.6;
 /** A shell that has bounced its last still needs to die somewhere. */
 export const SHELL_MAX_LIFETIME_TICKS = 60 * 12;
 
+/**
+ * Tanks in a good match, and the number bots are filled up to.
+ *
+ * Separate from `arena.spawns.length` on purpose, and the separation is the
+ * whole point of the constant. Filling every unused spawn with a bot reads as
+ * reasonable until the maps gain spawns for a fuller lobby: they went from four
+ * starts to eight, and every solo game silently became one against seven.
+ * How many places a map has is a question about the map. How many opponents
+ * make a good fight is a question about the game, and this is that answer.
+ *
+ * The join cap stays on `spawns.length` -- that one really is "how many people
+ * can this map hold".
+ */
+export const DEFAULT_MATCH_SIZE = 4;
+
 export interface TankSpec {
   /** World units per second. */
   moveSpeed: number;
