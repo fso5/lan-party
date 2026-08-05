@@ -11,7 +11,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createWorld, step } from '../src/sim.js';
-import { loadArena, VERSUS_MAPS } from '../src/maps/index.js';
+import { loadArena, VERSUS_MAPS, MISSIONS } from '../src/maps/index.js';
+import { MAX_WIRE_POS } from '../src/net/protocol.js';
 import { Arena, parseArena } from '../src/map.js';
 import { emptyInput, Tile } from '../src/types.js';
 import { TANK_SPECS } from '../src/tuning.js';
@@ -384,4 +385,60 @@ test('a blast clears the blocks it reaches and leaves the ones it does not', () 
     'a block 1.68 tiles out is beyond it and should still be standing',
   );
   assert.equal(w.tanks[0].alive, true, 'and the tank across the room is untouched');
+});
+
+/**
+ * An arena the wire format cannot describe must be refused when it is authored.
+ *
+ * Issue #2 flagged that `quantPos` wrapped rather than clamped, and asked for an
+ * assertion in the map loader as cheap insurance. The wrap was fixed; the
+ * insurance never landed, and clamping alone makes the failure quieter rather
+ * than absent. Measured before writing this: `parseArena` accepted a 40-wide
+ * map, and a tank the host had at x=38.5 arrived at x=31.99 on every client --
+ * six tiles out, pinned there however it drove.
+ */
+test('a map wider than the wire format is refused, not silently truncated', () => {
+  const rows = Array.from({ length: 8 }, (_, r) =>
+    r === 0 || r === 7 ? '#'.repeat(40) : `#${'.'.repeat(38)}#`,
+  );
+  assert.throws(
+    () => parseArena('too wide', rows),
+    /cannot carry a coordinate past/,
+    'a 40-tile arena does not fit a 12-bit position field',
+  );
+});
+
+test('a map taller than the wire format is refused too', () => {
+  // Same field, same limit -- x and y are both 12 bits, and only checking width
+  // would pass a map that fails identically on the other axis.
+  const rows = Array.from({ length: 40 }, () => '#'.repeat(10));
+  assert.throws(() => parseArena('too tall', rows), /cannot carry a coordinate past/);
+});
+
+test('the largest arena that fits is still allowed', () => {
+  // The guard must reject what cannot be carried and nothing more.
+  //
+  // Not a boundary test, despite appearances, and the mutation run is what said
+  // so: flipping the guard to `>=` survives. It can only change the verdict for
+  // a map exactly MAX_WIRE_POS (31.9921875) tiles across, and widths are row
+  // lengths, so they are always integers. The two forms are indistinguishable
+  // for every input the loader can receive. Left as `>` because it states the
+  // real rule; noting it here so the next person to run mutation testing on
+  // this file does not go hunting for the missing test.
+  const span = Math.floor(MAX_WIRE_POS);
+  const rows = Array.from({ length: span }, () => '#'.repeat(span));
+  assert.doesNotThrow(() => parseArena('largest that fits', rows));
+});
+
+test('every shipped map fits the wire format', () => {
+  // The guard throws at load, so a map authored over the limit would take out
+  // whichever screen loaded it rather than failing here. This is the check that
+  // turns that into a red build.
+  for (const m of [...MISSIONS, ...VERSUS_MAPS]) {
+    const a = loadArena(m);
+    assert.ok(
+      a.width <= MAX_WIRE_POS && a.height <= MAX_WIRE_POS,
+      `${m.name} is ${a.width}x${a.height}, over the ${MAX_WIRE_POS} tile wire limit`,
+    );
+  }
 });

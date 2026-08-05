@@ -8,6 +8,10 @@
  */
 
 import { Tile, blocksShell, blocksTank, type TeamId } from './types.js';
+// The one thing the map layer takes from the wire format. Worth the dependency
+// -- protocol.ts imports nothing, so there is no cycle, and the alternative is
+// a second copy of the limit that nobody thinks to update.
+import { MAX_WIRE_POS } from './net/protocol.js';
 
 export interface SpawnPoint {
   x: number;
@@ -187,6 +191,21 @@ export class Arena {
 export function parseArena(name: string, rows: string[]): ArenaDef {
   const height = rows.length;
   const width = Math.max(...rows.map((r) => r.length));
+
+  // Refuse an arena the protocol cannot describe, at the moment it is authored
+  // rather than mid-match on somebody else's phone. Issue #2 asked for exactly
+  // this insurance and it was the half of that finding still missing: quantPos
+  // was taught to clamp instead of wrap, which turns a teleport into a tank
+  // permanently stuck against an invisible wall -- better, still silent, and
+  // still nothing a map author would connect to a wire format.
+  if (width > MAX_WIRE_POS || height > MAX_WIRE_POS) {
+    throw new Error(
+      `arena '${name}' is ${width}x${height}, and the wire format cannot carry a ` +
+        `coordinate past ${MAX_WIRE_POS} tiles -- tanks beyond that would appear ` +
+        'pinned at the edge on every phone but the host',
+    );
+  }
+
   const tiles: Tile[] = new Array(width * height).fill(Tile.Floor);
   const spawns: SpawnPoint[] = [];
   const enemies: EnemyPlacement[] = [];

@@ -73,6 +73,22 @@ export function dequantPos(q: number): number {
   return q / POS_SCALE;
 }
 
+/**
+ * Largest world coordinate the wire can carry, in tiles.
+ *
+ * Exported so the map loader can refuse an arena the protocol cannot describe,
+ * rather than each layer carrying its own copy of the number -- the two-sources
+ * -of-truth shape that makes a constant look local and harmless right up until
+ * they drift.
+ *
+ * `quantPos` clamps above this, which is the right call for a stray coordinate
+ * and quietly disastrous for a whole arena: a tank at x=38.5 arrives as 31.99
+ * on every client, six tiles from where the host has it, pinned there however
+ * it drives, with locally simulated shells missing to match. Nothing about that
+ * looks like a wire format running out of bits.
+ */
+export const MAX_WIRE_POS = MAX_QUANT_POS / POS_SCALE;
+
 export function quantAngle(a: number): number {
   // Normalise to [0, 2PI) then to a byte.
   let n = a % (Math.PI * 2);
