@@ -21,9 +21,9 @@ A's, and whoever is mid-flight on a shared file says so *before* editing it.
 
 | | |
 |---|---|
-| `packages/core` | Deterministic sim, netcode, BLE + WiFi transports, match rules, lobby protocol. **119 tests.** |
-| `packages/proto` | Browser harness, the installable web app, and the client the host phone serves. **3 browser smokes.** |
-| `packages/app` | Expo app — Session B's. Native BLE and TCP modules, host screen. **28 tests.** |
+| `packages/core` | Deterministic sim, netcode, BLE + WiFi transports, match rules, lobby protocol. **212 tests.** |
+| `packages/proto` | Browser harness, the installable web app, and the client the host phone serves. **3 browser smokes + a PWA check.** |
+| `packages/app` | Expo app — Session B's. Native BLE and TCP modules, host screen. **48 tests.** |
 | CI | Android APK and GitHub Pages on every push; browser smokes on `proto`/`core` changes. |
 
 Live right now:
