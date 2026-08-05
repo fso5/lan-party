@@ -247,6 +247,101 @@ check(roster.total === 4 && roster.humans === 1,
   'the opening mission is one player against its three scripted enemies',
   `${roster.humans} human(s) and ${roster.authored} enemy/ies`);
 
+/*
+ * Every seat has to be told apart from every other seat, at a glance, on a
+ * phone, in a fight.
+ *
+ * The palette had four colours for what became eight seats, and the renderer
+ * was the one lookup without a modulo -- so seats 5-8 got `undefined`, which a
+ * canvas silently ignores, leaving each late tank wearing whatever colour was
+ * painted before it. Both halves are checked here: that there is a colour per
+ * seat, and that no two are close enough to be confused.
+ *
+ * dE76 in CIE Lab rather than an RGB difference, because RGB distance says
+ * navy and black are far apart and says two mid greens are far apart, and only
+ * one of those is true.
+ */
+const palette = await phone.evaluate(() => window.__teamColors);
+check(Array.isArray(palette) && palette.length >= 8,
+  'there is a tank colour for every seat the lobby can fill',
+  `${palette && palette.length} colour(s)`);
+
+const dE = (() => {
+  const lin = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const lab = (hexStr) => {
+    const [r, g, bl] = [1, 3, 5].map((i) => lin(parseInt(hexStr.slice(i, i + 2), 16) / 255));
+    const x = (0.4124 * r + 0.3576 * g + 0.1805 * bl) / 0.9505;
+    const y = 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+    const z = (0.0193 * r + 0.1192 * g + 0.9505 * bl) / 1.089;
+    const f = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+    return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
+  };
+  return (p, q) => {
+    const [l1, a1, b1] = lab(p);
+    const [l2, a2, b2] = lab(q);
+    return Math.hypot(l1 - l2, a1 - a2, b1 - b2);
+  };
+})();
+
+let closest = Infinity;
+let closestPair = '';
+for (let i = 0; i < palette.length; i++) {
+  for (let j = i + 1; j < palette.length; j++) {
+    const d = dE(palette[i], palette[j]);
+    if (d < closest) { closest = d; closestPair = `${palette[i]} vs ${palette[j]}`; }
+  }
+}
+// 25 is the floor, not the target -- the eight measure 31.3 at their closest
+// and the original four measured 39.0. A future colour landing under this is
+// two players who cannot find their own tank.
+check(closest >= 25, 'no two seats wear colours that could be confused',
+  `closest pair ${closest.toFixed(1)} (${closestPair})`);
+
+/*
+ * The scoreboard has to hold a full lobby without pushing the page sideways.
+ *
+ * It is a flex row of chips in the header, written when a match meant two
+ * teams and sized by nothing in particular. Eight seats means eight chips, and
+ * a header that overflows takes the whole page with it -- the arena included,
+ * which is the thing the layout checks above exist to protect.
+ *
+ * Driven by filling the board directly rather than by playing a match to eight
+ * players, because the question is about the layout and nothing else.
+ */
+const board8 = await phone.evaluate(() => {
+  const rounds = document.getElementById('rounds');
+  const wasHidden = rounds.hidden;
+  rounds.hidden = false;
+  const board = document.getElementById('scoreboard');
+  const before = board.innerHTML;
+  board.innerHTML = '';
+  for (let t = 0; t < 8; t++) {
+    const li = document.createElement('li');
+    li.textContent = `T${t + 1} 0`;
+    li.style.color = window.__teamColors[t % window.__teamColors.length];
+    board.appendChild(li);
+  }
+  const out = {
+    // `innerWidth`, not `scrollWidth <= innerWidth`. The first version of this
+    // check compared those two and could never fail: under mobile emulation the
+    // layout viewport grows to fit its content, so both numbers move together
+    // and stay equal however far the content spills. Found by mutating the chip
+    // spacing to 10rem -- the board went to 1469px, the check still passed, and
+    // `innerWidth` had quietly become 1542.
+    //
+    // The width the page lays out at is the real signal, and it is the same one
+    // 'the page lays out at the width of the phone' uses above.
+    layoutWidth: window.innerWidth,
+    boardWidth: Math.round(board.getBoundingClientRect().width),
+  };
+  board.innerHTML = before;
+  rounds.hidden = wasHidden;
+  return out;
+});
+check(board8.layoutWidth === 844,
+  'a full lobby of eight scores fits the header',
+  `eight chips (${board8.boardWidth}px) widened the layout to ${board8.layoutWidth}, not 844`);
+
 const cdp = await ctx.newCDPSession(phone);
 const pts = (x, y, id) => [{ x: Math.round(x), y: Math.round(y), id, radiusX: 1, radiusY: 1, force: 1 }];
 const send = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });

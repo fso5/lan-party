@@ -19,7 +19,47 @@
 
 const ALL_MAPS = [...MISSIONS, ...VERSUS_MAPS];
 
-const TEAM_COLORS = ['#2E6DA4', '#B33A3A', '#3E8E5A', '#8A5CB8'];
+/*
+ * One colour per seat the lobby can hand out, and the count is the point.
+ *
+ * There were four, for the four spawns the maps used to have. Seats 5-8 then
+ * arrived and `TEAM_COLORS[t.team]` -- the tank renderer, the one lookup here
+ * without a modulo -- returned undefined for them. Measured in a browser
+ * rather than assumed: assigning undefined to `fillStyle` is silently ignored,
+ * so the canvas keeps whatever colour it had. A team-4 tank drew in team 0's
+ * blue and a team-5 tank in team 1's red, changing with draw order. Not a
+ * duplicate colour, which would at least be stable -- a tank wearing the
+ * colour of whoever happened to be painted before it.
+ *
+ * The four additions stay in the same register as the originals (saturation
+ * 0.39-0.56, lightness 0.40-0.54) so a late seat reads as another tank rather
+ * than as a different kind of object. Closest pair is dE76 31.3, against 39.0
+ * for the original four; `teamColour` in the smoke asserts a floor of 25 so a
+ * later edit cannot quietly collide two seats.
+ *
+ * Untouched and worth knowing: team green sits 14.6 from the green *bot*,
+ * which is the closest thing on the field to a genuine ambiguity here. It
+ * predates all of this and changing it would repaint an existing team.
+ */
+const TEAM_COLORS = [
+  '#2E6DA4', // blue
+  '#B33A3A', // red
+  '#3E8E5A', // green
+  '#8A5CB8', // violet
+  '#C97A2E', // orange
+  '#2FA3B8', // cyan
+  '#B84A86', // magenta
+  '#7C8C2E', // olive
+];
+
+/**
+ * Colour for a seat, for every caller.
+ *
+ * A function rather than four call sites indexing the array, because three of
+ * them remembered the modulo and the fourth did not -- and the fourth was the
+ * renderer.
+ */
+const teamColor = (team) => TEAM_COLORS[((team % TEAM_COLORS.length) + TEAM_COLORS.length) % TEAM_COLORS.length];
 const KIND_COLORS = {
   0: '#2E6DA4', // player  - blue
   1: '#8A6A45', // brown
@@ -396,7 +436,7 @@ function renderLobby() {
 
     const dot = document.createElement('span');
     dot.className = 'dot';
-    dot.style.background = TEAM_COLORS[slot.team % TEAM_COLORS.length];
+    dot.style.background = teamColor(slot.team);
     li.appendChild(dot);
 
     const who = document.createElement('span');
@@ -416,14 +456,19 @@ function renderLobby() {
 
   // Offer one team per seat, so free-for-all is reachable with a full lobby and
   // 2v2 is reachable by everyone picking from the first two.
-  const teamCount = Math.max(2, Math.min(slots.length, TEAM_COLORS.length * 2));
+  //
+  // The bound was `TEAM_COLORS.length * 2` when there were four colours, which
+  // was not a statement about teams at all -- it was doubling a short palette
+  // to reach eight, accepting that two teams would wear the same colour. There
+  // is a colour per seat now, so the palette is a real bound and says so.
+  const teamCount = Math.max(2, Math.min(slots.length, TEAM_COLORS.length));
   const mine = slots.find((x) => x.slotId === net.mySlotId);
   const buttons = document.getElementById('lobby-team-buttons');
   buttons.innerHTML = '';
   for (let team = 0; team < teamCount; team++) {
     const b = document.createElement('button');
     b.textContent = `T${team + 1}`;
-    b.style.color = TEAM_COLORS[team % TEAM_COLORS.length];
+    b.style.color = teamColor(team);
     b.setAttribute('aria-pressed', String(mine ? mine.team === team : false));
     b.addEventListener('click', () => sendLobby((w) => writeLobbySetTeam(w, team)));
     buttons.appendChild(b);
@@ -1189,7 +1234,7 @@ function drawArena() {
 }
 
 function drawTank(t, s) {
-  const color = t.kind === TankKind.Player ? TEAM_COLORS[t.team] : KIND_COLORS[t.kind];
+  const color = t.kind === TankKind.Player ? teamColor(t.team) : KIND_COLORS[t.kind];
   const r = TANK_RADIUS * s;
 
   ctx.save();
@@ -1485,7 +1530,7 @@ function updateRoundsHud() {
   for (const team of teams) {
     const li = document.createElement('li');
     li.textContent = `${teamLabel(team)} ${scores.get(team) ?? 0}`;
-    li.style.color = TEAM_COLORS[team % TEAM_COLORS.length];
+    li.style.color = teamColor(team);
     if (team === myTeam()) li.dataset.you = 'true';
     board.appendChild(li);
   }
@@ -1713,6 +1758,7 @@ window.__state = state;
 window.__net = net;
 // And the aim preview, so a test can check it against a shell really fired.
 window.__trajectoryPath = trajectoryPath;
+window.__teamColors = TEAM_COLORS;
 
 window.addEventListener('resize', resize);
 
