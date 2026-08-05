@@ -470,3 +470,125 @@ test('input frames are small enough to send every tick over BLE', async () => {
   assert.ok(bytesPerSecond < 700, `input costs ${bytesPerSecond} B/s per client, too much for BLE`);
   void transport;
 });
+
+/**
+ * A BLE adapter whose connection outcome the test decides.
+ *
+ * The FakeBleLink above connects synchronously inside `connect()`, which is the
+ * happy path and cannot express the interesting one: `connectGatt` returning
+ * while no link is ever established.
+ */
+function controllableAdapter() {
+  let onConn: ((p: Peer) => void) | null = null;
+  let onDisc: ((id: PeerId, reason: string) => void) | null = null;
+  // A platform can only refuse a connection it was asked for. `join` awaits
+  // stopScanning before it registers anything, so a test that fires the outcome
+  // synchronously is describing an order that cannot happen -- and gets a
+  // misleading failure. Waiting on this keeps the test honest about causality.
+  let asked: () => void;
+  const wasAsked = new Promise<void>((r) => {
+    asked = r;
+  });
+  const adapter: BleAdapter = {
+    payloadSize: 18,
+    startAdvertising: async () => {},
+    stopAdvertising: async () => {},
+    startScanning: async () => {},
+    stopScanning: async () => {},
+    // Resolves immediately and does nothing else, exactly as `connectGatt` does.
+    connect: async () => {
+      asked();
+    },
+    disconnect: async () => {},
+    sendFrame: () => {},
+    onFrame: () => {},
+    onPeerConnected: (cb) => {
+      onConn = cb;
+    },
+    onPeerDisconnected: (cb) => {
+      onDisc = cb;
+    },
+  };
+  return {
+    adapter,
+    wasAsked,
+    connects: (id: PeerId) => onConn?.({ id, name: id, rtt: 40 }),
+    fails: (id: PeerId, reason: string) => onDisc?.(id, reason),
+  };
+}
+
+test('join does not report success for a connection that never came up', async () => {
+  // The bug this pins: `adapter.connect` resolving means the platform accepted
+  // the request, not that a link exists. `await join(...)` used to resolve
+  // cleanly here and the caller had no way to tell it had not worked.
+  const { adapter } = controllableAdapter();
+  const transport = new BleTransport(adapter);
+
+  await assert.rejects(
+    () => transport.join('host', 25),
+    /no answer from host/,
+    'a join nothing answered must fail rather than resolve',
+  );
+});
+
+test('a join that times out names both plausible causes', async () => {
+  // Whoever reads this message is standing in a room holding a phone. Range and
+  // a full host are the two things they can actually act on, and the client
+  // cannot tell which it is -- so it must not pick one.
+  const { adapter } = controllableAdapter();
+  const transport = new BleTransport(adapter);
+
+  await assert.rejects(
+    () => transport.join('host', 25),
+    (err: Error) =>
+      /out of range/.test(err.message) && /connections as its Bluetooth stack allows/.test(err.message),
+  );
+});
+
+test('join fails with the reason when the platform refuses the connection', async () => {
+  // Android delivers a refused connect as a state change to DISCONNECTED with a
+  // status code -- 133 is the usual catch-all, and it is what a host already at
+  // its connection limit produces.
+  const { adapter, wasAsked, fails } = controllableAdapter();
+  const transport = new BleTransport(adapter);
+
+  const joining = transport.join('host', 5_000);
+  await wasAsked;
+  fails('host', 'status 133');
+
+  await assert.rejects(joining, /could not connect to host: status 133/);
+});
+
+test('a connection that fails is not announced as a player leaving', async () => {
+  // onPeerLeave means somebody who was in the match is no longer in it. Firing
+  // it for a peer that never arrived would have a lobby remove a player it had
+  // never shown, and a host retire a client it never had.
+  const { adapter, wasAsked, fails } = controllableAdapter();
+  const transport = new BleTransport(adapter);
+  const departures: PeerId[] = [];
+  transport.setEvents({ onPeerLeave: (id) => departures.push(id) });
+
+  const joining = transport.join('host', 5_000);
+  await wasAsked;
+  fails('host', 'status 133');
+  await assert.rejects(joining, /could not connect/);
+
+  assert.deepEqual(departures, [], 'nobody left; the join failed');
+});
+
+test('a real departure is still announced after a successful join', async () => {
+  // The guard above must key on "is a join pending", not on the peer id, or it
+  // would swallow the genuine disconnect that follows a working connection.
+  const { adapter, wasAsked, connects, fails } = controllableAdapter();
+  const transport = new BleTransport(adapter);
+  const departures: PeerId[] = [];
+  transport.setEvents({ onPeerLeave: (id) => departures.push(id) });
+
+  const joining = transport.join('host', 5_000);
+  await wasAsked;
+  connects('host');
+  await joining;
+
+  fails('host', 'left');
+  assert.deepEqual(departures, ['host'], 'a peer that had connected did leave');
+});

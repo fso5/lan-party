@@ -106,6 +106,17 @@ export const FRAME_HEADER_BYTES = 2;
 export const BLE_SAFE_MTU = 180;
 
 /**
+ * How long `join` waits for a connection before calling it failed.
+ *
+ * Generous on purpose. A BLE connect on Android routinely takes a few seconds
+ * -- scanning has to stop, the link layer negotiates, then MTU exchange and
+ * service discovery run before the peer counts as connected -- so a tight
+ * timeout would report a healthy-but-slow phone as broken. Ten seconds is far
+ * longer than a working connect and far shorter than the forever this replaces.
+ */
+export const BLE_JOIN_TIMEOUT_MS = 10_000;
+
+/**
  * Fragmentation and reassembly.
  *
  * Most of our traffic fits in a single write -- an input frame is 8 bytes and an
@@ -287,6 +298,10 @@ export class BleTransport implements Transport {
   private framer: BleFramer;
   private events: Partial<TransportEvents> = {};
   private peers = new Map<PeerId, Peer>();
+  private pendingJoins = new Map<
+    PeerId,
+    { resolve: () => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
+  >();
 
   constructor(private adapter: BleAdapter) {
     // Read on every fragment, not captured here: this constructor runs before
@@ -301,12 +316,21 @@ export class BleTransport implements Transport {
 
     adapter.onPeerConnected((peer) => {
       this.peers.set(peer.id, peer);
+      this.finishJoin(peer.id)?.resolve();
       this.events.onPeerJoin?.(peer);
     });
 
     adapter.onPeerDisconnected((peerId, reason) => {
       this.peers.delete(peerId);
       this.framer.forgetPeer(peerId);
+      // A disconnect for a peer we are still trying to reach is that attempt
+      // failing, not a player leaving -- report it to the caller of join() and
+      // do not announce a departure for somebody who never arrived.
+      const pending = this.finishJoin(peerId);
+      if (pending) {
+        pending.reject(new Error(`could not connect to ${peerId}: ${reason}`));
+        return;
+      }
       this.events.onPeerLeave?.(peerId, reason);
     });
   }
@@ -355,9 +379,69 @@ export class BleTransport implements Transport {
     });
   }
 
-  async join(peerId: PeerId): Promise<void> {
+  /**
+   * Connect to a host, and do not claim success until it actually happened.
+   *
+   * `adapter.connect` resolving means the platform accepted the *request*. On
+   * Android it is `connectGatt` returning, which happens long before -- and
+   * regardless of whether -- a link is ever established. So the obvious
+   * `await transport.join(host)` used to resolve cleanly for a connection that
+   * never came up, and the caller had nothing to wait on and nothing to report.
+   *
+   * That is not a hypothetical. A connect that fails outright arrives at
+   * TanksBleModule's `onConnectionStateChange` as DISCONNECTED for a device
+   * that was never in `connections`, so the guard that (correctly) stops a
+   * departure being announced twice means this emits no event at all. The JS
+   * side asks to connect and hears nothing, forever.
+   *
+   * Which is the failure the roster measurement predicts people will actually
+   * hit: eight players means the host holds seven simultaneous GATT links, at
+   * or past the ceiling of a good many Android stacks, and the phones that lose
+   * that race are refused at connect time. Silence is the worst possible way to
+   * report "the room is full" -- so this waits for the connection event, fails
+   * loudly on the timeout, and names both plausible causes rather than guessing
+   * between them.
+   */
+  async join(peerId: PeerId, timeoutMs = BLE_JOIN_TIMEOUT_MS): Promise<void> {
     await this.adapter.stopScanning();
-    await this.adapter.connect(peerId);
+
+    const settled = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingJoins.delete(peerId);
+        reject(
+          new Error(
+            `no answer from ${peerId} ${timeoutMs}ms after asking to connect -- ` +
+              'it may be out of range, or the host may already hold as many ' +
+              'connections as its Bluetooth stack allows',
+          ),
+        );
+      }, timeoutMs);
+      // Deliberately not unref'd. That was the first thing tried here, to keep
+      // a ten-second timer from holding a test runner open, and it defeats the
+      // whole mechanism: an unref'd timer does not fire if nothing else is
+      // keeping the loop alive, so the join hangs exactly as it did before --
+      // which is how the tests below caught it. Every settle path clears it.
+      this.pendingJoins.set(peerId, { resolve, reject, timer });
+    });
+
+    // Register the wait *before* asking, so a stack that answers synchronously
+    // cannot land its event between the request and the listener.
+    try {
+      await this.adapter.connect(peerId);
+    } catch (err) {
+      this.finishJoin(peerId);
+      throw err;
+    }
+    return settled;
+  }
+
+  /** Drop a pending join's timer and hand back its callbacks, once. */
+  private finishJoin(peerId: PeerId) {
+    const pending = this.pendingJoins.get(peerId);
+    if (!pending) return undefined;
+    clearTimeout(pending.timer);
+    this.pendingJoins.delete(peerId);
+    return pending;
   }
 
   send(to: PeerId, data: Uint8Array, reliable: boolean): void {

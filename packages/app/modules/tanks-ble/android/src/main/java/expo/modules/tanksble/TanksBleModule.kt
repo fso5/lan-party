@@ -95,6 +95,18 @@ class TanksBleModule : Module() {
   private val rxCharacteristics = ConcurrentHashMap<String, BluetoothGattCharacteristic>()
 
   /**
+   * Devices we have asked to connect and not yet heard succeed.
+   *
+   * Needed to tell apart the two ways a device can reach the disconnected
+   * callback without ever having been in `connections`: a connect attempt that
+   * failed, which JS is waiting to hear about, and a deliberate `disconnect()`
+   * that already announced itself. Without this distinction the code either
+   * stays silent on a failed connect (what it used to do) or announces every
+   * intentional departure twice.
+   */
+  private val connecting = ConcurrentHashMap.newKeySet<String>()
+
+  /**
    * Negotiated payload, shared by both roles. Starts at the BLE default (23)
    * and grows once a connection negotiates up. The JS side reads this to size
    * its frames, so it must never overstate what a write can carry -- an
@@ -374,10 +386,14 @@ class TanksBleModule : Module() {
     try {
       val device = adapter?.getRemoteDevice(peerId)
         ?: throw IllegalStateException("unknown device $peerId")
+      // Recorded before the call, so a stack that fails fast cannot deliver the
+      // failure callback before we are in a position to recognise it.
+      connecting.add(peerId)
       // TRANSPORT_LE explicitly: without it Android may try BR/EDR on dual-mode
       // devices and fail in ways that look like the peer is absent.
       device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
     } catch (e: Throwable) {
+      connecting.remove(peerId)
       fail("connect", e)
     }
   }
@@ -419,6 +435,10 @@ class TanksBleModule : Module() {
       val id = gatt.device.address
       if (newState == BluetoothProfile.STATE_CONNECTED) {
         connections[id] = gatt
+        // Still not "connected" as far as JS is concerned -- that waits for
+        // service discovery below -- but it is no longer a candidate for the
+        // failed-connect report, because from here a drop is a real departure.
+        connecting.remove(id)
         // Ask for a bigger MTU before discovering services: a larger MTU makes
         // every subsequent write cheaper, and doing it after discovery means
         // renegotiating mid-match.
@@ -428,10 +448,25 @@ class TanksBleModule : Module() {
         // entry out and said so, this callback -- should the platform deliver
         // it after close() -- must not say it again.
         val wasLive = connections.remove(id) != null
+        val wasConnecting = connecting.remove(id)
         rxCharacteristics.remove(id)
         gatt.close()
         if (wasLive) {
           sendEvent("onPeerDisconnected", mapOf("peerId" to id, "reason" to "status $status"))
+        } else if (wasConnecting) {
+          // A connect that never came up. This used to emit nothing at all --
+          // the entry was never in `connections`, so the guard against
+          // double-announcing a departure also swallowed every failed connect,
+          // and JS sat waiting for a peer that was never going to arrive.
+          //
+          // This is the path a full host puts people on: status 133 is the
+          // usual catch-all and is what an Android stack already holding as
+          // many links as it supports returns. Saying so immediately is the
+          // difference between "it didn't work" and ten seconds of nothing.
+          sendEvent(
+            "onPeerDisconnected",
+            mapOf("peerId" to id, "reason" to "connect failed (status $status)"),
+          )
         }
       }
     }
@@ -458,6 +493,12 @@ class TanksBleModule : Module() {
       val tx = service.getCharacteristic(TX_UUID)
       if (tx == null) {
         sendEvent("onError", mapOf("where" to "discover", "message" to "peer has no TX characteristic"))
+        // Disconnect, as the missing-service branch above does. Returning here
+        // left a live GATT link in `connections` that could never deliver a
+        // notification, and -- because nothing ever removed it -- no
+        // disconnected event either. An onError JS may only log, and then
+        // silence. Dropping the link turns it into a reported failure.
+        gatt.disconnect()
         return
       }
 
