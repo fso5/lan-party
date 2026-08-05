@@ -204,9 +204,30 @@ jobs:
         run: |
           unzip -p out/tanks.apk assets/index.android.bundle > bundle.hbc
           ls -l bundle.hbc
+
+          # Does any JavaScript import the BLE adapter yet?
+          #
+          # This is what turns the note below into a requirement, without anyone
+          # having to remember to promote it. While nothing imports bleAdapter,
+          # Metro is right to drop it and its absence is expected. The moment a
+          # screen imports it, the bundle must carry it -- and if Metro drops it
+          # anyway, `requireNativeModule('TanksBle')` runs at module scope and
+          # the app crashes on the import rather than losing Bluetooth quietly.
+          #
+          # Matched as an import, not a mention: the word appears in a comment in
+          # tcpServer.ts, and a comment must not arm a check.
+          if grep -rqE "from '[^']*bleAdapter'|require\((['\"])[^'\"]*bleAdapter" \
+               packages/app/src packages/app/App.tsx 2>/dev/null; then
+            export BLE_WIRED=1
+            echo "JS imports bleAdapter -- the bundle is required to carry it."
+          else
+            echo "Nothing imports bleAdapter yet -- its absence from the bundle is expected."
+          fi
+
           python3 - <<'PY'
-          import sys, zipfile
+          import os, sys, zipfile
           data = open('bundle.hbc','rb').read()
+          ble_wired = os.environ.get('BLE_WIRED') == '1'
 
           def find(sym):
               return data.count(sym.encode('utf-8')), data.count(sym.encode('utf-16-le'))
@@ -251,7 +272,13 @@ jobs:
           # the APK either way, so "absent" here means Metro dropped the JS
           # binding for want of an importer -- the radio is on board and
           # unreachable, not missing.
-          watched = ['TanksBle', 'bleAdapter']
+          #
+          # Promoted to required the moment something imports the adapter, which
+          # is decided in the shell above rather than by anyone remembering.
+          watched = [] if ble_wired else ['TanksBle', 'bleAdapter']
+          if ble_wired:
+              required['bleAdapter'] = 'the BLE adapter, now that JS imports it'
+              required['TanksBle'] = "the radio's JS binding, via requireNativeModule"
 
           missing = []
           for sym, what in required.items():
