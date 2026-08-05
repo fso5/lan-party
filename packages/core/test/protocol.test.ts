@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   MAX_QUANT_POS,
   MAX_WIRE_BOUNCES,
+  PROTOCOL_VERSION,
   MsgType,
   NetEvent,
   Reader,
@@ -16,10 +17,12 @@ import {
   quantPos,
   MAX_LOBBY_SLOTS,
   readMineSpawn,
+  readMatchStart,
   readShellSpawn,
   readSnapshot,
   writeInput,
   writeMineSpawn,
+  writeMatchStart,
   writeShellSpawn,
   writeSnapshot,
 } from '../src/net/protocol.js';
@@ -259,6 +262,93 @@ test('every shell profile and player slot fits the bits the wire gives it', () =
   r.u8();
   r.u8();
   assert.equal(readShellSpawn(r).bounces, 0, 'an over-wide bounce count wraps rather than failing');
+});
+
+/**
+ * MatchStart, which decides what world every client builds.
+ *
+ * It had no test naming it. Not uncovered -- the browser suites write it from
+ * the host and read it on the page every run -- but covered only at the shape
+ * those happen to use, which is a couple of players and a couple of bots. The
+ * fields that grow are the ones a full lobby fills, and a roster that comes
+ * back in the wrong order is not a visible failure: every client builds tanks
+ * in creation order and takes its ids from position, so a swapped pair means
+ * two people driving each other's tanks with nothing on screen to say so.
+ */
+test('a match start round-trips a full lobby, field for field', () => {
+  const sent = {
+    mapId: 103,
+    // Distinct in every byte, so a mis-sized read shows up as a wrong value
+    // rather than a plausible one.
+    seed: 0xdeadbeef,
+    hostTick: 0xfeed,
+    yourTankId: 7,
+    players: Array.from({ length: MAX_LOBBY_SLOTS }, (_, i) => ({
+      team: MAX_LOBBY_SLOTS - 1 - i,
+      spawnIndex: i,
+    })),
+    bots: [
+      { kind: 2, team: 90, spawnIndex: 1 },
+      { kind: 3, team: 91, spawnIndex: 2 },
+      { kind: 5, team: 92, spawnIndex: 3 },
+    ],
+  };
+
+  const w = new Writer();
+  writeMatchStart(w, sent);
+  const buf = w.finish();
+
+  const r = new Reader(buf);
+  assert.equal(r.u8(), MsgType.MatchStart, 'the type byte leads');
+  const got = readMatchStart(r);
+
+  assert.equal(got.mapId, sent.mapId);
+  assert.equal(got.seed, sent.seed, 'a 32-bit seed must survive intact');
+  assert.equal(got.hostTick, sent.hostTick);
+  assert.equal(got.yourTankId, sent.yourTankId);
+  // deepEqual on the arrays, because order is the load-bearing part.
+  assert.deepEqual(got.players, sent.players);
+  assert.deepEqual(got.bots, sent.bots);
+  assert.equal(r.remaining, 0, 'the reader must consume exactly what was written');
+
+  // Stated rather than asserted tightly: a full lobby is 41 bytes, so it fits
+  // one BLE write at the negotiated MTU and fragments at the 18-byte floor,
+  // which is the path BleFramer covers.
+  assert.ok(buf.length < 180, `a full match start is ${buf.length}B`);
+});
+
+test('a match start from a different build is refused, not misread', () => {
+  // The version byte exists because the roster layout has changed before and
+  // will again. A phone running a cached older page reading a newer host's
+  // roster would not fail -- it would build a plausible world with the fields
+  // slid along by a byte.
+  const w = new Writer();
+  writeMatchStart(w, {
+    mapId: 101, seed: 1, hostTick: 0, yourTankId: 0,
+    players: [{ team: 0, spawnIndex: 0 }], bots: [],
+  });
+  const buf = w.finish();
+  buf[1] = PROTOCOL_VERSION + 1;
+
+  const r = new Reader(buf);
+  r.u8();
+  assert.throws(() => readMatchStart(r), /protocol version mismatch/);
+});
+
+test('a truncated match start is rejected rather than half-applied', () => {
+  const w = new Writer();
+  writeMatchStart(w, {
+    mapId: 101, seed: 7, hostTick: 3, yourTankId: 1,
+    players: [{ team: 0, spawnIndex: 0 }, { team: 1, spawnIndex: 1 }],
+    bots: [{ kind: 2, team: 90, spawnIndex: 2 }],
+  });
+  const full = w.finish();
+
+  for (let cut = 1; cut < full.length; cut++) {
+    const r = new Reader(full.subarray(0, cut));
+    r.u8();
+    assert.throws(() => readMatchStart(r), TruncatedPacketError, `cut at ${cut}`);
+  }
 });
 
 test('a mine spawn round-trips, including the two ends of the arena', () => {
