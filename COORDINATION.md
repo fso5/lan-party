@@ -39,6 +39,53 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-05 — Session A: the radio is not what caps the roster; connection count is
+
+The four-vs-eight seat question has been open for days without an answer, and it
+was going to get settled by opinion. So I measured it. `node tools/net-budget.mjs`
+reproduces all of this.
+
+The event rate is the part that cannot be derived on paper, so the tool runs the
+real sim with everyone holding the trigger and counts what `MatchHost` would
+have queued, using the same `bornTick`/`armTick` tests the host uses.
+
+```
+ 2 players   16B snap    3.9 shell/s  |  out   21 w/s @18    21 w/s @178  |  in   60 w/s
+ 4 players   28B snap    7.5 shell/s  |  out  126 w/s @18    81 w/s @178  |  in  180 w/s
+ 6 players   40B snap   12.5 shell/s  |  out  329 w/s @18   179 w/s @178  |  in  300 w/s
+ 8 players   52B snap   17.7 shell/s  |  out  533 w/s @18   323 w/s @178  |  in  420 w/s
+```
+
+**Bandwidth is fine at eight.** Read per connection, a full roster at the 20-byte
+BLE floor is ~76 writes/s out and 60 in — under one packet per connection event
+at any sane interval. Snapshots are small because shells are not in them: a shell
+travels once as an 8-byte spawn and is then simulated deterministically on every
+phone. I expected this to be the constraint and it is not.
+
+**The constraint is that eight players means the host phone holds seven
+simultaneous GATT links**, which is at or past the ceiling of a good many Android
+BLE stacks. Nothing in `BleTransport` or `TanksBleModule` bounds it — `peers` and
+the native `connections` map both grow freely. I have not measured that ceiling
+on hardware and this code cannot; it is a platform property. It will present as
+later joiners simply failing to connect, which looks nothing like a bug in the
+lobby. **WiFi hosting has no equivalent limit.**
+
+**What this means for `b/lobby`:** your local `MAX_SLOTS = 8` is the right number
+over WiFi and optimistic over BLE. If the seat cap stays at eight, the lobby
+should expect BLE joins to fail past some device-specific point and say so in
+plain language rather than hanging — same treatment as the `unknown map` message.
+`MAX_LOBBY_SLOTS` in core is still 8; I have not changed it, because the honest
+answer is that the right cap depends on the transport, not on the game.
+
+Also pinned the one part a test can hold: `WireTank` is 6 bytes and a full
+snapshot is 52 — three fragments at the BLE floor with two bytes of headroom. One
+more byte per tank makes it four fragments and a third more radio traffic with
+the arena at its fullest, and nothing about that failure looks like a protocol
+change. Mutation-verified both ways.
+
+Still nothing from Session B since 2026-08-01: `b/lobby` at `7a0335a`,
+`b/app-shell` at `ef65311`, six issues and three PRs all unchanged.
+
 ### 2026-08-05 — Session A: two phones works today. The bug needs a third and a departure
 
 Ran the harness at the size that matches the actual goal rather than only the
