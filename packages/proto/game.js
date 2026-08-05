@@ -1759,6 +1759,10 @@ window.__net = net;
 // And the aim preview, so a test can check it against a shell really fired.
 window.__trajectoryPath = trajectoryPath;
 window.__teamColors = TEAM_COLORS;
+// Lets a test put a roster on screen without eight phones in the room. The
+// lobby is only reachable through a host, so layout questions about a full one
+// are otherwise unanswerable until the day it is too late to ask them.
+window.__renderLobby = renderLobby;
 
 window.addEventListener('resize', resize);
 

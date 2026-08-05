@@ -342,6 +342,73 @@ check(board8.layoutWidth === 844,
   'a full lobby of eight scores fits the header',
   `eight chips (${board8.boardWidth}px) widened the layout to ${board8.layoutWidth}, not 844`);
 
+/*
+ * A full lobby has to leave Ready reachable.
+ *
+ * Eight slots and eight team buttons is a lot of panel for a phone held
+ * landscape, where there are 390px of height in total. The panel is capped at
+ * 86vh and scrolls, so the content grows past the screen and the button that
+ * starts the game goes below the fold -- fine, as long as scrolling actually
+ * brings it back. If the cap were ever dropped the panel would simply grow off
+ * the bottom and Ready would be unreachable, with nothing on screen to say so.
+ *
+ * Rendered directly rather than by joining eight phones, because the question
+ * is about the layout. Restored afterwards so the checks below still see the
+ * page they expect.
+ */
+const lobby8 = await phone.evaluate(() => {
+  const net = window.__net;
+  const before = { roster: net.roster, mySlotId: net.mySlotId };
+  net.mySlotId = 0;
+  net.roster = {
+    slots: Array.from({ length: 8 }, (_, i) => ({
+      slotId: i, name: `Player ${i + 1}`, team: i, ready: i % 2 === 0,
+    })),
+  };
+  window.__renderLobby();
+
+  const panel = document.querySelector('#match-lobby .panel');
+  const ready = document.getElementById('btn-ready');
+
+  // Whether a *player* can scroll, not whether a script can.
+  //
+  // Setting scrollTop works on an overflow:hidden element, so the first
+  // version of this check scrolled the panel itself and passed even with
+  // scrolling turned off -- a panel the user cannot move and a button they
+  // cannot reach, reported green. Verified by mutating overflow-y to hidden,
+  // which it did not catch. Ask the computed style as well.
+  const overflows = panel.scrollHeight > panel.clientHeight + 1;
+  const scrollable = ['auto', 'scroll'].includes(getComputedStyle(panel).overflowY);
+
+  // What a player would do when the button is below the fold.
+  panel.scrollTop = panel.scrollHeight;
+  const r = ready.getBoundingClientRect();
+  const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  const out = {
+    teamButtons: document.getElementById('lobby-team-buttons').children.length,
+    slots: document.getElementById('lobby-slots').children.length,
+    tappable: !!hit && (hit === ready || ready.contains(hit)),
+    onScreen: r.bottom <= window.innerHeight + 1 && r.top >= -1,
+    reachable: !overflows || scrollable,
+    overflows,
+    scrollable,
+    top: Math.round(r.top),
+  };
+
+  net.roster = before.roster;
+  net.mySlotId = before.mySlotId;
+  window.__renderLobby();
+  return out;
+});
+check(lobby8.slots === 8 && lobby8.teamButtons === 8,
+  'a full lobby shows every seat and a team for each',
+  `${lobby8.slots} slot(s), ${lobby8.teamButtons} team button(s)`);
+check(lobby8.tappable && lobby8.onScreen && lobby8.reachable,
+  'Ready is reachable with a full lobby on screen',
+  `button top ${lobby8.top} in a ${await phone.evaluate(() => window.innerHeight)}px viewport, ` +
+    `tappable=${lobby8.tappable} onScreen=${lobby8.onScreen} ` +
+    `overflows=${lobby8.overflows} userScrollable=${lobby8.scrollable}`);
+
 const cdp = await ctx.newCDPSession(phone);
 const pts = (x, y, id) => [{ x: Math.round(x), y: Math.round(y), id, radiusX: 1, radiusY: 1, force: 1 }];
 const send = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
