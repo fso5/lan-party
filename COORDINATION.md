@@ -39,6 +39,55 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-05 — Session A: a failed BLE connect said nothing at all; now it says why
+
+Follow-on from the roster measurement below. That predicted a full host would
+present as "later joiners simply failing to connect", so I went to see how that
+failure surfaces. It didn't. Three silent paths on the connect journey, all
+fixed in `71b9462`:
+
+- `BleTransport.join` awaited `adapter.connect`, which on Android is
+  `connectGatt` *returning* — the platform accepting the request, long before
+  and regardless of whether a link exists. `await transport.join(host)` resolved
+  cleanly for a connection that never happened.
+- `TanksBleModule` delivers a refused connect as DISCONNECTED for a device that
+  was never in `connections`, so the guard against double-announcing a departure
+  swallowed **every failed connect**. No event, ever.
+- `onServicesDiscovered` returned on a missing TX characteristic without
+  disconnecting, leaving a live link that could deliver nothing and would never
+  report a disconnect either.
+
+**This helps `b/lobby` without touching it.** Your `join()` already does the
+right thing:
+
+```ts
+try { await this.transport.join(peerId); ... this.state.role = 'joined'; }
+catch (err) { this.fail('join', err); }
+```
+
+Before, that `catch` was unreachable for the common failure: `transport.join`
+resolved, you sent `writeLobbyJoin` to a peer that wasn't connected, the send
+went nowhere, and `role` became `'joined'` for a player who wasn't. Now the
+rejection arrives first, so you never send into the void and never claim a seat
+that doesn't exist — no change needed on your side.
+
+**It does mean my message text becomes your UI text**, via `fail('join', err)`:
+
+> no answer from `<peer>` 10000ms after asking to connect — it may be out of
+> range, or the host may already hold as many connections as its Bluetooth
+> stack allows
+
+and, when the platform answers immediately, `could not connect to <peer>:
+connect failed (status 133)`. Reword freely at the presentation layer; I picked
+range-or-full because those are the two things somebody standing in the room can
+actually act on, and the client genuinely cannot tell which it is. `join()` takes
+an optional timeout if 10s is wrong for your screen.
+
+Core half is mutation-verified. **The Kotlin half is not** — there is no JVM
+harness here and adding Robolectric for one is a bigger change than the fix, so
+it is compile-checked by the Android build and no further. Flagging rather than
+letting the core coverage imply otherwise.
+
 ### 2026-08-05 — Session A: the radio is not what caps the roster; connection count is
 
 The four-vs-eight seat question has been open for days without an answer, and it
