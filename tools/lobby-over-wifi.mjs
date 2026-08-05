@@ -47,7 +47,10 @@ execFileSync('npx', ['esbuild', ts, '--format=esm', '--target=es2022', `--outfil
 execFileSync('node', [join(proto, 'build.mjs')], { stdio: 'pipe' });
 const html = readFileSync(join(proto, 'dist', 'tanks-proto.html'));
 
-const { BridgeTransport } = await import('@tanks/core');
+const {
+  BridgeTransport, MatchHost, Writer, createWorld, loadArena, VERSUS_MAPS,
+  writeMatchStart, TICK_HZ,
+} = await import('@tanks/core');
 const { LobbySession } = await import(mjs);
 const cleanup = () => { for (const f of [ts, mjs]) rmSync(f, { force: true }); };
 process.on('exit', cleanup);
@@ -148,13 +151,20 @@ check(rows.length === session.get().roster.slots.length,
   'the browser renders every seat the host has',
   `browser ${rows.length} vs host ${session.get().roster.slots.length}`);
 
+/*
+ * Finding 1 first, while the lobby is still seating people.
+ *
+ * Order matters here and I got it wrong once: run the leave-and-join after the
+ * match has started and the roster is no longer being reseated, so the check
+ * passes by reading the teams handed out before anybody left. It has to happen
+ * while the lobby is the thing doing the work.
+ */
 console.log('\n-- finding 1, over the transport that actually ships --');
 const teams = session.get().roster.slots.map((s) => s.team);
 check(new Set(teams).size === teams.length,
   'free-for-all puts everyone on their own team',
   `teams ${JSON.stringify(teams)}`);
 
-// A departure in the middle, which is the path the bug hides from.
 await pages[1].ctx.close();
 await pages[0].p.waitForTimeout(600);
 
@@ -162,7 +172,8 @@ const late = await browser.newContext();
 const lp = await late.newPage();
 await lp.addInitScript(() => localStorage.setItem('tanks.name', 'Dre'));
 await lp.goto(`http://127.0.0.1:${port}/`);
-await lp.waitForTimeout(1200);
+await lp.waitForSelector('#match-lobby:not([hidden])', { timeout: 15_000 }).catch(() => {});
+await lp.waitForTimeout(600);
 
 const after = session.get().roster.slots.map((s) => `${s.name}=t${s.team}`);
 const afterTeams = session.get().roster.slots.map((s) => s.team);
@@ -170,6 +181,93 @@ console.log('after a leave and a join:', JSON.stringify(after));
 check(new Set(afterTeams).size === afterTeams.length,
   'still one team each after somebody leaves and somebody joins',
   `teams ${JSON.stringify(afterTeams)} -- finding 1 reproduces over WiFi`);
+
+console.log('\n-- ready up, and start the match the way HostScreen would have to --');
+
+// Whoever is still seated taps Ready. The host is already ready: `seat` sets
+// ready:true for it because it plays rather than serving.
+const live = [pages[0], pages[2], { p: lp, name: 'Dre' }];
+for (const { p } of live) await p.click('#btn-ready');
+await pages[0].p.waitForTimeout(800);
+
+const readyStates = session.get().roster.slots.map((s) => `${s.name}:${s.ready ? 'ready' : 'not'}`);
+console.log('  ', JSON.stringify(readyStates));
+check(session.canStart(), 'canStart() goes true once every seat is ready',
+  `roster ${JSON.stringify(readyStates)}`);
+
+/*
+ * The wiring LobbySession deliberately does not do.
+ *
+ * It stops at canStart() and peerForSlot() -- building the world and handing
+ * out MatchStart is the screen's job, and no screen does it yet. This is that
+ * glue, written the way server.mjs writes it, so the run says whether the rest
+ * of the path holds once somebody writes it into HostScreen.
+ */
+let entered = 0;
+if (session.canStart()) {
+  const map = VERSUS_MAPS[0];
+  const arena = loadArena(map);
+  const slots = session.get().roster.slots;
+  // Team comes from the lobby, which is the entire point of having one.
+  const players = slots.map((s, i) => ({ team: s.team, spawnIndex: i }));
+  const seed = 4242;
+  const world = createWorld({ arena, seed, players, bots: [] });
+  const host = new MatchHost(world, transport);
+  const startMsg = { mapId: map.id, seed, players, bots: [] };
+
+  slots.forEach((slot, i) => {
+    const peer = session.peerForSlot(slot.slotId);
+    if (!peer) return; // the host's own slot has no peer
+    host.addClient(peer, i);
+    const w = new Writer(64);
+    writeMatchStart(w, { ...startMsg, hostTick: world.tick, yourTankId: i });
+    const sock = sockets.get(peer);
+    if (sock && sock.readyState === sock.OPEN) sock.send(w.finish());
+  });
+
+  // `update` takes real elapsed milliseconds; setInterval drifts, so measure
+  // rather than assume the nominal interval, as server.mjs does.
+  let last = performance.now();
+  const timer = setInterval(() => {
+    const now = performance.now();
+    host.update(now - last);
+    last = now;
+  }, 1000 / TICK_HZ);
+
+  for (const { p, name } of live) {
+    try {
+      await p.waitForFunction(
+        () => document.getElementById('match-lobby').hidden && !!window.__state?.world,
+        { timeout: 10_000 },
+      );
+      const mine = await p.evaluate(() => ({
+        tanks: window.__state.world.tanks.length,
+        teams: [...new Set(window.__state.world.tanks.map((t) => t.team))].sort((a, b) => a - b),
+      }));
+      check(true, `${name} entered the match`, JSON.stringify(mine));
+      entered++;
+    } catch {
+      check(false, `${name} entered the match`, 'still sitting in the lobby');
+    }
+  }
+  clearInterval(timer);
+}
+check(entered === live.length, 'every browser made it from lobby to match',
+  `${entered}/${live.length}`);
+
+// The punchline. The match was built from the roster above, collision and all,
+// so the lobby bug is not a cosmetic wrong label -- it reaches the world every
+// player is now driving in.
+if (entered) {
+  const world = await live[0].p.evaluate(() => ({
+    tanks: window.__state.world.tanks.length,
+    teams: window.__state.world.tanks.map((t) => t.team),
+  }));
+  console.log(`\nthe match everyone is now in: ${world.tanks} tanks on teams ${JSON.stringify(world.teams)}`);
+  check(new Set(world.teams).size === world.tanks,
+    'and every tank in the running match is on its own team',
+    `${new Set(world.teams).size} teams for ${world.tanks} tanks -- two players who cannot hurt each other`);
+}
 
 await browser.close();
 httpServer.close();

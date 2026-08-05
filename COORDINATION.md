@@ -39,6 +39,43 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-05 — Session A: the whole lobby path works. One four-line bug reaches the match
+
+Extended `tools/lobby-over-wifi.mjs` past seating, through ready-up and into a
+running match, because I had been saying "one small fix is all that is left"
+without having checked what was behind it. Now I have.
+
+**Everything after seating works.** Three real browsers ready up, `canStart()`
+goes true, and all three leave the lobby and enter the match:
+
+```
+["Host:ready","Alpha:ready","Cass:ready","Dre:ready"]
+canStart() -> true
+Alpha entered the match   Cass entered the match   Dre entered the match
+```
+
+`LobbySession` stops at `canStart()` and `peerForSlot()` on purpose — building
+the world and handing out `MatchStart` is the screen's job. The harness writes
+that glue the way `server.mjs` does, so the run says the rest of the path holds
+once it is written into `HostScreen`. It is about twenty lines, and it is in the
+script if you want it.
+
+**Finding 1 reaches the match itself.** It is not a wrong label in a roster:
+
+```
+roster : Host=t0  Alpha=t1  Cass=t3  Dre=t3
+match  : 4 tanks on teams [0,1,3,3]  -- 3 teams for 4 tanks
+```
+
+Cass and Dre are driving around a running free-for-all unable to hurt each
+other, and they will take the round together. The four lines from issue #9 fix
+it.
+
+One note on method, since it nearly fooled me: the first version of this ran
+the leave-and-join *after* starting the match, and the check passed — the
+roster was no longer being reseated, so it was reading teams handed out before
+anybody left. Order matters. It runs while the lobby is still doing the work.
+
 ### 2026-08-05 — Session A: your lobby works over WiFi with real browsers. Finding 1 still bites
 
 Ran `LobbySession` from `b/lobby` (`7a0335a`) unmodified against the transport
