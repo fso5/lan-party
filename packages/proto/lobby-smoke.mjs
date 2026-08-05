@@ -706,6 +706,29 @@ for (const [i, p] of pages.entries()) {
     check(match.match.score.get(clientTeamId) === 1, 'the winning team should have one round');
 
     /*
+     * And the banner announcing round one is out of the way by now.
+     *
+     * game.js sets it to clear after 2200ms against a 3s intermission, and
+     * says why: "A round result has to get out of the way before the next
+     * round starts, or it covers its opening seconds -- which is when a shell
+     * is already in the air." That intent had no test. Stretching the banner
+     * to sixty seconds survived all four suites.
+     *
+     * Checked at exactly the right moment for free: the wait above returns
+     * when the host has begun round two on a fresh world, which is the first
+     * instant the banner would be covering live play.
+     */
+    const banner = await pages[0].evaluate(() => {
+      const b = document.getElementById('banner');
+      return { show: b.dataset.show, text: b.textContent };
+    });
+    check(
+      banner.show !== 'true',
+      'the round banner clears before the next round starts',
+      `still showing ${JSON.stringify(banner.text)} as round ${match.match.round} begins`,
+    );
+
+    /*
      * And the players can see it.
      *
      * The line above reads the host's own match state, which is the wrong
