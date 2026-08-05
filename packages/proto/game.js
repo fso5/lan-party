@@ -14,6 +14,7 @@
 /* global createWorld, step, loadArena, MISSIONS, VERSUS_MAPS, emptyInput,
    isMatchOver, stepShell, dcos, dsin, datan2, TANK_RADIUS, TANK_SPECS,
    TICK_HZ, EventKind, Tile, TankKind, livingTeams, DRAW, MsgType, LobbyOp,
+   MAX_SHELLS_PER_TANK, MAX_MINES_PER_TANK,
    DEFAULT_MATCH_SIZE,
    readRoster, writeLobbyJoin, writeLobbySetTeam, writeLobbySetReady, Writer */
 
@@ -1552,8 +1553,14 @@ function updateHud() {
 
   document.getElementById('stat-enemies').textContent =
     state.localPlayers > 1 ? w.tanks.filter((t) => t.alive).length : enemies;
-  document.getElementById('stat-shells').textContent = player ? `${player.shellsOut}/5` : '-';
-  document.getElementById('stat-mines').textContent = player ? `${player.minesOut}/2` : '-';
+  // Read the caps rather than repeating them. They were written out as /5 and
+  // /2, which was true and had no way of staying true: the rule lives in
+  // tuning.ts and the readout lived here, so raising an allowance would have
+  // left the HUD quietly counting against the old one.
+  document.getElementById('stat-shells').textContent =
+    player ? `${player.shellsOut}/${MAX_SHELLS_PER_TANK}` : '-';
+  document.getElementById('stat-mines').textContent =
+    player ? `${player.minesOut}/${MAX_MINES_PER_TANK}` : '-';
 
   updateRoundsHud();
 

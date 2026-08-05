@@ -13,7 +13,13 @@ import assert from 'node:assert/strict';
 import { createWorld, step } from '../src/sim.js';
 import { loadArena, VERSUS_MAPS } from '../src/maps/index.js';
 import { emptyInput } from '../src/types.js';
-import { MINE_ARM_TICKS, MINE_TRIGGER_RADIUS, TANK_RADIUS } from '../src/tuning.js';
+import {
+  MAX_MINES_PER_TANK,
+  MINE_ARM_TICKS,
+  MINE_FUSE_TICKS,
+  MINE_TRIGGER_RADIUS,
+  TANK_RADIUS,
+} from '../src/tuning.js';
 
 /** Two tanks on opposing teams, standing close enough to trigger a mine. */
 function noseToNose() {
@@ -89,4 +95,54 @@ test('an armed mine ignores the tank that laid it', () => {
 
   assert.equal(w.mines.length, 1, 'the mine went off under the tank that laid it');
   assert.ok(layer.alive, 'a tank was killed by its own mine');
+});
+
+test('a tank can only have its allowance of mines on the ground', () => {
+  /*
+   * Found by mutation: halving MAX_MINES_PER_TANK broke nothing, in core or in
+   * any of the four browser suites. The cap is the whole of what stops someone
+   * carpeting a doorway, and it is the kind of number that gets raised for a
+   * quick experiment and left.
+   *
+   * `nextMineTick` puts 30 ticks between mines, so this drives real steps
+   * rather than calling layMine in a loop -- calling it directly would be
+   * refused by the cooldown and pass for the wrong reason.
+   */
+  const { w, layer } = noseToNose();
+  // Nothing to trip them: the victim is what makes mines go off in the other
+  // tests here, and a mine exploding would hand the allowance back mid-count.
+  w.tanks[1].alive = false;
+
+  const idle = new Map([[layer.id, emptyInput()]]);
+  let laid = 0;
+  for (let attempt = 0; attempt < MAX_MINES_PER_TANK + 3; attempt++) {
+    const before = w.mines.length;
+    lay(w, layer.id);
+    if (w.mines.length > before) laid++;
+    // Clear of the cooldown, well short of the fuse, so a refusal is the cap
+    // and nothing else.
+    for (let i = 0; i < 31; i++) step(w, idle);
+  }
+
+  assert.equal(laid, MAX_MINES_PER_TANK, `laid ${laid} mines with an allowance of ${MAX_MINES_PER_TANK}`);
+  assert.equal(layer.minesOut, MAX_MINES_PER_TANK);
+});
+
+test('the allowance comes back when a mine goes off', () => {
+  // The other half, and the one that would stick: a counter that only ever
+  // climbs leaves a player unable to lay another mine for the rest of the
+  // round, with the HUD showing why and nothing explaining it.
+  const { w, layer } = noseToNose();
+  w.tanks[1].alive = false;
+  const idle = new Map([[layer.id, emptyInput()]]);
+
+  lay(w, layer.id);
+  assert.equal(layer.minesOut, 1, 'the mine is on the ground');
+
+  // Let it burn down to its own fuse rather than tripping it, so this is about
+  // the counter and not about the trigger.
+  for (let i = 0; i < MINE_FUSE_TICKS + 5; i++) step(w, idle);
+
+  assert.equal(w.mines.length, 0, 'the fuse ran out');
+  assert.equal(layer.minesOut, 0, 'and the allowance came back with it');
 });
