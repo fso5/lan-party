@@ -135,6 +135,33 @@ describe('payload size', () => {
     expect(a.payloadSize).toBe(18);
   });
 
+  test('a third phone leaving still leaves two links unaccounted for', () => {
+    // The two-peer cases above cannot tell `live.delete(id)` from `live.clear()`
+    // -- going from two to one and from two to none both read as "not more than
+    // one left", so the floor lifts either way and the tests agree. Found by
+    // mutation: clearing the whole set on any departure broke nothing.
+    //
+    // At three it matters. One phone leaving still leaves two links whose MTUs
+    // are unknown and unattributable, so a number arriving afterwards must not
+    // be believed. Believing it writes past what the smaller link carries, and
+    // BLE truncates rather than refusing -- a corrupted snapshot instead of a
+    // dropped one.
+    const a = createNativeBleAdapter();
+    connect('p1');
+    connect('p2');
+    connect('p3');
+    expect(a.payloadSize).toBe(18);
+
+    disconnect('p3');
+    mtu(185);
+    expect(a.payloadSize).toBe(18);
+
+    // Down to one, and now a number can be attributed.
+    disconnect('p2');
+    mtu(185);
+    expect(a.payloadSize).toBe(183);
+  });
+
   test('stays at the floor after one of two leaves, until that link speaks', () => {
     // We know one peer is left. We do not know which, so its MTU is still
     // unknown and guessing it is the one mistake that corrupts data.

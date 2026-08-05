@@ -47,6 +47,28 @@ describe('base64', () => {
     expect(Array.from(base64ToBytes('////'))).toEqual([0xff, 0xff, 0xff]);
   });
 
+  test('characters outside the alphabet are skipped, not decoded as garbage', () => {
+    // `base64ToBytes` skips anything it does not recognise. Found by mutation:
+    // letting an unknown character through instead of skipping it broke no
+    // test, and it does not fail loudly either -- `indexOf` returns -1, which
+    // shifts into the accumulator and quietly corrupts every byte after it.
+    //
+    // What reaches this function comes off a radio by way of a native module,
+    // so a stray newline or a truncated write is the realistic input, not a
+    // hypothetical one.
+    const bytes = Uint8Array.from({ length: 32 }, (_, i) => (i * 7) & 0xff);
+    const clean = bytesToBase64(bytes);
+
+    for (const [what, dirty] of [
+      ['a newline in the middle', clean.slice(0, 8) + '\n' + clean.slice(8)],
+      ['wrapped at 4 characters', clean.replace(/(.{4})/g, '$1\r\n')],
+      ['spaces either side', `  ${clean}  `],
+      ['a character from no alphabet', clean.slice(0, 8) + '*' + clean.slice(8)],
+    ] as const) {
+      expect(Array.from(base64ToBytes(dirty)), what).toEqual(Array.from(bytes));
+    }
+  });
+
   test('a realistic snapshot survives the trip intact', () => {
     // 4 header bytes + 6 per tank for 8 tanks, plus core's 2-byte fragment
     // header: the largest thing that routinely crosses this path.

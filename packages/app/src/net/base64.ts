@@ -48,5 +48,11 @@ export function base64ToBytes(b64: string): Uint8Array {
       out[o++] = (acc >> bits) & 0xff;
     }
   }
-  return out;
+  // Sized from the raw string, so anything skipped above leaves a byte of zero
+  // on the end. Trim to what was actually written.
+  //
+  // Not cosmetic: a stray newline in a frame turned a 32-byte payload into 33,
+  // and BleFramer reassembles fragments by concatenating their lengths -- so a
+  // single ignored character shifts every byte of a multi-fragment message.
+  return o === out.length ? out : out.subarray(0, o);
 }
