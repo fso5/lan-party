@@ -48,6 +48,21 @@ Files app goes through Quick Look where JavaScript is unreliable.
 The build it was made from is shown in the footer, so you can tell at a glance
 whether a phone is running a cached copy.
 
+One asymmetry worth knowing, because it decides how much a green tick is worth.
+The APK has been checked as a *published artifact* -- downloaded from the
+release and opened, both native classes found in the dex, the netcode symbols
+found in the bundle, Hermes bytecode confirmed. The Pages site has not: the
+sandbox these sessions run in cannot reach `*.github.io` at all, so the last
+link in the iPhone chain is verified only up to the artifact that gets
+uploaded.
+
+That artifact is checked thoroughly -- `pwa-check.mjs` serves it from
+`/tanks-mobile/` exactly as Pages does, so a path that only works at the root
+fails there rather than in Safari -- and the deploy job fails loudly if Pages
+is not enabled. But nobody has yet fetched the live URL and confirmed what it
+serves. If you are ever debugging why a phone will not install it, start by
+assuming that gap is where the problem is hiding.
+
 ## Install it
 
 **Android — [download the APK](https://github.com/fso5/tanks-mobile/releases/latest)**
