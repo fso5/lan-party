@@ -146,3 +146,49 @@ test('the allowance comes back when a mine goes off', () => {
   assert.equal(w.mines.length, 0, 'the fuse ran out');
   assert.equal(layer.minesOut, 0, 'and the allowance came back with it');
 });
+
+test('a mine reaches exactly as far as it says it does', () => {
+  /*
+   * The half nobody writes. Every other mine test here puts the victim inside
+   * the trigger circle and checks it goes off, so the radius could be four
+   * times what it says and the suite would agree with itself -- found exactly
+   * that way, by quadrupling MINE_TRIGGER_RADIUS at the call site and watching
+   * nothing fail.
+   *
+   * Written as a boundary rather than as "far away is safe". A first version
+   * put the survivor at 1.5x the reach, which caught the quadrupling and let a
+   * 60% widening through -- a mine reaching half a tank further than it should
+   * is exactly the size of error that survives a loose test and changes how the
+   * game plays. Just inside must go off and just outside must not, five per
+   * cent either side of the real edge.
+   */
+  const edge = MINE_TRIGGER_RADIUS + TANK_RADIUS;
+
+  for (const [where, factor, shouldFire] of [
+    ['just inside', 0.95, true],
+    ['just outside', 1.05, false],
+  ] as const) {
+    const { w, layer, victim } = noseToNose();
+    victim.x = layer.x + edge * factor;
+    victim.y = layer.y;
+
+    lay(w, layer.id);
+    assert.equal(w.mines.length, 1, `${where}: the mine went down`);
+
+    // Past arming, well short of the fuse, so anything that happens is the
+    // trigger and not the clock.
+    const idle = new Map([
+      [layer.id, emptyInput()],
+      [victim.id, emptyInput()],
+    ]);
+    for (let i = 0; i < MINE_ARM_TICKS + 30; i++) step(w, idle);
+
+    if (shouldFire) {
+      assert.equal(w.mines.length, 0, `${where}: the mine should have gone off`);
+      assert.equal(victim.alive, false, `${where}: and taken the tank with it`);
+    } else {
+      assert.equal(w.mines.length, 1, `${where}: the mine should still be waiting`);
+      assert.equal(victim.alive, true, `${where}: and the tank should be alive`);
+    }
+  }
+});
