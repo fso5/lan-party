@@ -51,10 +51,12 @@ whether a phone is running a cached copy.
 One asymmetry worth knowing, because it decides how much a green tick is worth.
 The APK has been checked as a *published artifact* -- downloaded from the
 release and opened, both native classes found in the dex, the netcode symbols
-found in the bundle, Hermes bytecode confirmed. The Pages site has not: the
-sandbox these sessions run in cannot reach `*.github.io` at all, so the last
-link in the iPhone chain is verified only up to the artifact that gets
-uploaded.
+found in the bundle, Hermes bytecode confirmed. The Pages site has not, and cannot be
+from here: the egress policy for these sessions denies `fso5.github.io`
+outright — the proxy records `connect_rejected`, "gateway answered 403 to
+CONNECT" — so the last link in the iPhone chain is verified only up to the
+artifact that gets uploaded. It is a policy, not a flaky network, so retrying
+is not the answer.
 
 That artifact is checked thoroughly -- `pwa-check.mjs` serves it from
 `/tanks-mobile/` exactly as Pages does, so a path that only works at the root
