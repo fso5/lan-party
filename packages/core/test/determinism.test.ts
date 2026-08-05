@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { dsin, dcos, datan2, wrapAngle, Rng, PI } from '../src/math.js';
 import { createWorld, step, isMatchOver } from '../src/sim.js';
-import { loadArena, MISSIONS, VERSUS_MAPS } from '../src/maps/index.js';
+import { loadArena, missionById, MISSIONS, VERSUS_MAPS } from '../src/maps/index.js';
 import { Arena, parseArena } from '../src/map.js';
 import { Tile, emptyInput, type TankInput } from '../src/types.js';
 import { TANK_RADIUS } from '../src/tuning.js';
@@ -23,6 +23,37 @@ import {
   MAX_LOBBY_SLOTS,
   MsgType,
 } from '../src/net/protocol.js';
+
+test('every shipped map has an id of its own, and answers to it', () => {
+  /*
+   * The map id is the whole of what MatchStart says about which arena to
+   * build: `missionById(start.mapId)` on every client, against a host that
+   * picked the map. `missionById` searches the campaign first and returns the
+   * first match, so two maps sharing an id is not a duplicate-key error
+   * anywhere -- it is every client quietly building a different arena from the
+   * host. Walls where there are none, spawns somewhere else, and no message on
+   * any screen. Nothing enforces uniqueness; the ids are hand-written.
+   *
+   * Asked as "does each map answer to its own id" rather than as a set-size
+   * comparison, because that is the property the clients depend on and it
+   * names the offender when it breaks.
+   */
+  const all = [...MISSIONS, ...VERSUS_MAPS];
+  for (const m of all) {
+    const found = missionById(m.id);
+    assert.ok(found, `map "${m.name}" has id ${m.id} and missionById cannot find it`);
+    assert.equal(
+      found.name,
+      m.name,
+      `id ${m.id} belongs to "${m.name}" but resolves to "${found.name}" -- ` +
+        `a client would build the wrong arena and nothing would report it`,
+    );
+  }
+
+  // An id nobody uses has to come back empty rather than fall back to
+  // something, which is what lets a client say so instead of guessing.
+  assert.equal(missionById(9999), undefined);
+});
 
 test('a full lobby starts on a full set of distinct spawns', () => {
   /*

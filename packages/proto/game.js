@@ -1065,7 +1065,16 @@ function joinBluetoothMatch() {
       if (r.u8() === MsgType.MatchStart) {
         const start = readMatchStart(r);
         const map = missionById(start.mapId);
-        if (!map) return;
+        if (!map) {
+          // Say so, the way the WiFi path already does. This is the one place
+          // host and client can be running different builds -- over WiFi the
+          // host serves the page, but a Bluetooth client runs its own installed
+          // copy -- so a map the host has and we do not is exactly the case
+          // that reaches here. Returning quietly left the phone sitting on
+          // "connecting" with the match already running around it.
+          setNetStatus(`unknown map ${start.mapId} -- update this phone`);
+          return;
+        }
         const world = createWorld({
           arena: loadArena(map),
           seed: start.seed,
