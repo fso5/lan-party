@@ -21,6 +21,28 @@
  *     which is why the host must be in the foreground with the screen on. That
  *     is fine for a game and fatal for anything else, so it is worth knowing.
  *
+ * ## What actually limits the roster size
+ *
+ * Not bandwidth. Measured on a full eight-player roster with everyone holding
+ * the trigger, the host sends about 530 writes/s at the 20-byte BLE floor and
+ * about 320 once an MTU is negotiated, and receives 420 input frames/s. Spread
+ * over the seven connections that implies, that is roughly 76 outbound and 60
+ * inbound per connection per second -- under one packet per connection event at
+ * any sane interval. The snapshot itself is tiny (52B at eight tanks, three
+ * fragments at the floor) because shells are not in it: they travel once as an
+ * 8-byte spawn and are then simulated deterministically on every phone.
+ *
+ * The limit is the *number of concurrent connections*, and nothing here or in
+ * TanksBleModule bounds it -- `peers` and the native `connections` map both
+ * grow freely. Eight players means the host phone holds seven simultaneous
+ * GATT links, which is at or past the ceiling of a good many Android BLE
+ * stacks. I have not measured that ceiling on hardware and this code cannot;
+ * it is a platform property, and it will present as later joiners simply
+ * failing to connect rather than as anything resembling a bug in here.
+ *
+ * WiFi hosting (see lanhost.ts) has no equivalent limit, which is a point in
+ * its favour for a full roster that has nothing to do with either one's speed.
+ *
  * ## Characteristics
  *
  * Two, both on one service:

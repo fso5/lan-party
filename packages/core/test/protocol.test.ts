@@ -27,6 +27,7 @@ import {
   writeSnapshot,
 } from '../src/net/protocol.js';
 import { TANK_SPECS } from '../src/tuning.js';
+import { BLE_SAFE_MTU, FRAME_HEADER_BYTES } from '../src/net/ble.js';
 
 /**
  * Bounds checking.
@@ -375,4 +376,62 @@ test('a mine spawn round-trips, including the two ends of the arena', () => {
     assert.ok(Math.abs(back.x - x) < 1 / 128, `x ${x} came back as ${back.x}`);
     assert.ok(Math.abs(back.y - y) < 1 / 128, `y ${y} came back as ${back.y}`);
   }
+});
+
+/**
+ * A snapshot's cost per tank, which is what decides the host's write rate.
+ *
+ * Snapshots are the only thing the host sends on a fixed clock -- everything
+ * else (shell spawns, mines, kills) is an event, sent when it happens. So the
+ * floor of the radio's load is `fragments(snapshot) * SNAPSHOT_HZ` writes per
+ * second to *every* client, because BLE notifications are per-connection and
+ * there is no broadcast on the radio.
+ *
+ * Measured on a full roster with everyone holding the trigger, the host makes
+ * roughly 530 writes/s at the 20-byte BLE floor and 320 at a negotiated MTU.
+ * That is comfortable. It stops being comfortable quietly: WireTank is six
+ * bytes, and a full roster lands at 52 -- three fragments at the floor, with
+ * two bytes to spare. One more byte per tank makes it 60, a fourth fragment,
+ * and a third more radio traffic at the exact moment the arena is fullest.
+ *
+ * Nothing about that failure looks like a protocol change. It looks like BLE
+ * being flaky with a lot of players, on the phones with the worst radios.
+ */
+test('a full-roster snapshot stays within its fragment budget on the worst link', () => {
+  const snapshotBytes = (tanks: number) => {
+    const w = new Writer(256);
+    writeSnapshot(
+      w,
+      1234,
+      Array.from({ length: tanks }, (_, i) => ({
+        id: i,
+        x: 5.5 + i,
+        y: 4.5,
+        bodyAngle: 1,
+        turretAngle: 2,
+        alive: true,
+      })),
+    );
+    return w.finish().length;
+  };
+
+  // Stated as a difference rather than a total, so this pins the per-tank cost
+  // itself and not the header alongside it.
+  const perTank = snapshotBytes(MAX_LOBBY_SLOTS) - snapshotBytes(MAX_LOBBY_SLOTS - 1);
+  assert.equal(perTank, 6, 'a tank on the wire is 6 bytes: id+alive, 12-bit x and y, two angles');
+
+  const full = snapshotBytes(MAX_LOBBY_SLOTS);
+  assert.equal(full, 4 + MAX_LOBBY_SLOTS * 6, 'header is type, 16-bit tick, count');
+
+  // The floor every BLE stack must accept, minus the framer's own header.
+  const floor = 20 - FRAME_HEADER_BYTES;
+  assert.equal(
+    Math.ceil(full / floor),
+    3,
+    `a full snapshot is ${full}B = ${Math.ceil(full / floor)} fragments at the ${floor}B floor; ` +
+      'a fourth raises the host write rate by a third with the arena at its fullest',
+  );
+
+  // On a link that negotiated an MTU it must not fragment at all.
+  assert.equal(Math.ceil(full / (BLE_SAFE_MTU - FRAME_HEADER_BYTES)), 1);
 });
