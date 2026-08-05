@@ -25,7 +25,8 @@ import { solveShot, directAngleTo, stepAi } from '../src/ai.js';
 import { createWorld, step } from '../src/sim.js';
 import { loadArena, VERSUS_MAPS } from '../src/maps/index.js';
 import { dcos, dsin } from '../src/math.js';
-import { TankKind } from '../src/types.js';
+import { TankKind, emptyInput } from '../src/types.js';
+import { TANK_SPECS } from '../src/tuning.js';
 
 /** Two tanks on opposing teams, plus one bot that will do the shooting. */
 function botVsPlayer() {
@@ -172,4 +173,57 @@ test('directAngleTo points where it says', () => {
       `angle ${a.toFixed(3)} does not point from (${x0},${y0}) to (${x1},${y1})`,
     );
   }
+});
+
+test('a bot keeps shooting where you were, not where you are', () => {
+  /*
+   * `reactionTicks` is described in tuning.ts as the fairness knob, and the
+   * mutation that removes it -- re-solving every tick instead -- was caught by
+   * nothing. Worth pinning, and worth pinning accurately, because measuring it
+   * showed the description was wrong.
+   *
+   * It is not a delay before firing. A bot whose turret already points at its
+   * solution fires within two ticks whatever the number says: Brown at 55,
+   * Grey at 40 and Teal at 26 all fired on tick 2 in a probe that pre-aimed
+   * them. What the delay actually gates is *re-solving*. Between solutions the
+   * bot keeps aiming at the spot it worked out, so a target that moves is shot
+   * at where it used to be -- which is the window to dodge, arrived at by a
+   * different route than the comment claimed.
+   *
+   * Brown because it is immobile: a mobile bot dodges, and dodging deliberately
+   * invalidates its own solution, which would muddle what is being measured.
+   */
+  const w = botVsPlayer();
+  const bot = w.tanks.find((t) => t.kind === TankKind.Brown)!;
+  const player = w.tanks[0];
+  const spec = TANK_SPECS[TankKind.Brown];
+
+  // A clear line along an open row, so a solution exists at all.
+  player.x = 5.5;
+  player.y = 2.5;
+  bot.x = 15.5;
+  bot.y = 2.5;
+
+  const idle = new Map([[player.id, emptyInput()]]);
+  step(w, idle);
+  const solved = bot.ai!.aimAngle;
+  assert.equal(bot.ai!.aimValid, true, 'the bot should have a solution to start from');
+
+  // Move the target a long way along the same row. Everything about the right
+  // answer has changed; the bot must not know that yet.
+  player.x = 9.5;
+  for (let i = 0; i < spec.reactionTicks - 4; i++) step(w, idle);
+  assert.equal(
+    bot.ai!.aimAngle,
+    solved,
+    'inside the reaction window the bot must still be aiming at the old spot',
+  );
+
+  // Past the window it is allowed to notice.
+  for (let i = 0; i < 12; i++) step(w, idle);
+  assert.notEqual(
+    bot.ai!.aimAngle,
+    solved,
+    'once the window passes the bot must re-solve against where the target is now',
+  );
 });

@@ -59,9 +59,19 @@ export interface TankSpec {
   /** Standard deviation of aim error in radians. Player is always 0. */
   aimError: number;
   /**
-   * How long the AI deliberates before firing once it has a solution, in ticks.
-   * This is the single most important "fairness" knob -- it is what gives you
-   * time to dodge, and what makes late-game tanks terrifying.
+   * How long a bot sticks with a firing solution before working out a new one.
+   *
+   * The single most important "fairness" knob, but not for the reason this
+   * comment used to give. It said the bot deliberates this long *before
+   * firing*, and it does not: a bot whose turret already points at its solution
+   * fires within two ticks whatever this is set to -- measured at 55, 40 and 26
+   * with identical results. Firing is gated by the turret swinging onto the
+   * solution and by fireCooldown, not by this.
+   *
+   * What it gates is re-solving. Between solutions the bot keeps aiming where
+   * it worked out, so a target that moves gets shot at where it used to be.
+   * That is the window to dodge, and a shorter one really does make late-game
+   * tanks terrifying -- by way of tracking you, not by way of reacting faster.
    */
   reactionTicks: number;
   /** Whether this type drives at all. */

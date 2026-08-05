@@ -135,14 +135,25 @@ test('every team appears on the scoreboard from the start', () => {
 });
 
 test('standings rank by score, ties by team id', () => {
-  const m = createMatch(RULES, [0, 1, 2]);
-  m.score.set(0, 1);
+  // Seeded out of order on purpose. This test used to pass [0, 1, 2], which
+  // cannot tell a tiebreaker from its absence: `sort` is stable, the scoreboard
+  // is a Map in insertion order, and insertion order was already the answer.
+  // Dropping `|| a.team - b.team` broke nothing.
+  //
+  // Unreachable today -- `MatchHost` sorts the team list before it gets here --
+  // so this is defence in depth rather than a live bug. But `standings` is
+  // exported and says it orders ties by team, and a test should check that
+  // rather than happen to agree with it.
+  const m = createMatch(RULES, [3, 1, 2, 0]);
+  m.score.set(3, 1);
   m.score.set(1, 3);
   m.score.set(2, 1);
+  m.score.set(0, 1);
   assert.deepEqual(standings(m), [
     { team: 1, score: 3 },
     { team: 0, score: 1 },
     { team: 2, score: 1 },
+    { team: 3, score: 1 },
   ]);
 });
 
