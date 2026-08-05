@@ -15,7 +15,12 @@
  * and is not on main. The script fetches it from the branch itself, so it needs
  * no setup beyond the branch existing:
  *
- *     node tools/lobby-over-wifi.mjs
+ *     node tools/lobby-over-wifi.mjs                 # four seats, with churn
+ *     PLAYERS=Alpha node tools/lobby-over-wifi.mjs   # the goal: two phones
+ *
+ * The two-seat run is the one that matters most -- one phone hosting, one
+ * joining -- and it passes clean. The four-seat run adds a departure, which is
+ * the only thing that provokes the seating bug.
  *
  * It reads their file and never writes to it.
  */
@@ -115,7 +120,8 @@ console.log(`hosting on ${port}; roster after startHosting:`,
 
 const browser = await chromium.launch({ executablePath: findChrome() });
 const pages = [];
-for (const name of ['Alpha', 'Bravo', 'Cass']) {
+const NAMES = (process.env.PLAYERS || 'Alpha,Bravo,Cass').split(',').filter(Boolean);
+for (const name of NAMES) {
   const ctx = await browser.newContext();
   const p = await ctx.newPage();
   await p.addInitScript((n) => localStorage.setItem('tanks.name', n), name);
@@ -142,8 +148,8 @@ for (const { p, name } of pages) {
 await pages[0].p.waitForTimeout(600);
 const seated = session.get().roster.slots.map((s) => `${s.name}=t${s.team}`);
 console.log('\nhost-side roster:', JSON.stringify(seated));
-check(session.get().roster.slots.length === 4,
-  'the host seated itself and all three browsers',
+check(session.get().roster.slots.length === NAMES.length + 1,
+  `the host seated itself and all ${NAMES.length} browser(s)`,
   `${session.get().roster.slots.length} slot(s)`);
 
 const rows = await rosterOf(pages[0].p);
@@ -154,17 +160,24 @@ check(rows.length === session.get().roster.slots.length,
 /*
  * Finding 1 first, while the lobby is still seating people.
  *
+ * Skipped in the two-seat case: with one client there is nobody to lose, and
+ * the bug needs a departure. That case exists to prove the goal -- two phones,
+ * one hosting -- reaches a match at all.
+ *
  * Order matters here and I got it wrong once: run the leave-and-join after the
  * match has started and the roster is no longer being reseated, so the check
  * passes by reading the teams handed out before anybody left. It has to happen
  * while the lobby is the thing doing the work.
  */
-console.log('\n-- finding 1, over the transport that actually ships --');
+const SKIP_FINDING_1 = NAMES.length < 2;
+if (!SKIP_FINDING_1) console.log('\n-- finding 1, over the transport that actually ships --');
 const teams = session.get().roster.slots.map((s) => s.team);
 check(new Set(teams).size === teams.length,
   'free-for-all puts everyone on their own team',
   `teams ${JSON.stringify(teams)}`);
 
+let live = pages;
+if (!SKIP_FINDING_1) {
 await pages[1].ctx.close();
 await pages[0].p.waitForTimeout(600);
 
@@ -181,12 +194,13 @@ console.log('after a leave and a join:', JSON.stringify(after));
 check(new Set(afterTeams).size === afterTeams.length,
   'still one team each after somebody leaves and somebody joins',
   `teams ${JSON.stringify(afterTeams)} -- finding 1 reproduces over WiFi`);
+live = [pages[0], pages[2], { p: lp, name: 'Dre' }];
+}
 
 console.log('\n-- ready up, and start the match the way HostScreen would have to --');
 
 // Whoever is still seated taps Ready. The host is already ready: `seat` sets
 // ready:true for it because it plays rather than serving.
-const live = [pages[0], pages[2], { p: lp, name: 'Dre' }];
 for (const { p } of live) await p.click('#btn-ready');
 await pages[0].p.waitForTimeout(800);
 

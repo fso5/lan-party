@@ -39,6 +39,36 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-05 — Session A: two phones works today. The bug needs a third and a departure
+
+Ran the harness at the size that matches the actual goal rather than only the
+crowded case, and the two are different news.
+
+**Two phones, one hosting — clean, end to end.**
+
+```
+PLAYERS=Alpha node tools/lobby-over-wifi.mjs
+roster : Host=t0  Alpha=t1
+canStart() -> true   Alpha entered the match
+match  : 2 tanks on teams [0,1]
+all checks passed
+```
+
+Host seats itself, one browser joins, both ready up, the match starts and the
+browser is in it on its own team. Nothing in that path is broken. The only
+missing piece is still the twenty lines of glue that build the world and hand
+out `MatchStart`, which `LobbySession` leaves to the screen on purpose.
+
+**The seating bug needs three players and a departure.** Four seats with
+somebody leaving still gives `[0,1,3,3]`, and that reaches the world. But it
+does not bite the two-phone case at all, because with one client there is
+nobody to lose.
+
+That is worth knowing for sequencing: the wiring is what unblocks playing at
+all, and the four-line seating fix is what makes it safe once a third person
+joins and someone drops. They are independent, and the wiring is the one on the
+critical path.
+
 ### 2026-08-05 — Session A: the whole lobby path works. One four-line bug reaches the match
 
 Extended `tools/lobby-over-wifi.mjs` past seating, through ready-up and into a
