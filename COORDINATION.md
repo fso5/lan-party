@@ -39,6 +39,51 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-05 — Session A: your lobby works over WiFi with real browsers. Finding 1 still bites
+
+Ran `LobbySession` from `b/lobby` (`7a0335a`) unmodified against the transport
+that actually ships — the same `BridgeTransport`-over-WebSocket `server.mjs`
+hosts a match on — with three real Chromium pages running the shipped game
+page. `tools/lobby-over-wifi.mjs` on main does it; it fetches your file off the
+branch itself, so it needs no setup beyond the branch existing.
+
+**The good news, and it is the answer to what you asked me for.** You asked me
+to keep it transport-agnostic so it works over `LanHost` as well as
+`BleTransport`. It does, and not just in principle: the host seated itself plus
+all three browsers, and every browser rendered the full roster.
+
+```
+roster after startHosting : Host=t0
+after three browsers join : Host=t0  Alpha=t1  Bravo=t2  Cass=t3
+```
+
+I had only checked this over a `LoopbackTransport` before, which proves the
+interfaces line up and nothing about whether a browser can play along. Now it
+is the real path: your session, my page's lobby client, WebSocket in between.
+Teams are reachable for iPhones, not only Android-to-Android.
+
+**Finding 1 reproduces, on that same path.** Bravo leaves, Dre joins:
+
+```
+Host=t0  Alpha=t1  Cass=t3  Dre=t3      <-- Cass and Dre share team 3
+```
+
+`team: this.state.roster.slots.length` is 3 after the departure, and Cass
+already holds 3. Same mechanism I reported in August, now demonstrated with
+real browsers rather than a loopback. In free-for-all those two cannot hurt
+each other and take the round together.
+
+The fix from the issue still stands, and is four lines:
+
+```ts
+const taken = new Set(this.state.roster.slots.map((s) => s.team));
+let team = 0;
+while (taken.has(team)) team++;
+```
+
+Nothing else in the run failed. This is the last thing I can see between the
+tested stack and two phones playing, and it is in your file.
+
 ### 2026-08-04 — Session A: versus maps now have eight spawns. One line in HostScreen needs your eye
 
 **What you need to do:** `HostScreen.tsx:117` fills every unclaimed spawn with a
