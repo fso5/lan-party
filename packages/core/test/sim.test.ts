@@ -12,7 +12,8 @@ import assert from 'node:assert/strict';
 
 import { createWorld, step } from '../src/sim.js';
 import { loadArena, VERSUS_MAPS } from '../src/maps/index.js';
-import { emptyInput } from '../src/types.js';
+import { Arena, parseArena } from '../src/map.js';
+import { emptyInput, Tile } from '../src/types.js';
 import { TANK_SPECS } from '../src/tuning.js';
 import {
   MAX_MINES_PER_TANK,
@@ -322,4 +323,65 @@ test('the blast kills exactly as far as it says it does', () => {
       `${where}: at ${(blastEdge * factor).toFixed(2)} tiles the tank should ${shouldDie ? 'die' : 'live'}`,
     );
   }
+});
+
+test('a blast clears the blocks it reaches and leaves the ones it does not', () => {
+  /*
+   * The last of the three thresholds the sweep found unguarded, and the one I
+   * said I was leaving: terrain rather than lives, so least urgent, but the
+   * same silent kind of wrong.
+   *
+   * Blocks are measured to their centres, which makes a tile-centred mine a
+   * useless probe: the nearest block centres sit at 1, 1.41 and 2 tiles, so the
+   * radius could go from 1.6 to 2.2 without changing a single outcome. The mine
+   * is placed off-grid instead, solved so one block centre lands at 0.95 of the
+   * radius and the one directly below it at 1.05 -- 1.52 and 1.68 tiles from a
+   * mine at 6.0, 3.744.
+   *
+   * Pushed straight into the world rather than laid by a tank, because a tank
+   * standing close enough to place it there would be inside its own blast.
+   */
+  const arena = new Arena(
+    parseArena('blast range', [
+      '##########',
+      '#1.......#',
+      '#........#',
+      '#......%.#',
+      '#......%.#',
+      '#........#',
+      '##########',
+    ]),
+  );
+  const w = createWorld({ arena, seed: 1, players: [{ team: 0, spawnIndex: 0 }] });
+
+  const near = { x: 7, y: 3 };
+  const far = { x: 7, y: 4 };
+  assert.equal(w.arena.at(near.x, near.y), Tile.Block, 'the near block is there to begin with');
+  assert.equal(w.arena.at(far.x, far.y), Tile.Block, 'and so is the far one');
+
+  w.mines.push({
+    id: w.nextEntityId++,
+    ownerId: w.tanks[0].id,
+    team: w.tanks[0].team,
+    x: 6.0,
+    y: 3.744,
+    fuseTick: w.tick + 5,
+    armTick: w.tick + 1,
+  });
+
+  const idle = new Map([[w.tanks[0].id, emptyInput()]]);
+  for (let i = 0; i < 10; i++) step(w, idle);
+  assert.equal(w.mines.length, 0, 'the mine went off');
+
+  assert.equal(
+    w.arena.at(near.x, near.y),
+    Tile.Floor,
+    'a block 1.52 tiles out is inside a 1.6 blast and should be gone',
+  );
+  assert.equal(
+    w.arena.at(far.x, far.y),
+    Tile.Block,
+    'a block 1.68 tiles out is beyond it and should still be standing',
+  );
+  assert.equal(w.tanks[0].alive, true, 'and the tank across the room is untouched');
 });
