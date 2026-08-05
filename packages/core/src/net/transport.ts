@@ -58,6 +58,24 @@ export interface Transport {
   host(matchName: string): Promise<void>;
   /** Begin scanning. Discovered hosts arrive via onPeerJoin. */
   discover(): Promise<void>;
+
+  /**
+   * Connect to a host, resolving only once `send` to it will actually go
+   * somewhere, and rejecting -- with a reason worth showing a person -- if it
+   * will not.
+   *
+   * The only method here that used to carry no contract at all, which is
+   * exactly how BleTransport came to violate the obvious one. It awaited the
+   * platform's connect call, and on Android that is `connectGatt` *returning*:
+   * the request being accepted, long before and regardless of whether a link
+   * comes up. So `await join(host)` resolved for a connection that never
+   * happened, callers sent into the void, and a lobby marked somebody seated
+   * who was not there.
+   *
+   * "Resolved" must mean connected, not requested. An implementation that
+   * cannot tell the difference should wait for whatever event does, and time
+   * out rather than resolve on hope.
+   */
   join(peerId: PeerId): Promise<void>;
 
   send(to: PeerId, data: Uint8Array, reliable: boolean): void;

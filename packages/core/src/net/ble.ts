@@ -476,5 +476,16 @@ export class BleTransport implements Transport {
       await this.adapter.disconnect(peerId).catch(() => {});
     }
     this.peers.clear();
+
+    // Settle anything still trying to connect. Leaving these leaves a ten
+    // second timer running on a transport nobody holds any more, which will
+    // eventually reject a promise whose owner has gone -- and keeps the process
+    // alive until it does. Closing mid-join is a real failure for the caller,
+    // so it is reported as one rather than swallowed.
+    for (const [peerId, pending] of this.pendingJoins) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(`transport closed while connecting to ${peerId}`));
+    }
+    this.pendingJoins.clear();
   }
 }
