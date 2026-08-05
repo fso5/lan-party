@@ -5,6 +5,8 @@ import { Arena, parseArena } from '../src/map.js';
 import { stepShell, moveTank, sweepCircleHit } from '../src/physics.js';
 import { dcos, dsin, PI } from '../src/math.js';
 import { Tile } from '../src/types.js';
+import { TANK_RADIUS } from '../src/tuning.js';
+import { loadArena, MISSIONS, VERSUS_MAPS } from '../src/maps/index.js';
 
 function box(rows: string[]): Arena {
   return new Arena(parseArena('test', rows));
@@ -353,4 +355,61 @@ test('every start in every map can reach every other start', async () => {
         `drives around alone while the others finish the round.`,
     );
   }
+});
+
+test('no movement ever puts a tank somewhere it cannot be', () => {
+  /*
+   * The invariant the whole of `moveTank` exists to keep. Everything else it
+   * does -- sliding along a face, snapping flush to it -- is in service of
+   * this, and none of it is worth anything if the result can land inside
+   * geometry.
+   *
+   * Swept rather than case-by-case: every quarter tile of every shipped arena
+   * that a tank can occupy, moved by twelve deltas including diagonals, both
+   * a real per-tick step (0.05 tiles at the player's speed) and strides far
+   * larger than the game ever takes. About 250,000 positions, well under a
+   * second.
+   *
+   * It has teeth where it counts: letting a tank squeeze into a wall on either
+   * axis is caught here, with the offending position in the message.
+   *
+   * What it does *not* cover is worth writing down, because the code looks like
+   * it should. `moveTank` hedges its snap-to-wall arithmetic four ways -- it
+   * checks the snapped position is occupiable on each axis, refuses to snap in
+   * the direction the tank was not going, and backs off the face by an epsilon.
+   * Removing any one of the four leaves this sweep green at eighth-tile
+   * resolution over a million moves. So on the maps we ship, at the speeds we
+   * move, none of those branches decides anything: the epsilon in particular
+   * only matters if landing exactly flush ever reads as blocked, and it does
+   * not.
+   *
+   * They are all kept. "I could not reach it" is a weaker claim than "it cannot
+   * happen", and a future arena may well be the difference. But nobody should
+   * read them as load-bearing, which is the whole reason this paragraph exists.
+   */
+  const deltas = [
+    [0.05, 0], [-0.05, 0], [0, 0.05], [0, -0.05],
+    [0.2, 0], [-0.2, 0], [0, 0.2], [0, -0.2],
+    [0.2, 0.2], [-0.2, 0.2], [0.6, 0.6], [-0.6, -0.6],
+  ] as const;
+
+  let checked = 0;
+  for (const m of [...MISSIONS, ...VERSUS_MAPS]) {
+    const a = loadArena(m);
+    for (let y = 0.25; y < a.height; y += 0.25) {
+      for (let x = 0.25; x < a.width; x += 0.25) {
+        if (!a.canTankOccupy(x, y, TANK_RADIUS)) continue;
+        for (const [dx, dy] of deltas) {
+          const r = moveTank(a, x, y, dx, dy, TANK_RADIUS);
+          checked++;
+          assert.ok(
+            a.canTankOccupy(r.x, r.y, TANK_RADIUS),
+            `${m.name}: from ${x.toFixed(2)},${y.toFixed(2)} by ${dx},${dy} ` +
+              `landed at ${r.x.toFixed(4)},${r.y.toFixed(4)}, which is inside geometry`,
+          );
+        }
+      }
+    }
+  }
+  assert.ok(checked > 100000, `the sweep must actually sweep; only ${checked} moves`);
 });
