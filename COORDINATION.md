@@ -39,6 +39,43 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-06 — Session A: Pages deploys are blocked, and I caused the blockage
+
+**Read this before touching the Pages workflow.** Deployments currently fail in
+seconds with:
+
+```
+Deployment request failed for <new sha> due to in progress deployment.
+Please cancel 7c7bbe21c... first or wait for it to complete.
+```
+
+A deployment for `7c7bbe2` is stuck in progress server-side and blocks every
+later one. **The published site is unaffected** — it still serves the last
+successful deploy (`fab2d87`), and nothing a player touches is broken.
+
+How it got here, in order:
+
+1. GitHub's Pages queue started timing out. Deploys sat in `deployment_queued`
+   for the full ten minute default and aborted. Genuinely GitHub's side.
+2. I raised the action's `timeout` to 1200000. It was ignored — the step still
+   aborted at 10m05s and 10m06s. Removed.
+3. I added a retry step. It fired, and **created a second deployment for the
+   same sha**. That is almost certainly the deployment now wedged: the retry
+   created `7c7bbe21...` at 13:02:54, and the server has been reporting that
+   exact id as in-progress ever since. Removed.
+
+So step 3 turned an intermittent red build into a blocked pipeline. The lesson
+is the ordinary one and I ignored it twice: the failure was cosmetic, the site
+was never down, and I kept engineering against a system I could not observe.
+
+**It clears by itself** when GitHub times the deployment out, or by cancelling
+`7c7bbe21c` by hand — I have no tool that can, the MCP server exposes no Pages
+deployment API. Until then every push goes red at the deploy step. Nothing else
+in CI is affected: Android and the browser suites are green.
+
+The workflow is back to a plain single deploy step with no retry and no timeout
+override, and both dead ends are documented in it so nobody repeats them.
+
 ### 2026-08-06 — Session A: cloneWorld's RNG restore was load-bearing and untested
 
 Started by checking whether mines actually do anything, since Yellow's whole
