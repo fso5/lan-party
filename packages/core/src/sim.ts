@@ -91,7 +91,21 @@ function makeTank(id: number, kind: TankKind, team: number, x: number, y: number
       targetX: x,
       targetY: y,
       repathTick: 0,
-      thinkTick: 0,
+      // Staggered by id rather than started at zero.
+      //
+      // A solve sweeps 96 angles through the real shell physics and is by far
+      // the most expensive thing a tick can do. Every bot used to start at 0
+      // and then re-solve every `reactionTicks`, which is per-kind -- so bots
+      // of a kind stayed in lockstep for the whole match and paid for their
+      // solves on the same tick, forever. That is why the cost is spiky rather
+      // than steady: with eight bots the median tick costs 9us and the 99th
+      // costs 2095us, and it is the spike that drops a frame, not the median.
+      //
+      // Offsetting by id spreads the same work across ticks. It changes when a
+      // bot first thinks, never what it decides, and it stays deterministic --
+      // ids come from creation order, which is already part of the wire
+      // contract, so a client rebuilding the roster gets the same offsets.
+      thinkTick: id % TANK_SPECS[kind].reactionTicks,
       focusId: -1,
       aimAngle: angle,
       aimValid: false,

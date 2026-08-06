@@ -205,7 +205,11 @@ test('a bot keeps shooting where you were, not where you are', () => {
   bot.y = 2.5;
 
   const idle = new Map([[player.id, emptyInput()]]);
-  step(w, idle);
+  // Not "one step and it has solved": bots no longer all think on tick 0. Their
+  // first think tick is staggered by tank id so that a match full of them does
+  // not pay for every solve on the same tick, so the first solution lands
+  // somewhere inside the first reaction window.
+  for (let i = 0; i < spec.reactionTicks && !bot.ai!.aimValid; i++) step(w, idle);
   const solved = bot.ai!.aimAngle;
   assert.equal(bot.ai!.aimValid, true, 'the bot should have a solution to start from');
 
@@ -436,4 +440,57 @@ test('a mine layer walks off its own mine before the fuse runs out', async () =>
     step(w, new Map());
     assert.ok(tank.alive, 'and it should still be alive afterwards');
   }
+});
+
+test('bots of the same kind do not all think on the same tick', async () => {
+  /*
+   * A solve sweeps 96 candidate angles through the real shell physics, and it
+   * is the most expensive thing a tick can contain. Bots re-solve every
+   * `reactionTicks`, which is a per-kind constant -- so bots of one kind that
+   * all start thinking on tick 0 stay in phase for the whole match and land
+   * every one of their solves on the same tick as each other.
+   *
+   * The cost of that is a spike, not a slower average. Measured with
+   * tools/sim-bench.mjs at eight bots: the median tick costs 9-10us either
+   * way, but the 99th percentile is 2058us in phase against 1161us staggered
+   * -- 12.35% of a 60Hz frame against 6.96%. The mean is unchanged, because it
+   * is the same work either way; it is the frame that misses its deadline that
+   * a player sees.
+   *
+   * The stagger is `id % reactionTicks`, so what is pinned here is that the
+   * phases differ at all. The timing itself belongs in the benchmark, which
+   * can measure it; a unit test asserting microseconds would only be pinning
+   * this machine.
+   */
+  const { TANK_SPECS } = await import('../src/tuning.js');
+  const arena = loadArena(VERSUS_MAPS[0]);
+
+  // One kind, so `reactionTicks` is identical across them and any difference in
+  // phase is the stagger rather than a difference between kinds.
+  const w = createWorld({
+    arena,
+    seed: 3,
+    players: [],
+    bots: Array.from({ length: arena.spawns.length }, (_, i) => ({
+      kind: TankKind.Grey,
+      team: i,
+      spawnIndex: i,
+    })),
+  });
+
+  const period = TANK_SPECS[TankKind.Grey].reactionTicks;
+  const phases = new Set(w.tanks.map((t) => t.ai!.thinkTick % period));
+  assert.ok(
+    phases.size > 1,
+    `all ${w.tanks.length} bots think on the same phase, so every solve lands on one tick`,
+  );
+
+  // And the stagger has to survive the first solve, or it buys one tick and
+  // then collapses back into phase.
+  for (let i = 0; i < period * 3; i++) step(w, new Map());
+  const later = new Set(w.tanks.map((t) => t.ai!.thinkTick % period));
+  assert.ok(
+    later.size > 1,
+    'the bots fell back into a single phase once they started re-solving',
+  );
 });
