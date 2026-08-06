@@ -14,6 +14,14 @@
 # a green tick here must not be read as "the iOS module builds".
 #
 # Runs only when the Swift changes, so it costs nothing the rest of the time.
+#
+# Verified both directions before being trusted, because a check nobody has
+# seen fail is a check nobody knows works. Green on the real file ("parsed 1
+# file(s)" in the log, not merely a green tick), and red with `expected '}' in
+# class` on a branch where a brace was dropped on purpose. The branch was
+# a/verify-ios-parse; it could not be deleted afterwards -- this token can push
+# but not delete refs -- so it was reverted to match main instead and carries
+# nothing broken.
 name: iOS syntax
 
 on:
