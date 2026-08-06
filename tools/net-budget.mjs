@@ -49,6 +49,14 @@ import {
   writeSnapshot,
 } from '@tanks/core';
 
+import { fileURLToPath } from 'node:url';
+import { requireFreshCore } from './lib/fresh-core.mjs';
+
+// These numbers describe packages/core/dist, not packages/core/src. See the
+// note in lib/fresh-core.mjs -- an A/B run that skipped the rebuild once
+// compared a change against itself and reported no difference.
+requireFreshCore(fileURLToPath(new URL('..', import.meta.url)));
+
 const FLOOR = 20 - FRAME_HEADER_BYTES; // what a stack that never negotiates gives us
 const GOOD = BLE_SAFE_MTU - FRAME_HEADER_BYTES;
 const SECONDS = 60;

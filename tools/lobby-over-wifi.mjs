@@ -32,8 +32,14 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { chromium } from 'playwright';
+import { requireFreshCore } from './lib/fresh-core.mjs';
 
 const repo = dirname(dirname(fileURLToPath(import.meta.url)));
+
+// This runs their lobby against *our* core, and the core it reaches is
+// packages/core/dist. See tools/lib/fresh-core.mjs: a stale one turns "their
+// code works against ours" into a claim about a build nobody is running.
+requireFreshCore(repo);
 const proto = join(repo, 'packages', 'proto');
 
 // Their file, straight off the branch, transpiled but otherwise untouched --

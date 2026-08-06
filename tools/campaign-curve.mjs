@@ -52,6 +52,14 @@ import {
   TICK_HZ,
 } from '@tanks/core';
 
+import { fileURLToPath } from 'node:url';
+import { requireFreshCore } from './lib/fresh-core.mjs';
+
+// These numbers describe packages/core/dist, not packages/core/src. See the
+// note in lib/fresh-core.mjs -- an A/B run that skipped the rebuild once
+// compared a change against itself and reported no difference.
+requireFreshCore(fileURLToPath(new URL('..', import.meta.url)));
+
 const YARDSTICKS = [
   ['Grey', TankKind.Grey],
   ['Teal', TankKind.Teal],

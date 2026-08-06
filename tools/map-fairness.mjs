@@ -37,6 +37,14 @@
  */
 import { loadArena, VERSUS_MAPS, MAX_LOBBY_SLOTS } from '@tanks/core';
 
+import { fileURLToPath } from 'node:url';
+import { requireFreshCore } from './lib/fresh-core.mjs';
+
+// These numbers describe packages/core/dist, not packages/core/src. See the
+// note in lib/fresh-core.mjs -- an A/B run that skipped the rebuild once
+// compared a change against itself and reported no difference.
+requireFreshCore(fileURLToPath(new URL('..', import.meta.url)));
+
 const round1 = (n) => Math.round(n * 10) / 10;
 
 function seatStats(arena, n) {

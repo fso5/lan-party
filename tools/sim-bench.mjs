@@ -24,6 +24,14 @@
  * reason it is worth keeping rather than re-deriving. See `revive` below.
  */
 import { createWorld, step, loadArena, VERSUS_MAPS, emptyInput, TICK_HZ, MAX_LOBBY_SLOTS } from '@tanks/core';
+
+import { fileURLToPath } from 'node:url';
+import { requireFreshCore } from './lib/fresh-core.mjs';
+
+// These numbers describe packages/core/dist, not packages/core/src. See the
+// note in lib/fresh-core.mjs -- an A/B run that skipped the rebuild once
+// compared a change against itself and reported no difference.
+requireFreshCore(fileURLToPath(new URL('..', import.meta.url)));
 function run(label, players, busy) {
   const arena = loadArena(VERSUS_MAPS[0]);
   const world = createWorld({

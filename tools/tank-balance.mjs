@@ -1,7 +1,10 @@
 /**
  * Which tank actually beats which?
  *
- *     node tools/tank-balance.mjs
+ *     npm run build -w @tanks/core && node tools/tank-balance.mjs
+ *
+ * The build is not optional -- this measures `dist`, not `src`, and refuses to
+ * run against a stale one. See tools/lib/fresh-core.mjs for what that cost.
  *
  * types.ts describes an escalating enemy roster -- Brown "the tutorial enemy"
  * through Black the "late-game threat" -- and nothing had ever checked it. The
@@ -46,6 +49,14 @@ import {
   TankKind,
   TICK_HZ,
 } from '@tanks/core';
+
+import { fileURLToPath } from 'node:url';
+import { requireFreshCore } from './lib/fresh-core.mjs';
+
+// These numbers describe packages/core/dist, not packages/core/src. See the
+// note in lib/fresh-core.mjs -- an A/B run that skipped the rebuild once
+// compared a change against itself and reported no difference.
+requireFreshCore(fileURLToPath(new URL('..', import.meta.url)));
 
 const KINDS = [
   ['Brown', TankKind.Brown],
