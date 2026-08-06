@@ -72,6 +72,13 @@ const root = new URL('./pwa/', import.meta.url).pathname;
  * passing the day it is not.
  */
 const BASE = '/tanks-mobile/';
+
+/*
+ * Lets the phase below serve a second build without rebuilding anything. Set to
+ * a function and every response passes through it.
+ */
+let redeploy = null;
+
 const srv = createServer((req, res) => {
   let p = req.url.split('?')[0];
   if (!p.startsWith(BASE)) { res.writeHead(404); res.end('not under the base path'); return; }
@@ -79,8 +86,15 @@ const srv = createServer((req, res) => {
   if (p === '/') p = '/index.html';
   const file = join(root, p);
   if (!existsSync(file)) { res.writeHead(404); res.end('nope'); return; }
-  res.writeHead(200, { 'Content-Type': TYPES[extname(file)] || 'application/octet-stream' });
-  res.end(readFileSync(file));
+  let body = readFileSync(file);
+  if (redeploy) body = redeploy(p, body);
+  res.writeHead(200, {
+    'Content-Type': TYPES[extname(file)] || 'application/octet-stream',
+    // Pages sets no long TTL on these and neither should this. A cached sw.js
+    // would hide the very update this is about to test.
+    'Cache-Control': 'no-cache',
+  });
+  res.end(body);
 });
 await new Promise(r => srv.listen(8099, r));
 
@@ -133,6 +147,104 @@ check(
   cached.entries.some((e) => e === BASE || e === `${BASE}index.html`),
   'the game page itself is cached, under the path it is served from',
   cached.entries.join(' '),
+);
+
+/*
+ * Does an installed app ever get a fix?
+ *
+ * This is the whole update mechanism for the route that reaches an iPhone:
+ * open the Pages URL once, add to home screen, and from then on every change
+ * arrives through the service worker or not at all. A worker that never
+ * replaces its cache leaves that player on the build they first installed,
+ * permanently and silently -- they do not see a stale version, they see a game
+ * that simply never improves.
+ *
+ * Nothing tested it. The offline checks above install a worker once and stop,
+ * so a build that could never update passed them all.
+ *
+ * Simulated rather than rebuilt: the server rewrites sw.js so its cache name
+ * differs, which is exactly what a real deploy does -- build-pwa hashes the
+ * page into the cache name, so any content change produces a new one. A
+ * browser only installs a new worker when sw.js differs byte for byte, so this
+ * is the real trigger and not a shortcut past it.
+ */
+const oldCache = cached.cache;
+const NEW_CACHE = `${oldCache}-next`;
+redeploy = (path, body) => {
+  if (path.endsWith('sw.js')) {
+    return Buffer.from(body.toString().replaceAll(oldCache, NEW_CACHE));
+  }
+  if (path.endsWith('.html')) {
+    return Buffer.from(body.toString().replace(/<title>[^<]*<\/title>/, '<title>Tanks! next</title>'));
+  }
+  return body;
+};
+
+await p.reload();
+
+/*
+ * Polled from out here rather than with waitForFunction and an async
+ * predicate. The first version did the latter, and it reported success on the
+ * very run whose own diagnostic line showed the old cache still in place: the
+ * predicate returns a promise, and what the poller made of that was not what
+ * it looked like. A check that can pass while the thing it checks is false is
+ * worse than no check, so the await happens where its result is plainly a
+ * value and the comparison happens in Node.
+ */
+let seenCaches = [];
+for (let i = 0; i < 30; i++) {
+  seenCaches = await p.evaluate(() => caches.keys());
+  if (seenCaches.length === 1 && seenCaches[0] === NEW_CACHE) break;
+  await p.waitForTimeout(500);
+}
+const swapped = seenCaches.length === 1 && seenCaches[0] === NEW_CACHE;
+
+const afterUpdate = { caches: seenCaches };
+console.log('after redeploy:', JSON.stringify(afterUpdate));
+check(
+  swapped,
+  'a redeployed app replaces its cache instead of serving the old one forever',
+  `caches now ${afterUpdate.caches.join(', ')}, wanted just ${NEW_CACHE}`,
+);
+
+// And the new bytes actually reach the player. The reload above was served
+// cache-first from the old worker, so this is the visit after -- which is what
+// a player gets the second time they open it.
+await p.reload();
+const title = await p.evaluate(() => document.title);
+check(
+  title === 'Tanks! next',
+  'and the next launch serves the new build, not the cached old one',
+  `title is ${JSON.stringify(title)}`,
+);
+
+/*
+ * Put the real build back in the cache before the offline phase.
+ *
+ * Clearing `redeploy` alone is not enough and the first version of this got it
+ * wrong: the worker serves cache-first, so the doctored page stays cached and
+ * the offline checks below end up proving that *this test's rewrite* works
+ * offline. The tell was the offline reload reporting `title: "Tanks! next"`.
+ *
+ * So this deploys a third time, with the real html and a third cache name --
+ * the same mechanism again, which also happens to prove it twice.
+ */
+const FINAL_CACHE = `${oldCache}-real`;
+redeploy = (path, body) =>
+  path.endsWith('sw.js') ? Buffer.from(body.toString().replaceAll(oldCache, FINAL_CACHE)) : body;
+
+await p.reload();
+for (let i = 0; i < 30; i++) {
+  const keys = await p.evaluate(() => caches.keys());
+  if (keys.length === 1 && keys[0] === FINAL_CACHE) break;
+  await p.waitForTimeout(500);
+}
+await p.reload();
+const restored = await p.evaluate(() => document.title);
+check(
+  restored !== 'Tanks! next',
+  'the offline phase below runs against the real build, not this test rewrite',
+  `title is still ${JSON.stringify(restored)}`,
 );
 
 // Now cut the network entirely and reload.
