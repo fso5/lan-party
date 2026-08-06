@@ -311,6 +311,65 @@ test('every versus arena starts its balanced seat counts equally', async () => {
 });
 
 /**
+ * Every versus arena is exactly symmetric under one of its rectangle's moves.
+ *
+ * The fairness test above measures the consequence -- equal sightlines, equal
+ * distance to the nearest neighbour -- and its comment says the shipped maps
+ * "happen to be perfectly symmetric". This measures the cause, and exactly:
+ * zero mismatched tiles under a named transform, not a property inferred from
+ * four sampled corners.
+ *
+ * Worth having beside it rather than folded into it, because the two fail on
+ * different edits. Sightlines are sampled from the seats in play, so geometry
+ * broken somewhere those lines never cross -- a wall moved near a middle edge,
+ * say -- changes nothing there and everything here.
+ *
+ * Measured, and each map answers differently, which is why the assertion is
+ * "at least one" rather than a fixed transform:
+ *
+ *   Crossfire   180 degree rotation   0 mismatched tiles
+ *   Pillars     mirror top/bottom     0
+ *   The Moat    mirror left/right     0
+ *
+ * Missions are exempt for the same reason they are exempt above: one player
+ * against scripted enemies is asymmetric on purpose.
+ */
+test('every versus arena is exactly symmetric under some reflection or rotation', async () => {
+  const { loadArena, VERSUS_MAPS } = await import('../src/maps/index.js');
+
+  for (const map of VERSUS_MAPS) {
+    const a = loadArena(map);
+    const transforms = {
+      'rotated 180 degrees': (x: number, y: number) => [a.width - 1 - x, a.height - 1 - y],
+      'mirrored left/right': (x: number, y: number) => [a.width - 1 - x, y],
+      'mirrored top/bottom': (x: number, y: number) => [x, a.height - 1 - y],
+    } as Record<string, (x: number, y: number) => number[]>;
+
+    const mismatches: Record<string, number> = {};
+    for (const [name, move] of Object.entries(transforms)) {
+      let bad = 0;
+      for (let y = 0; y < a.height; y++) {
+        for (let x = 0; x < a.width; x++) {
+          const [mx, my] = move(x, y);
+          if (a.at(x, y) !== a.at(mx, my)) bad++;
+        }
+      }
+      mismatches[name] = bad;
+    }
+
+    const exact = Object.entries(mismatches).filter(([, n]) => n === 0);
+    assert.ok(
+      exact.length > 0,
+      `${map.name} is not symmetric under any of its rectangle's moves -- mismatched tiles: ` +
+        Object.entries(mismatches)
+          .map(([n, c]) => `${n} ${c}`)
+          .join(', ') +
+        '. One side has more cover than the other and no player can see why.',
+    );
+  }
+});
+
+/**
  * Every tank in a map must be able to reach every other one.
  *
  * A map where somebody is walled off from the fight is unplayable, and it is
