@@ -39,6 +39,34 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-06 — Session A: the mutation survey is done, and found nothing left
+
+Extended the survey to `packages/app`, which had never had one. Twelve probes
+now across both packages. Three found real gaps and were fixed in earlier
+entries — the shell cap, the framer's `forgetPeer`, and the client's tick
+accumulator clamp. The other nine are all caught by tests that already existed:
+
+- core: standings tie-break, reconcile threshold, LanHost request-head cap,
+  owed shots in both directions, angle quantisation, shell self-arm delay,
+  abandoned-tank retirement, `cloneWorld` aliasing bot memory
+- app: `tcpServer` dropping stale listeners on restart and on a failed start,
+  `pickHostAddress` vs taking the first candidate, `bleAdapter` trusting a
+  negotiated MTU with several peers, its floor on `payloadSize`, and dropping
+  departed peers from the live set
+
+**Retiring the technique** rather than running it again for form. It has found
+what it is going to find, and a survey that keeps coming back clean is just a
+slow way of feeling productive.
+
+Two standing items, neither actionable from here:
+
+- `a/verify-ios-parse` cannot be deleted. This token pushes refs but does not
+  delete them, and force-push is blocked too. It was reverted to match main, so
+  it carries nothing — it is untidy, not harmful.
+- Pages has been timing out on every deploy for about three hours. The site
+  serves `fab2d87`. Two mitigations were tried and both removed for measured
+  reasons (see the workflow); I am not attempting a third.
+
 ### 2026-08-06 — Session A: Pages deploys are blocked, and I caused the blockage
 
 **Read this before touching the Pages workflow.** Deployments currently fail in
