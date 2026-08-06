@@ -227,3 +227,63 @@ test('a bot keeps shooting where you were, not where you are', () => {
     'once the window passes the bot must re-solve against where the target is now',
   );
 });
+
+test('a bot that can move never wedges', async () => {
+  /*
+   * A bot stuck against geometry is a free kill in the campaign and a dead
+   * opponent in versus, and nothing reports it -- the match runs on perfectly
+   * well with a tank that has quietly given up. Nothing checked it either.
+   *
+   * Measured as the longest unbroken run of ticks where a tank does not move at
+   * all, which needs no distance threshold to interpret. The first attempt did
+   * use one -- "half a tile in five seconds" -- and gave an answer that was
+   * really a property of the number chosen: the smallest observed span was
+   * 0.70 against a 0.5 bar. It also could not tell a wedged bot from one
+   * holding still to line up a shot, which is correct behaviour and looks
+   * identical from the outside.
+   *
+   * Frozen ticks separate them. Aiming is bounded by fireCooldown, tens of
+   * ticks; wedged is unbounded. Measured across the versus maps: 0.0s for every
+   * bot bar one brief 0.9s on The Moat. The bar is 3s, so a legitimate pause
+   * has room and a wedge -- which runs to tens of seconds -- does not.
+   *
+   * Everyone is revived each tick: this is about behaviour, not survival, and a
+   * dead bot trivially does not move.
+   */
+  const { TICK_HZ } = await import('../src/tuning.js');
+  const SECONDS = 30;
+  const LIMIT = TICK_HZ * 3;
+  const STILL = 1e-4;
+
+  const roamers = [TankKind.Grey, TankKind.Teal, TankKind.Yellow, TankKind.Black];
+
+  for (const map of VERSUS_MAPS) {
+    const arena = loadArena(map);
+    const w = createWorld({
+      arena,
+      seed: 31,
+      players: [],
+      bots: roamers.map((kind, i) => ({ kind, team: i, spawnIndex: i })),
+    });
+
+    const last = new Map(w.tanks.map((t) => [t.id, { x: t.x, y: t.y }]));
+    const run = new Map(w.tanks.map((t) => [t.id, 0]));
+
+    for (let tick = 0; tick < TICK_HZ * SECONDS; tick++) {
+      for (const t of w.tanks) t.alive = true;
+      step(w, new Map());
+      for (const t of w.tanks) {
+        if (!TANK_SPECS[t.kind].mobile) continue;
+        const p = last.get(t.id)!;
+        const moved = Math.hypot(t.x - p.x, t.y - p.y);
+        last.set(t.id, { x: t.x, y: t.y });
+        const r = moved < STILL ? run.get(t.id)! + 1 : 0;
+        run.set(t.id, r);
+        assert.ok(
+          r < LIMIT,
+          `${map.name}: tank ${t.id} (${TankKind[t.kind]}) has not moved for ${(r / TICK_HZ).toFixed(1)}s`,
+        );
+      }
+    }
+  }
+});
