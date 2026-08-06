@@ -466,3 +466,56 @@ test('a match that ends for want of a next round is still announced', () => {
 
   assert.deepEqual(announced, [3]);
 });
+
+test('a hosted round that nobody can win still ends', async () => {
+  /*
+   * The round time limit, proven where it actually ships.
+   *
+   * The rules tests drive `updateMatch` directly, which establishes the rule
+   * but not that a real host reaches it. This is the failure that made the
+   * limit necessary -- two Brown tanks on Pillars, measured at 0 of 6 seeds
+   * resolving in five minutes of game time -- run through MatchHost's own
+   * per-tick loop instead.
+   *
+   * Worth the extra coverage because the bug class is the worst one: not a
+   * wrong result but no result, a match that stops advancing with no error
+   * anywhere and a room of people waiting.
+   */
+  const { TankKind } = await import('../src/types.js');
+  const { TICK_HZ } = await import('../src/tuning.js');
+
+  const arena = loadArena(VERSUS_MAPS.find((m) => m.name === 'Pillars')!);
+  const world = createWorld({
+    arena,
+    seed: 200,
+    players: [],
+    // Both stationary, single-bounce, and the pillars leave no path between
+    // these two starts. Neither can ever reach the other.
+    bots: [
+      { kind: TankKind.Brown, team: 0, spawnIndex: 0 },
+      { kind: TankKind.Brown, team: 1, spawnIndex: 1 },
+    ],
+  });
+
+  const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
+  const host = new MatchHost(world, new LoopbackTransport('host', 'Host', net));
+
+  // Read the match state directly: MatchHost exposes it and has no round-over
+  // callback, only onRoundStart and onMatchOver.
+  const stepMs = 1000 / TICK_HZ;
+  const limitSeconds = DEFAULT_RULES.roundTimeLimitTicks / TICK_HZ;
+  for (
+    let t = 0;
+    t < DEFAULT_RULES.roundTimeLimitTicks + TICK_HZ && host.match.lastRoundWinner === null;
+    t++
+  ) {
+    host.update(stepMs);
+  }
+
+  assert.notEqual(
+    host.match.lastRoundWinner,
+    null,
+    `the round never ended, ${limitSeconds}s of game time in`,
+  );
+  assert.equal(host.match.lastRoundWinner, DRAW, 'nobody could have won it');
+});
