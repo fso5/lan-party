@@ -485,6 +485,17 @@ test('an arena authored with an open border gets sealed anyway', () => {
   assert.equal(open.at(2, 2), Tile.Floor, 'sealing the border filled the interior too');
 });
 
+/*
+ * Whether a seat is actually *playable* -- reachable from the rest of the arena
+ * rather than sealed into a pocket -- is checked by "every start in every map
+ * can reach every other start" in physics.test.ts. It covers missions as well
+ * as versus maps, counts authored enemies as starts, and accounts for
+ * TANK_RADIUS rather than just the tile.
+ *
+ * Noted here because it took a full pass to rediscover: it is filed under
+ * "start", every test in this file says "spawn", and a grep for one does not
+ * find the other.
+ */
 test('versus maps have a usable spawn for every seat the lobby offers', () => {
   // Was "exactly 4", which is what the maps carried and what made seats 5-8
   // stack on seat 1's tile. Pinned to the lobby's own capacity now, so the two
