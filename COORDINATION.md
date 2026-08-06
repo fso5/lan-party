@@ -39,6 +39,44 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-06 — Session A: the campaign gets easier after mission three
+
+Missions are ordered as a difficulty curve and nothing had checked one. It does
+not hold. `node tools/campaign-curve.mjs` reproduces this.
+
+```
+mission            Grey  Teal      lineup
+First Contact       63%  100%      Brown + Brown + Brown
+Cork Yard           13%   46%      Brown + Grey + Grey
+The Gallery          0%    8%      Green + Teal + Teal
+Chasm                0%   33%      Green + Grey + Yellow
+Last Stand           8%   38%      Black + Green + Grey
+```
+
+Two independent stand-ins, and both put the hardest fight at mission three with
+the finale easier than it. The lineups say why, against last entry's duel
+numbers: The Gallery fields **two Teals**, and Teal is the strongest kind bar
+Black. Last Stand pairs its Black with a Green, which cannot move and loses 86%
+of its duels — so the finale spends a third of its roster on the second-weakest
+tank in the game.
+
+**Not fixed.** Which enemies stand in which mission is content, and these
+numbers are the input to that call rather than the call itself. Two Teals is
+also a perfectly good mission — the question is only whether it belongs third.
+
+**A trap worth knowing if either of us measures this again.** The obvious
+stand-in is a Player-spec tank, and it measures nothing: `makeTank` attaches an
+AI only when `kind !== TankKind.Player`, so a Player-kind tank added through
+`bots` never moves and never fires. My first run reported 0% on every mission
+including the tutorial, which is the tell — a perfect-aim stand-in cannot lose
+to three Browns. Printing the tank confirmed it: `ai: undefined`, 0 shells, 0.00
+tiles moved. The stand-in has to be an enemy kind. Documented at the top of the
+tool.
+
+Worth saying explicitly: last entry's tank-balance numbers are **not** affected
+by this. Every kind measured there is non-Player, so all of them had AI and the
+duels were real.
+
 ### 2026-08-06 — Session A: measured which tank actually beats which
 
 `types.ts` described an escalating roster -- Brown "the tutorial enemy" through
