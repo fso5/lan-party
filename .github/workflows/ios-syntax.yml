@@ -39,6 +39,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Parse every Swift file
+        # Explicit, because inside a container the default is `sh -e`, which on
+        # this image is dash: no `pipefail`, no `< <(...)`. The first run of
+        # this workflow died on `set -o pipefail` before parsing anything, which
+        # is a check reporting failure for a reason that has nothing to do with
+        # what it checks -- the mirror image of one passing while verifying
+        # nothing, and just as worth naming.
+        shell: bash
         run: |
           set -euo pipefail
           found=0
