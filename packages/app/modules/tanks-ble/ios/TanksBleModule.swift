@@ -339,6 +339,13 @@ final class BleBridge: NSObject, CBPeripheralManagerDelegate, CBCentralManagerDe
     let id = peripheral.identifier.uuidString
     connected.removeValue(forKey: id)
     fail("connect", error?.localizedDescription ?? "could not connect")
+    // An onError does not settle a pending join -- BleTransport.join waits for
+    // onPeerConnected or onPeerDisconnected and nothing else. Without this the
+    // caller sat through the full ten second timeout and then got the generic
+    // "no answer" message, throwing away the reason CoreBluetooth just handed
+    // us. Android reports its status code here for the same reason.
+    let reason = error?.localizedDescription ?? "no reason given"
+    emit?("onPeerDisconnected", ["peerId": id, "reason": "connect failed (\(reason))"])
   }
 
   func centralManager(
@@ -358,6 +365,11 @@ final class BleBridge: NSObject, CBPeripheralManagerDelegate, CBCentralManagerDe
     guard let service = peripheral.services?.first(where: { $0.uuid == TanksBleModule.serviceUUID })
     else {
       fail("discover", "peer has no Tanks service")
+      // Drop the link rather than leaving it up and useless. The peripheral is
+      // connected but can never carry anything, and without this nothing ever
+      // removes it -- so JS gets an error it may only log, then silence.
+      // Cancelling produces didDisconnectPeripheral, which settles the join.
+      centralManager?.cancelPeripheralConnection(peripheral)
       return
     }
     peripheral.discoverCharacteristics(
@@ -370,15 +382,30 @@ final class BleBridge: NSObject, CBPeripheralManagerDelegate, CBCentralManagerDe
     error: Error?
   ) {
     let id = peripheral.identifier.uuidString
+    var tx: CBCharacteristic?
     for characteristic in service.characteristics ?? [] {
       if characteristic.uuid == TanksBleModule.rxUUID {
         rxCharacteristics[id] = characteristic
       } else if characteristic.uuid == TanksBleModule.txUUID {
+        tx = characteristic
         // Unlike Android there is no CCCD to write by hand; iOS handles the
         // descriptor as part of this call.
         peripheral.setNotifyValue(true, for: characteristic)
       }
     }
+
+    // onPeerConnected is what resolves a join, and Transport.join promises that
+    // a resolved join means a send will go somewhere. This used to announce the
+    // peer whatever the peripheral turned out to carry: with TX missing nothing
+    // is ever received, with RX missing nothing can be sent, and either way the
+    // match sat on a connection that looked fine and did nothing. Android
+    // checks the same two before announcing.
+    guard tx != nil, rxCharacteristics[id] != nil else {
+      fail("discover", "peer is missing a Tanks characteristic")
+      centralManager?.cancelPeripheralConnection(peripheral)
+      return
+    }
+
     emit?("onPeerConnected", ["peerId": id, "name": peripheral.name ?? id])
     emit?("onStateChange", ["state": "mtu", "payload": payloadSize])
   }
