@@ -358,11 +358,34 @@ export interface WireTank {
  *   u8  bodyAngle
  *   u8  turretAngle
  */
+/**
+ * How many tanks the wire can tell apart.
+ *
+ * A tank id is four bits, and the same four bits name a shell's and a mine's
+ * owner. Masked on the way out in all three places, so tank 16 goes out as tank
+ * 0: two tanks drawn on top of each other, kills credited to the wrong player,
+ * and a shell that passes through its real owner while arming against a
+ * stranger. Nothing about that resembles running out of bits.
+ *
+ * Sixteen against the eight `MAX_LOBBY_SLOTS` allows, so there is real headroom
+ * -- the largest shipped map assembles eight tanks counting authored enemies.
+ * It is named here because it is the ceiling any future seat-cap rise runs into,
+ * and a number nobody has written down is one nobody checks.
+ */
+export const MAX_WIRE_TANKS = 16;
+
 export function writeSnapshot(w: Writer, tick: number, tanks: WireTank[]): void {
   w.u8(MsgType.Snapshot);
   w.u16(tick & 0xffff);
   w.u8(tanks.length);
   for (const t of tanks) {
+    if (t.id >= MAX_WIRE_TANKS || t.id < 0) {
+      // Same reasoning as the roster count guard below: refuse loudly rather
+      // than mask and hand back a packet that is well-formed and wrong.
+      throw new Error(
+        `tank id ${t.id} cannot be sent -- the wire names at most ${MAX_WIRE_TANKS} tanks (0..${MAX_WIRE_TANKS - 1})`,
+      );
+    }
     const qx = quantPos(t.x);
     const qy = quantPos(t.y);
     w.u8((t.id & 0x0f) | (t.alive ? 0x10 : 0));

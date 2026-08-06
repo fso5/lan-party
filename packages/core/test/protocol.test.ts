@@ -16,6 +16,7 @@ import {
   dequantPos,
   quantPos,
   MAX_LOBBY_SLOTS,
+  MAX_WIRE_TANKS,
   readMineSpawn,
   readMatchStart,
   readShellSpawn,
@@ -434,4 +435,49 @@ test('a full-roster snapshot stays within its fragment budget on the worst link'
 
   // On a link that negotiated an MTU it must not fragment at all.
   assert.equal(Math.ceil(full / (BLE_SAFE_MTU - FRAME_HEADER_BYTES)), 1);
+});
+
+/**
+ * The wire can only name sixteen tanks, and says so rather than masking.
+ *
+ * Four bits, used for a tank's id in every snapshot and for a shell's and a
+ * mine's owner. `& 0x0f` in all three places means tank 16 travels as tank 0:
+ * two tanks drawn on each other, kills credited to the wrong player, and a
+ * shell arming against a stranger while passing through its owner. The failure
+ * is silent and looks nothing like a wire format out of bits.
+ *
+ * Not reachable today -- measured across every shipped map, the worst assembles
+ * eight tanks counting authored enemies, against sixteen available. That is the
+ * reason to write it down rather than the reason to skip it: eight spare seats
+ * is exactly the kind of margin someone spends without checking.
+ */
+test('a tank the wire cannot name is refused, not silently renumbered', () => {
+  const tank = (id: number) => ({
+    id,
+    x: 5.5,
+    y: 4.5,
+    bodyAngle: 1,
+    turretAngle: 2,
+    alive: true,
+  });
+
+  assert.throws(
+    () => writeSnapshot(new Writer(256), 1, [tank(MAX_WIRE_TANKS)]),
+    /cannot be sent/,
+    'id 16 would have gone out as id 0',
+  );
+
+  // The boundary in the other direction, so the guard cannot be tightened into
+  // rejecting a legal tank without a test noticing.
+  assert.doesNotThrow(() => writeSnapshot(new Writer(256), 1, [tank(MAX_WIRE_TANKS - 1)]));
+});
+
+test('the id space is wider than the lobby can fill', () => {
+  // If a seat-cap rise ever takes MAX_LOBBY_SLOTS past this, snapshots start
+  // throwing mid-match rather than at the point the cap was changed. This is
+  // the check that makes that a red build instead.
+  assert.ok(
+    MAX_LOBBY_SLOTS <= MAX_WIRE_TANKS,
+    `${MAX_LOBBY_SLOTS} seats cannot fit an id space of ${MAX_WIRE_TANKS}`,
+  );
 });
