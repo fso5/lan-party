@@ -1659,3 +1659,47 @@ test('a client can tell how long the host has been quiet', () => {
     `the counter must reset once the host speaks again, got ${client.msSinceHostUpdate}ms`,
   );
 });
+
+test('a client back from a long stall drops the backlog instead of fast-forwarding', () => {
+  /*
+   * Found by mutation: deleting the accumulator clamp from MatchClient.update
+   * broke nothing.
+   *
+   * The case is ordinary on a phone -- lock the screen mid-match, come back.
+   * `update` is handed the whole elapsed time at once, and its per-call budget
+   * of 8 ticks means a fifteen second gap leaves nearly fifteen seconds still
+   * banked. Without the clamp that backlog is spent 8 ticks per frame for the
+   * next couple of seconds: the game replays the time you were away at eight
+   * times speed while you watch, and only then catches up.
+   *
+   * Dropping it is right because the host's next snapshot is the truth anyway
+   * -- resync exists for exactly this. Replaying locally just animates a
+   * prediction that is about to be thrown away.
+   */
+  const tickMs = 1000 / 60;
+
+  // Both a screen-lock and a stutter. The long one is the obvious case; the
+  // short one is what pins the threshold. Raising the clamp to tickMs * 800
+  // still catches a fifteen second gap, so a test with only that in it passes
+  // while a half second stutter fast-forwards unnoticed -- which is the version
+  // a player actually meets, and meets often.
+  for (const stallMs of [500, 15_000]) {
+    const net = new LoopbackNetwork(PERFECT_PROFILE, 5);
+    const clientT = new LoopbackTransport('client', 'Client', net);
+    const client = new MatchClient(versusWorld(), clientT, 'host', 1);
+
+    const before = client.world.tick;
+    client.update(stallMs);
+    assert.equal(client.world.tick - before, 8, `${stallMs}ms: the per-call budget still applies`);
+
+    // The frame after: with the backlog dropped this is an ordinary tick. With
+    // it banked, the budget is spent in full again, and again.
+    const beforeNext = client.world.tick;
+    client.update(tickMs);
+    assert.equal(
+      client.world.tick - beforeNext,
+      1,
+      `${stallMs}ms: the client is still working through the time it was asleep for`,
+    );
+  }
+});
