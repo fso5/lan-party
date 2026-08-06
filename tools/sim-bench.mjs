@@ -16,14 +16,30 @@
  * Two runs on the same box gave the range above, so treat the order of
  * magnitude as the result and not the digits.
  *
- * A phone is slower than this box, but not by the three orders of magnitude
- * that would matter: even twenty times slower leaves the sim at a third of the
- * frame with the rest free. If that ever stops being true, this says so.
+ * ## Bots cost an order of magnitude more, and this used to hide it
+ *
+ * Every row above drives *player* tanks with scripted input. `step` only calls
+ * `stepAi` for a tank carrying an `ai`, so none of those rows ran the shot
+ * solver -- the single most expensive thing in the simulation -- and the
+ * headline "the sim is 1% of a frame" described a match that cannot happen
+ * outside this file. server.mjs fills a versus match with bots, and the whole
+ * campaign is bots.
+ *
+ *     8 players    p99  128us   0.77%
+ *     8 bots       p99 1127us   6.76%
+ *
+ * Nine times the cost, from a row that did not exist. Read the bot rows, not
+ * the player ones, when asking whether a phone can hold 60Hz.
+ *
+ * A phone is slower than this box. At twenty times slower the player-only
+ * figure still leaves the frame mostly free, but the bot figure does not --
+ * so the margin is a factor of a few, not the three orders of magnitude the
+ * player rows implied.
  *
  * The first version of this measured nothing and looked fine, which is the
  * reason it is worth keeping rather than re-deriving. See `revive` below.
  */
-import { createWorld, step, loadArena, VERSUS_MAPS, emptyInput, TICK_HZ, MAX_LOBBY_SLOTS } from '@tanks/core';
+import { createWorld, step, loadArena, VERSUS_MAPS, emptyInput, TICK_HZ, MAX_LOBBY_SLOTS, TankKind } from '@tanks/core';
 
 import { fileURLToPath } from 'node:url';
 import { requireFreshCore } from './lib/fresh-core.mjs';
@@ -32,12 +48,25 @@ import { requireFreshCore } from './lib/fresh-core.mjs';
 // note in lib/fresh-core.mjs -- an A/B run that skipped the rebuild once
 // compared a change against itself and reported no difference.
 requireFreshCore(fileURLToPath(new URL('..', import.meta.url)));
-function run(label, players, busy) {
+
+// The mobile kinds. Brown and Green never move, so a bench made of them would
+// measure a cheaper AI than the game runs, and the stationary pair are not what
+// server.mjs fills a match with anyway.
+const BOT_KINDS = [TankKind.Grey, TankKind.Teal, TankKind.Yellow, TankKind.Black];
+function run(label, players, busy, bots = 0) {
   const arena = loadArena(VERSUS_MAPS[0]);
   const world = createWorld({
     arena,
     seed: 7,
     players: Array.from({ length: players }, (_, i) => ({ team: i, spawnIndex: i })),
+    // Bots cost what players do plus the shot solver, which is the whole point
+    // of measuring them: `step` calls stepAi for any tank carrying an `ai`, and
+    // ignores the scripted input for it entirely.
+    bots: Array.from({ length: bots }, (_, i) => ({
+      kind: BOT_KINDS[i % BOT_KINDS.length],
+      team: players + i,
+      spawnIndex: (players + i) % arena.spawns.length,
+    })),
   });
 
   // Everyone driving, aiming and holding the trigger: the worst case the game
@@ -102,5 +131,11 @@ console.log(`budget: ${(1000 / TICK_HZ).toFixed(2)}ms per tick at ${TICK_HZ}Hz\n
 run('2 players, idle', 2, false);
 run('2 players, all firing', 2, true);
 run('4 players, all firing', 4, true);
-const worst = run(`${MAX_LOBBY_SLOTS} players, all firing`, MAX_LOBBY_SLOTS, true);
-console.log(`\nworst p99 share of a frame: ${(worst * 100).toFixed(2)}%`);
+const allPlayers = run(`${MAX_LOBBY_SLOTS} players, all firing`, MAX_LOBBY_SLOTS, true);
+
+console.log('');
+run('4 players + 4 bots', 4, true, 4);
+const allBots = run(`${MAX_LOBBY_SLOTS} bots`, 0, true, MAX_LOBBY_SLOTS);
+
+console.log(`\np99 share of a frame: ${(allPlayers * 100).toFixed(2)}% all players, ` +
+  `${(allBots * 100).toFixed(2)}% all bots`);
