@@ -57,37 +57,27 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url || steps.retry.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
         continue-on-error: true
 
-      # One retry, because the failure this keeps hitting is transient. Three
-      # of the last four deploys sat in `deployment_queued` for the full ten
-      # minute default and aborted; the one in between went through in seven.
-      # Nothing about the repository differs between those runs.
-      #
-      # A retry rather than a longer timeout because the timeout input does not
-      # work here -- setting it to 1200000 changed nothing, measured, twice.
-      # This costs ten minutes only on a run that was already going to fail,
-      # and the artifact is still uploaded, so the second attempt has something
-      # to deploy.
-      - id: retry
-        if: steps.deployment.outcome == 'failure'
-        uses: actions/deploy-pages@v4
-        continue-on-error: true
-        # No `timeout:` here, and that is a finding rather than an oversight.
-        # Two deploys in a row aborted after sitting in `deployment_queued`, so
-        # the input was set to 1200000 to double the ten minute default. The
-        # next run printed the new message from the step below -- proving it
-        # used this file -- and its deploy step still ran 10m06s and aborted.
-        # The input is real and documented on v4, the YAML was valid, and it
-        # made no difference. Removed rather than left in place implying a
-        # protection it does not provide. Whatever bounds this is not that.
+        # No retry step here, and no `timeout:` either. Both were tried against
+        # this failure and both are recorded because the reasons are specific.
+        #
+        # `timeout: 1200000` changed nothing -- the step still aborted at 10m05s
+        # and 10m06s, the default, measured twice.
+        #
+        # A second deploy-pages step fired correctly and failed in seven
+        # seconds with `Deployment cancelled.`. The log says why: the deployment
+        # id *is* the commit sha (`Created deployment for 7c7bbe2..., ID:
+        # 7c7bbe2...`). The first attempt cancels that deployment on timeout, so
+        # a retry at the same commit re-attaches to one that is already
+        # cancelled. Retrying within a run cannot work.
 
       - name: Explain a failed deploy
-        if: steps.deployment.outcome == 'failure' && steps.retry.outcome == 'failure'
+        if: steps.deployment.outcome == 'failure'
         run: |
           echo "::warning::Deploying to GitHub Pages failed."
           echo ""
@@ -97,9 +87,14 @@ jobs:
           echo "     The log above says 'Current status: deployment_queued'"
           echo "     over and over, then 'Timeout reached, aborting!'. That is"
           echo "     GitHub being slow, not this repository being wrong. The"
-          echo "     site that was already published is still up. This already"
-          echo "     retried once, so the queue was slow for twenty minutes --"
-          echo "     re-run the workflow, or just push again."
+          echo "     site that was already published is still up, so nothing"
+          echo "     is broken for anyone."
+          echo ""
+          echo "     Push a new commit rather than re-running this workflow."
+          echo "     The deployment id is the commit sha, and the attempt that"
+          echo "     just timed out cancelled it -- a re-run at the same sha"
+          echo "     may re-attach to that cancelled deployment and fail in"
+          echo "     seconds. A new sha gets a new deployment."
           echo ""
           echo "  2. Pages is not switched on."
           echo "     The log says 'Not Found' or 'Resource not accessible by"
