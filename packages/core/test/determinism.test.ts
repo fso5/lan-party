@@ -2,10 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { dsin, dcos, datan2, wrapAngle, Rng, PI } from '../src/math.js';
-import { createWorld, step, isMatchOver } from '../src/sim.js';
+import { createWorld, cloneWorld, step, isMatchOver } from '../src/sim.js';
 import { loadArena, missionById, MISSIONS, VERSUS_MAPS } from '../src/maps/index.js';
 import { Arena, parseArena } from '../src/map.js';
-import { Tile, emptyInput, type TankInput } from '../src/types.js';
+import { Tile, TankKind, emptyInput, type TankInput } from '../src/types.js';
 import { TANK_RADIUS } from '../src/tuning.js';
 import {
   Writer,
@@ -530,4 +530,59 @@ test('a headless match runs to completion without stalling', () => {
 
   assert.ok(isMatchOver(w), 'match did not resolve within 90 seconds');
   assert.equal(w.tanks[0].alive, false, 'a stationary player should be killed by the AI');
+});
+
+/**
+ * A cloned world carries on the same stream, not a fresh one.
+ *
+ * This is the same property as the test above, one step further along, and it
+ * is the one reconciliation actually depends on: a client builds its world by
+ * cloning the host's and then replays ticks against it. Every random decision
+ * the AI makes -- which way to break, when to drop a mine -- is drawn from
+ * `w.rng`, so a clone that started a new stream would diverge from the host on
+ * the first bot that made a choice, and reconciliation would fight it forever
+ * without ever converging.
+ *
+ * `cloneWorld` saves and restores the generator deliberately. Nothing tested
+ * it: replacing the restore with a fresh `Rng(0)` passed all 231 tests, because
+ * the worlds those tests clone hold no bots, and with no AI nothing ever draws.
+ * So the coverage looked complete and the property was unguarded.
+ */
+test('a cloned world keeps the RNG stream, so replay stays in lockstep', () => {
+  const world = createWorld({
+    arena: loadArena(VERSUS_MAPS[0]),
+    seed: 20260806,
+    players: [{ team: 0, spawnIndex: 0 }],
+    // Bots are the point: only the AI draws from w.rng, so a world without one
+    // cannot detect this at all.
+    bots: [
+      { kind: TankKind.Yellow, team: 1, spawnIndex: 1 },
+      { kind: TankKind.Grey, team: 2, spawnIndex: 2 },
+    ],
+  });
+
+  // Run a little first, so the clone happens mid-stream rather than at a point
+  // a fresh generator might coincidentally match.
+  const idle = new Map([[0, emptyInput()]]);
+  for (let t = 0; t < 120; t++) step(world, idle);
+
+  const copy = cloneWorld(world);
+  assert.deepEqual(copy.rng.save(), world.rng.save(), 'the clone starts where the original is');
+
+  for (let t = 0; t < 600; t++) {
+    step(world, idle);
+    step(copy, idle);
+  }
+
+  assert.deepEqual(
+    copy.tanks.map((t) => [t.id, t.x, t.y, t.bodyAngle, t.turretAngle, t.alive]),
+    world.tanks.map((t) => [t.id, t.x, t.y, t.bodyAngle, t.turretAngle, t.alive]),
+    'the clone diverged from the world it was copied from',
+  );
+  assert.deepEqual(
+    copy.mines.map((m) => [m.x, m.y, m.armTick]),
+    world.mines.map((m) => [m.x, m.y, m.armTick]),
+    'mines are laid on a random draw, so they diverge first',
+  );
+  assert.deepEqual(copy.rng.save(), world.rng.save(), 'RNG streams must stay in lockstep');
 });

@@ -39,6 +39,36 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-06 — Session A: cloneWorld's RNG restore was load-bearing and untested
+
+Started by checking whether mines actually do anything, since Yellow's whole
+identity is area denial and nothing had measured it. They work: over 60 matches
+with two Yellows each, mines account for **6.6% of all kills** — and half of
+those kill the tank that laid them, which is authentic to the genre but worth
+knowing. The AI's rule is deliberate (lay with small probability when an enemy
+is within six tiles), so the rate follows from how often enemies come close:
+0.03/s on Pillars against 0.17/s on The Moat, a 5x spread by map alone.
+
+That is a clean result, but it led somewhere better. The AI draws from `w.rng`,
+and clients build their world by **cloning** the host's and replaying ticks
+against it. So `cloneWorld` preserving the generator is load-bearing for
+reconciliation.
+
+It does preserve it, deliberately. **Nothing tested that.** Replacing the
+restore with a fresh `Rng(0)` passed all 231 tests. The reason the coverage
+looked complete is specific and worth remembering: every world those tests clone
+holds only players, and with no AI nothing ever draws from the generator, so the
+stream stays trivially in step. The property was unguarded precisely where it
+matters — a real match, with bots in it.
+
+Now tested with bots present, and mutation-verified twice: starting a fresh
+generator and restoring the wrong state both fail it. Without this a client
+would diverge from the host on the first bot decision after any clone, and
+reconciliation would fight it forever without converging.
+
+Also confirmed sound and left alone: `cloneWorld` already deep-copies each
+tank's `ai` block, so bot memory does not alias between host and client.
+
 ### 2026-08-06 — Session A: the campaign gets easier after mission three
 
 Missions are ordered as a difficulty curve and nothing had checked one. It does
