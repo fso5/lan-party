@@ -1517,7 +1517,7 @@ function updateRoundsHud() {
         text: drew
           ? 'Draw'
           : `${teamLabel(result.winner)} wins the ${result.matchOver ? 'match' : 'round'}`,
-        tone: won ? 'win' : 'lose',
+        tone: drew ? 'draw' : won ? 'win' : 'lose',
         // A match result stays up. A round result has to get out of the way
         // before the next round starts, or it covers its opening seconds --
         // which is when a shell is already in the air.

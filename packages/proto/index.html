@@ -362,6 +362,10 @@
   #banner[data-show="true"] { opacity: 1; }
   #banner[data-tone="win"]  { color: #4F8A3D; }
   #banner[data-tone="lose"] { color: var(--aim); }
+  /* A draw is neither, and showing it in the loss colour told half the room
+     they had lost a round nobody won. --ink is the ordinary text colour, which
+     is exactly the point. */
+  #banner[data-tone="draw"] { color: var(--ink); }
   @media (prefers-reduced-motion: reduce) {
     #banner { transition: none; }
   }
