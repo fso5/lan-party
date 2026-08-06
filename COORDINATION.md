@@ -39,6 +39,47 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-06 — Session A: the AI is nine times the sim's cost, and the enemies shoot each other
+
+Two findings from measuring the bots, one acted on and one deliberately not.
+
+**`sim-bench` was measuring the wrong thing.** It drives player tanks with
+scripted input, and `step` only runs `stepAi` for a tank with an `ai` — so no
+row it had ever ran the shot solver, which is by far the most expensive thing
+a tick contains. Its headline, 0.77% of a frame at eight tanks, described a
+match that cannot happen: server.mjs fills versus with bots and the campaign
+is entirely bots. With bot rows added, eight bots cost 6.76% of a frame at
+p99 against 0.77% for eight players.
+
+**Bots were solving in lockstep.** They re-solve every `reactionTicks`, a
+per-kind constant, and all started at tick 0 — so bots of a kind paid for
+every solve on the same tick as each other for the whole match. The median
+tick was 9us and the 99th was 2058us. Staggering the first think tick by tank
+id spreads the same work: p99 2058us -> 1127us, mean unchanged. Ids come from
+creation order, already part of the wire contract, so host and client agree.
+
+**Enemies kill each other, and the obvious fix is not worth it.** Every
+campaign enemy is team 1 (map.ts), friendly fire is on, and the shot solver
+refuses angles that come back at the *shooter* but says nothing about the
+shooter's own side. Measured over 24 seeds per mission: 14.8% of all enemy
+deaths are friendly fire, and in Cork Yard it is 43% — mostly Grey shooting
+Grey, with the player taking 27 of 51 kills on a mission where the enemies
+do nearly half the work themselves.
+
+I implemented the blocker check — refuse an angle that passes within a tank
+radius of a living teammate — and reverted it. It works (with a teammate on
+the line the solver moves 0.26 rad off the straight shot) but it changes
+nothing: friendly-fire deaths went 14.8% -> 15.0%, because the victims are
+mostly walking into shells that are already in flight, not standing on the
+line when the trigger is pulled. It is the same stale-position problem as the
+own-shell fix, and the solver cannot see the future. Meanwhile it cost 2.3x
+the AI's per-tick time at eight bots on two teams — the check sits in the
+innermost loop, 96 angles by ~104 segments by each teammate.
+
+So: the friendly fire is real and visible to a player, and the fix for it is
+on the dodge side rather than the solver side. Recorded rather than attempted,
+because the cheap version has now been measured and does not work.
+
 ### 2026-08-06 — Session A: the mutation survey is done, and found nothing left
 
 Extended the survey to `packages/app`, which had never had one. Twelve probes
