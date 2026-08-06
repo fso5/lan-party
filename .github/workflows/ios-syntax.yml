@@ -1,0 +1,58 @@
+# Parses the iOS module, because nothing else in this repo ever looks at it.
+#
+# There is no iOS build here and adding one needs a macOS runner, which is a
+# cost decision nobody has made. The result was 438 lines of Swift that no
+# machine had read -- and then a change to them, made from a Linux container
+# with no toolchain, verified by checking that the brackets balanced. That is
+# not verification, and this is the cheapest thing that is.
+#
+# `-parse` and not `-typecheck` on purpose: CoreBluetooth and ExpoModulesCore
+# do not exist on Linux, so type checking cannot work here and would only fail
+# on the imports. Parsing catches what actually goes wrong when someone edits a
+# file blind -- a dropped brace, an unbalanced paren, a malformed string
+# interpolation. It will not catch a wrong method name or a bad signature, and
+# a green tick here must not be read as "the iOS module builds".
+#
+# Runs only when the Swift changes, so it costs nothing the rest of the time.
+name: iOS syntax
+
+on:
+  push:
+    paths:
+      - 'packages/app/modules/**/ios/**'
+      - '.github/workflows/ios-syntax.yml'
+  pull_request:
+    paths:
+      - 'packages/app/modules/**/ios/**'
+      - '.github/workflows/ios-syntax.yml'
+  workflow_dispatch:
+
+jobs:
+  parse:
+    runs-on: ubuntu-latest
+    # The official image, so no third-party action is in the path of a check
+    # whose whole job is to be trustworthy. Unpinned because the Swift grammar
+    # is stable across releases and a drifting tag failing loudly is a better
+    # outcome here than a pinned tag quietly ageing out.
+    container: swift:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse every Swift file
+        run: |
+          set -euo pipefail
+          found=0
+          # Fail if there is nothing to check. A glob that matches nothing would
+          # otherwise make this pass by doing nothing at all, which is the
+          # failure mode the mutation harness exists to prevent elsewhere.
+          while IFS= read -r f; do
+            found=$((found + 1))
+            echo "parsing $f"
+            swiftc -parse "$f"
+          done < <(find packages/app/modules -path '*/ios/*' -name '*.swift' -print)
+
+          if [ "$found" -eq 0 ]; then
+            echo "::error::no Swift files found -- this check was verifying nothing"
+            exit 1
+          fi
+          echo "parsed $found file(s)"
