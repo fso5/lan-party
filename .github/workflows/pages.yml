@@ -62,23 +62,37 @@ jobs:
       - id: deployment
         uses: actions/deploy-pages@v4
         continue-on-error: true
+        with:
+          # The default is ten minutes, and a real deploy hit it while still
+          # sitting in `deployment_queued` -- the Pages queue was slow, nothing
+          # was wrong, and the build went red for it. Twenty minutes costs
+          # nothing on a healthy run, because the step returns as soon as the
+          # deployment reports success.
+          timeout: 1200000
 
-      # Pages needs switching on once by hand -- the Actions token can deploy to
-      # an existing site but cannot create one. Say so in plain language rather
-      # than leaving a raw 404 from the deploy action, which reads as a bug
-      # rather than a setting.
       - name: Explain a failed deploy
         if: steps.deployment.outcome == 'failure'
         run: |
-          echo "::warning::GitHub Pages is not enabled for this repository."
+          echo "::warning::Deploying to GitHub Pages failed."
           echo ""
-          echo "  Turn it on once, here:"
-          echo "    https://github.com/${{ github.repository }}/settings/pages"
-          echo "    Source -> GitHub Actions"
+          echo "  Two things cause this and they are not the same."
           echo ""
-          echo "  Then re-run this workflow. Every push deploys after that."
+          echo "  1. The deployment queued and never came back."
+          echo "     The log above says 'Current status: deployment_queued'"
+          echo "     over and over, then 'Timeout reached, aborting!'. That is"
+          echo "     GitHub being slow, not this repository being wrong. The"
+          echo "     site that was already published is still up. Re-run this"
+          echo "     workflow, or just push again."
           echo ""
-          echo "  This is the only route that gets the game onto an iPhone:"
+          echo "  2. Pages is not switched on."
+          echo "     The log says 'Not Found' or 'Resource not accessible by"
+          echo "     integration' instead. The Actions token can deploy to an"
+          echo "     existing site but cannot create one, so it has to be"
+          echo "     enabled once by hand:"
+          echo "       https://github.com/${{ github.repository }}/settings/pages"
+          echo "       Source -> GitHub Actions"
+          echo ""
+          echo "  This route is the only one that gets the game onto an iPhone:"
           echo "  release assets are served as attachments, so Safari downloads"
           echo "  the HTML instead of running it."
           exit 1
