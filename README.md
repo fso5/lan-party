@@ -182,8 +182,8 @@ what `net/websocket.ts` is for, and it is why Bluetooth is not the only route.
 
 ```
 npm install
-npm test  --workspace @tanks/core      # 177 tests, headless
-npm test  --workspace @tanks/app       # 46 tests
+npm test  --workspace @tanks/core      # headless, ~2s
+npm test  --workspace @tanks/app       # vitest
 npm run build --workspace @tanks/proto # -> packages/proto/dist/tanks-proto.html
 npm run smoke --workspace @tanks/proto # drives the built page in a real browser
 npm run mp:smoke    --workspace @tanks/proto  # two browsers against a real host
@@ -415,9 +415,8 @@ Maps are authored as ASCII so a level reads as a picture in source:
 13. Host migration
 14. Mods: more maps, map editor
 
-119 tests passing. Steps 5 and 6 are deliberately ordered: debugging prediction
-and reconciliation over UDP is tractable; debugging it *simultaneously* with
-debugging BLE is not.
+Steps 5 and 6 are deliberately ordered: debugging prediction and reconciliation
+over UDP is tractable; debugging it *simultaneously* with debugging BLE is not.
 
 ### Measured over the BLE transport
 
