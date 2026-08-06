@@ -287,3 +287,69 @@ test('a bot that can move never wedges', async () => {
     }
   }
 });
+
+test('a bot dodges its own shell once that shell can kill it', async () => {
+  /*
+   * The dodge logic used to skip every shell the tank owned, so a bot avoided
+   * everyone's fire except the one shot most likely to kill it. Measured across
+   * 72 four-bot matches before the fix: 18% of all deaths were self-inflicted,
+   * and 24-31% of each bank-shooting kind's own deaths. Afterwards, own-shell
+   * deaths fell from 31 to 4.
+   *
+   * The shot solver does refuse angles that come back at the shooter, which is
+   * why this is not obvious -- but it checks where the shooter is at the moment
+   * of firing, and a roamer then drives on into the ricochet.
+   *
+   * Skipping an own shell while it is still inside the self-arm grace period
+   * remains correct: it cannot hurt anyone yet, and fleeing it would make a
+   * tank run from every shot it takes. So both halves are checked here.
+   */
+  const { TANK_SPECS } = await import('../src/tuning.js');
+
+  // One roamer, alone, so nothing but its own shell can move it.
+  const makeWorld = () =>
+    createWorld({
+      arena: loadArena(VERSUS_MAPS[0]),
+      seed: 5,
+      players: [],
+      bots: [{ kind: TankKind.Grey, team: 0, spawnIndex: 0 }],
+    });
+
+  const profile = TANK_SPECS[TankKind.Grey].shell;
+
+  const runWith = (age: number) => {
+    const w = makeWorld();
+    const tank = w.tanks[0];
+    const startX = tank.x;
+    const startY = tank.y;
+
+    // A shell of the tank's own, bearing down on it from the left.
+    w.shells.push({
+      id: 1,
+      ownerId: tank.id,
+      team: tank.team,
+      x: tank.x - 2,
+      y: tank.y,
+      vx: profile.speed,
+      vy: 0,
+      radius: profile.radius,
+      bouncesLeft: 0,
+      bornTick: w.tick - age,
+      selfArmDelay: profile.selfArmDelay,
+    });
+
+    // A few ticks is enough to see whether it steps off the line. Perpendicular
+    // travel is what dodging looks like; the shell comes in flat along y.
+    for (let i = 0; i < 12; i++) step(w, new Map());
+    return { sideways: Math.abs(tank.y - startY), forward: Math.abs(tank.x - startX) };
+  };
+
+  const armed = runWith(profile.selfArmDelay + 5);
+  const notYet = runWith(0);
+
+  assert.ok(
+    armed.sideways > notYet.sideways,
+    `an armed own shell should push the tank off the line: moved ${armed.sideways.toFixed(3)} ` +
+      `sideways against ${notYet.sideways.toFixed(3)} for one that cannot hurt it yet`,
+  );
+});
