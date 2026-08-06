@@ -481,6 +481,9 @@ test('input frames are small enough to send every tick over BLE', async () => {
 function controllableAdapter() {
   let onConn: ((p: Peer) => void) | null = null;
   let onDisc: ((id: PeerId, reason: string) => void) | null = null;
+  // A holder rather than a bare `let`: assigned only inside a callback, TS
+  // narrows a `T | null` variable to null at the return site below.
+  const hooks: { frame?: (from: PeerId, frame: Uint8Array) => void } = {};
   // A platform can only refuse a connection it was asked for. `join` awaits
   // stopScanning before it registers anything, so a test that fires the outcome
   // synchronously is describing an order that cannot happen -- and gets a
@@ -501,7 +504,9 @@ function controllableAdapter() {
     },
     disconnect: async () => {},
     sendFrame: () => {},
-    onFrame: () => {},
+    onFrame: (cb) => {
+      hooks.frame = cb;
+    },
     onPeerConnected: (cb) => {
       onConn = cb;
     },
@@ -514,6 +519,7 @@ function controllableAdapter() {
     wasAsked,
     connects: (id: PeerId) => onConn?.({ id, name: id, rtt: 40 }),
     fails: (id: PeerId, reason: string) => onDisc?.(id, reason),
+    deliver: (from: PeerId, frame: Uint8Array) => hooks.frame?.(from, frame),
   };
 }
 
@@ -591,4 +597,79 @@ test('a real departure is still announced after a successful join', async () => 
 
   fails('host', 'left');
   assert.deepEqual(departures, ['host'], 'a peer that had connected did leave');
+});
+
+test('a departed peer takes its half-assembled message with it', () => {
+  /*
+   * Found by mutation: deleting the `forgetPeer` call from BleTransport's
+   * disconnect handler broke nothing, and `forgetPeer` had no test of its own.
+   *
+   * Two things go wrong without it. The buffers of everyone who ever left stay
+   * held, which on a phone hosting an evening of matches is a slow leak nobody
+   * would attribute to the radio. And the ids are per-peer, so a new player
+   * assigned a departed one's id can complete a stranger's message: the header
+   * on a BLE address makes that unlikely rather than impossible, and the result
+   * would be a snapshot spliced from two halves that both look valid.
+   */
+  const f = new BleFramer(18);
+  const msg = Uint8Array.from({ length: 28 }, (_, i) => i);
+  const frames = f.fragment(msg);
+  assert.equal(frames.length, 2, 'the message under test has to fragment');
+
+  assert.equal(f.reassemble('peer', frames[0]), null, 'first fragment is held');
+  f.forgetPeer('peer');
+
+  assert.equal(
+    f.reassemble('peer', frames[1]),
+    null,
+    'the tail completed a message whose head should have left with the peer',
+  );
+});
+
+test('forgetting one peer leaves everybody else alone', () => {
+  // The other half: a forgetPeer that cleared the whole map would pass the test
+  // above and drop a live player's message mid-reassembly.
+  const f = new BleFramer(18);
+  const a = Uint8Array.from({ length: 28 }, () => 0xaa);
+  const b = Uint8Array.from({ length: 28 }, () => 0xbb);
+  const fa = f.fragment(a);
+  const fb = f.fragment(b);
+
+  f.reassemble('A', fa[0]);
+  f.reassemble('B', fb[0]);
+
+  f.forgetPeer('A');
+
+  assert.deepEqual(f.reassemble('B', fb[1]), b, 'B lost its message when A left');
+});
+
+test('a disconnect actually reaches the framer, not just the peer list', () => {
+  /*
+   * The wiring, as opposed to the method. The two tests above call
+   * `forgetPeer` directly and pass whether or not BleTransport ever calls it --
+   * deleting the call from the disconnect handler survived both, which is the
+   * same shape of gap as testing a guard without testing that anything invokes
+   * it.
+   *
+   * The scenario is ordinary rather than exotic: a phone drops mid-snapshot and
+   * comes back. BLE peer ids are stable addresses, so the returning phone is
+   * the same peer, and a head left over from before its disconnect would be
+   * completed by a tail from after it.
+   */
+  const { adapter, deliver, fails } = controllableAdapter();
+  const transport = new BleTransport(adapter);
+  const packets: Uint8Array[] = [];
+  transport.setEvents({ onPacket: (_from, data) => packets.push(data) });
+
+  // payloadSize is 18 on this adapter, so 28 bytes is two fragments.
+  const frames = new BleFramer(18).fragment(Uint8Array.from({ length: 28 }, (_, i) => i));
+  assert.equal(frames.length, 2, 'the message under test has to fragment');
+
+  deliver('host', frames[0]);
+  assert.deepEqual(packets, [], 'half a message is not a packet');
+
+  fails('host', 'link lost');
+  deliver('host', frames[1]);
+
+  assert.deepEqual(packets, [], 'the tail completed a message from before the disconnect');
 });

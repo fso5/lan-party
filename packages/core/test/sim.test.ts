@@ -442,3 +442,42 @@ test('every shipped map fits the wire format', () => {
     );
   }
 });
+
+/**
+ * A tank cannot have more shells in the air than the cap allows.
+ *
+ * MAX_SHELLS_PER_TANK is the number the HUD counts down, so exceeding it is
+ * visible: the display says none left while another shot goes out. It appeared
+ * in no test at all -- loosening the guard from `>=` to `>`, which buys a sixth
+ * shell, passed every one of them.
+ *
+ * Ticks are advanced without stepping the world on purpose. The cap is about
+ * how many shells are *outstanding*, and stepping would fly them into walls and
+ * retire them, quietly making room for the next shot and measuring nothing.
+ */
+test('a tank cannot exceed its shell cap', async () => {
+  const { fireShell } = await import('../src/sim.js');
+  const { MAX_SHELLS_PER_TANK } = await import('../src/tuning.js');
+
+  const world = createWorld({
+    arena: loadArena(VERSUS_MAPS[0]),
+    seed: 3,
+    players: [{ team: 0, spawnIndex: 0 }],
+  });
+  const tank = world.tanks[0];
+  // Aim into the arena rather than the wall behind the spawn: fireShell also
+  // refuses when the muzzle lands inside a wall, and that would end the loop
+  // early for the wrong reason.
+  tank.turretAngle = Math.PI / 2;
+
+  const cooldown = TANK_SPECS[tank.kind].fireCooldown;
+  let fired = 0;
+  for (let i = 0; i < MAX_SHELLS_PER_TANK + 3; i++) {
+    if (fireShell(world, tank)) fired++;
+    world.tick += cooldown;
+  }
+
+  assert.equal(fired, MAX_SHELLS_PER_TANK, `fired ${fired} shells against a cap of ${MAX_SHELLS_PER_TANK}`);
+  assert.equal(tank.shellsOut, MAX_SHELLS_PER_TANK);
+  assert.equal(world.shells.length, MAX_SHELLS_PER_TANK, 'and that is how many are actually in the air');
+});
