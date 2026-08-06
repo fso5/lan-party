@@ -62,13 +62,14 @@ jobs:
       - id: deployment
         uses: actions/deploy-pages@v4
         continue-on-error: true
-        with:
-          # The default is ten minutes, and a real deploy hit it while still
-          # sitting in `deployment_queued` -- the Pages queue was slow, nothing
-          # was wrong, and the build went red for it. Twenty minutes costs
-          # nothing on a healthy run, because the step returns as soon as the
-          # deployment reports success.
-          timeout: 1200000
+        # No `timeout:` here, and that is a finding rather than an oversight.
+        # Two deploys in a row aborted after sitting in `deployment_queued`, so
+        # the input was set to 1200000 to double the ten minute default. The
+        # next run printed the new message from the step below -- proving it
+        # used this file -- and its deploy step still ran 10m06s and aborted.
+        # The input is real and documented on v4, the YAML was valid, and it
+        # made no difference. Removed rather than left in place implying a
+        # protection it does not provide. Whatever bounds this is not that.
 
       - name: Explain a failed deploy
         if: steps.deployment.outcome == 'failure'
