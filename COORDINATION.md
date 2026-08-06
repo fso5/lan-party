@@ -39,6 +39,45 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-06 — Session A: a round could run forever, and now cannot
+
+Went looking at match *pacing*, which nothing had ever measured, and found a
+softlock instead.
+
+`isMatchOver` is "one team left standing" and `roundOutcome` returns null until
+then. There was no clock anywhere. So a round where the survivors cannot kill
+each other simply never ends -- no error, no stall, the match just stops
+advancing.
+
+Reachable, not theoretical. Two Brown tanks on Pillars: **0 of 6 seeds resolved
+within five minutes of game time each.** Brown does not move and its shells
+bounce once, and the pillars leave no such path between those two starts. The
+version that matters is not bots though -- it is two people hiding behind
+opposite pillars, which any pair of players can do on purpose or by accident in
+a game passed around a room.
+
+Fixed with `roundTimeLimitTicks` in `MatchRules`, defaulting to 120s, after
+which the round is a draw. The draw path already existed for the everyone-dies
+case and scores nothing, so this needed no new concept. The same six seeds now
+all resolve at 120.0s as draws.
+
+**The 120s is the one judgement call and it is easy to change** -- it is a field
+on MatchRules, so a lobby can set it per match. Measured first rather than
+picked: bot rounds resolve in a 5-18s median depending on map and tank count,
+and the slowest of 72 runs took 100s, so two minutes clears legitimate play with
+room while still ending a stalemate inside anyone's patience.
+
+For `b/lobby`: `MatchRules` gained a required field. Nothing outside core builds
+one -- MatchHost defaults to DEFAULT_RULES and your roster carries its own wire
+type -- so this should not touch you. If you do construct rules anywhere, spread
+DEFAULT_RULES rather than listing fields and the next rule added will not break
+you either.
+
+Mutation-verified: disabling the limit fails two tests, and measuring the clock
+from tick 0 instead of from the round's own start fails one uniquely. That
+second one matters -- it would have made every round after the first shorter
+than the last, until round three or four was called a draw as it began.
+
 ### 2026-08-05 — Session A: checked the published APK rather than the green tick
 
 Several days of core changes have gone in on the strength of CI passing. Pulled

@@ -24,7 +24,7 @@ function fourPlayerWorld() {
   });
 }
 
-const RULES: MatchRules = { mode: 'ffa', roundsToWin: 2, intermissionTicks: 30 };
+const RULES: MatchRules = { ...DEFAULT_RULES, roundsToWin: 2, intermissionTicks: 30 };
 
 test('a round is undecided while two or more teams are alive', () => {
   const w = fourPlayerWorld();
@@ -160,7 +160,7 @@ test('standings rank by score, ties by team id', () => {
 test('match point reports every team on it, not just one', () => {
   // Several teams can sit on match point at once, and a UI that assumes one
   // would name the wrong player.
-  const m = createMatch({ mode: 'ffa', roundsToWin: 3, intermissionTicks: 0 }, [0, 1, 2]);
+  const m = createMatch({ ...DEFAULT_RULES, roundsToWin: 3, intermissionTicks: 0 }, [0, 1, 2]);
   assert.deepEqual(teamsOnMatchPoint(m), []);
 
   m.score.set(2, 2);
@@ -203,5 +203,79 @@ test('the default rules are sane for a phone match', () => {
   assert.ok(
     DEFAULT_RULES.intermissionTicks >= TICK_HZ && DEFAULT_RULES.intermissionTicks <= TICK_HZ * 6,
     'intermission should be a few seconds, not a blink or a wait',
+  );
+});
+
+/**
+ * A round nobody can win still ends.
+ *
+ * `roundOutcome` returns null while more than one team is alive, and before the
+ * time limit that was the whole story: if the survivors could not reach each
+ * other the round ran forever. No error, no stall detector, nothing to report
+ * -- the match simply never advanced.
+ */
+test('a round that nobody can win is called a draw at the limit', () => {
+  const world = createWorld({
+    arena: loadArena(VERSUS_MAPS[0]),
+    seed: 5,
+    players: [
+      { team: 0, spawnIndex: 0 },
+      { team: 1, spawnIndex: 1 },
+    ],
+  });
+  const match = createMatch({ ...DEFAULT_RULES, roundTimeLimitTicks: 100 }, [0, 1]);
+
+  // Nobody dies, so the only thing that can end this is the clock.
+  let decided = false;
+  for (world.tick = 0; world.tick <= 100; world.tick++) {
+    decided = updateMatch(match, world);
+    if (decided) break;
+  }
+
+  assert.ok(decided, 'the round never ended');
+  assert.equal(world.tick, 100, 'it should end on the limit, not before or after');
+  assert.equal(match.lastRoundWinner, DRAW, 'nobody won it');
+  assert.equal(match.score.get(0), 0, 'a draw scores nothing');
+  assert.equal(match.score.get(1), 0);
+});
+
+test('the clock starts again for each round, not once for the match', () => {
+  // The bug this rules out: measuring from tick 0 rather than from the round's
+  // own start would make every round after the first shorter than the last,
+  // and round three or four would be called a draw the moment it began.
+  const world = createWorld({
+    arena: loadArena(VERSUS_MAPS[0]),
+    seed: 5,
+    players: [
+      { team: 0, spawnIndex: 0 },
+      { team: 1, spawnIndex: 1 },
+    ],
+  });
+  const rules = { ...DEFAULT_RULES, roundTimeLimitTicks: 100, intermissionTicks: 10 };
+  const match = createMatch(rules, [0, 1]);
+
+  const runUntilDecided = () => {
+    for (let i = 0; i < 1000; i++) {
+      world.tick++;
+      if (updateMatch(match, world)) return world.tick;
+    }
+    return -1;
+  };
+
+  const first = runUntilDecided();
+  assert.equal(first, 100, 'first round times out at the limit');
+
+  // Walk through the intermission into round two.
+  for (let i = 0; i < 20; i++) {
+    world.tick++;
+    updateMatch(match, world);
+  }
+  assert.equal(match.phase, 'playing', 'round two should have begun');
+
+  const second = runUntilDecided();
+  assert.equal(
+    second - match.roundStartTick,
+    100,
+    `round two lasted ${second - match.roundStartTick} ticks, not the full limit`,
   );
 });

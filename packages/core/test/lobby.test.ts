@@ -12,6 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createWorld, cloneWorld } from '../src/sim.js';
+import { DEFAULT_RULES } from '../src/rules.js';
 import { loadArena, VERSUS_MAPS } from '../src/maps/index.js';
 import {
   LobbyOp,
@@ -223,7 +224,7 @@ test('a match ending sets matchOver on the wire, a mid-match round does not', ()
   const clientT = new LoopbackTransport('client', 'Client', net);
 
   const world = ffaWorld();
-  const host = new MatchHost(world, hostT, { mode: 'ffa', roundsToWin: 2, intermissionTicks: 30 });
+  const host = new MatchHost(world, hostT, { ...DEFAULT_RULES, roundsToWin: 2, intermissionTicks: 30 });
   const client = new MatchClient(cloneWorld(world), clientT, 'host', 1);
   net.connect('host', 'client');
   host.addClient('client', 1);
@@ -433,7 +434,7 @@ test('the end of a match is announced exactly once', () => {
   // world keeps stepping, and nothing tells the UI to offer a way out.
   const net = new LoopbackNetwork(PERFECT_PROFILE, 1);
   const host = new MatchHost(ffaWorld(), new LoopbackTransport('h', 'H', net), {
-    mode: 'ffa',
+    ...DEFAULT_RULES,
     roundsToWin: 1,
     intermissionTicks: 30,
   });

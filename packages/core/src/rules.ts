@@ -31,6 +31,19 @@ export interface MatchRules {
   roundsToWin: number;
   /** Pause between a round ending and the next beginning. */
   intermissionTicks: number;
+  /**
+   * Longest a round may run before it is called a draw.
+   *
+   * Without this a round simply does not end when the survivors cannot kill
+   * each other, and that is reachable rather than theoretical: two Brown tanks
+   * on Pillars never resolve, measured over six seeds and five minutes of game
+   * time each. Brown does not move and its shells bounce once, and the pillars
+   * leave no such path between those two starts. Two people hiding behind
+   * opposite pillars do the same thing, which is the version that matters --
+   * this is a game passed around a room, and a round that cannot end takes the
+   * evening with it.
+   */
+  roundTimeLimitTicks: number;
 }
 
 export const DEFAULT_RULES: MatchRules = {
@@ -39,6 +52,11 @@ export const DEFAULT_RULES: MatchRules = {
   // Long enough to read who won and see the explosion land, short enough that
   // nobody reaches for their phone's home button.
   intermissionTicks: TICK_HZ * 3,
+  // Measured before choosing: bot rounds resolve in a 5-18s median depending on
+  // map and count, and the slowest of 72 runs took 100s. Two minutes sits well
+  // clear of legitimate play while still ending a stalemate inside the span of
+  // somebody's patience.
+  roundTimeLimitTicks: TICK_HZ * 120,
 };
 
 export type MatchPhase = 'playing' | 'intermission' | 'finished';
@@ -55,6 +73,8 @@ export interface MatchState {
   phase: MatchPhase;
   /** Tick the current intermission ends. Meaningless while playing. */
   resumeAtTick: number;
+  /** Tick the current round began, for the time limit. */
+  roundStartTick: number;
   /** Team that took the last round, DRAW, or null before any round ends. */
   lastRoundWinner: number | null;
   /** Team that took the match, or null while it is still running. */
@@ -73,6 +93,7 @@ export function createMatch(rules: MatchRules, teams: number[]): MatchState {
     score,
     phase: 'playing',
     resumeAtTick: 0,
+    roundStartTick: 0,
     lastRoundWinner: null,
     matchWinner: null,
   };
@@ -107,11 +128,15 @@ export function updateMatch(match: MatchState, world: WorldState): boolean {
     if (world.tick >= match.resumeAtTick) {
       match.phase = 'playing';
       match.round++;
+      match.roundStartTick = world.tick;
     }
     return false;
   }
 
-  const winner = roundOutcome(world);
+  // Time out before asking who is left: a round nobody can win is exactly the
+  // case where roundOutcome keeps returning null forever.
+  const timedOut = world.tick - match.roundStartTick >= match.rules.roundTimeLimitTicks;
+  const winner = timedOut ? DRAW : roundOutcome(world);
   if (winner === null) return false;
 
   if (winner !== DRAW) {
