@@ -57,9 +57,24 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.retry.outputs.page_url }}
     steps:
       - id: deployment
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      # One retry, because the failure this keeps hitting is transient. Three
+      # of the last four deploys sat in `deployment_queued` for the full ten
+      # minute default and aborted; the one in between went through in seven.
+      # Nothing about the repository differs between those runs.
+      #
+      # A retry rather than a longer timeout because the timeout input does not
+      # work here -- setting it to 1200000 changed nothing, measured, twice.
+      # This costs ten minutes only on a run that was already going to fail,
+      # and the artifact is still uploaded, so the second attempt has something
+      # to deploy.
+      - id: retry
+        if: steps.deployment.outcome == 'failure'
         uses: actions/deploy-pages@v4
         continue-on-error: true
         # No `timeout:` here, and that is a finding rather than an oversight.
@@ -72,7 +87,7 @@ jobs:
         # protection it does not provide. Whatever bounds this is not that.
 
       - name: Explain a failed deploy
-        if: steps.deployment.outcome == 'failure'
+        if: steps.deployment.outcome == 'failure' && steps.retry.outcome == 'failure'
         run: |
           echo "::warning::Deploying to GitHub Pages failed."
           echo ""
@@ -82,8 +97,9 @@ jobs:
           echo "     The log above says 'Current status: deployment_queued'"
           echo "     over and over, then 'Timeout reached, aborting!'. That is"
           echo "     GitHub being slow, not this repository being wrong. The"
-          echo "     site that was already published is still up. Re-run this"
-          echo "     workflow, or just push again."
+          echo "     site that was already published is still up. This already"
+          echo "     retried once, so the queue was slow for twenty minutes --"
+          echo "     re-run the workflow, or just push again."
           echo ""
           echo "  2. Pages is not switched on."
           echo "     The log says 'Not Found' or 'Resource not accessible by"
