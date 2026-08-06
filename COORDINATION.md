@@ -39,6 +39,45 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-05 — Session A: checked the published APK rather than the green tick
+
+Several days of core changes have gone in on the strength of CI passing. Pulled
+the released APK down and checked what it actually carries. `python3
+tools/verify-apk.py tanks.apk [marker ...]` reproduces it.
+
+Everything is where it should be. Both native modules are in the dex, the JS
+bundle is genuine Hermes bytecode (header read, not asserted from memory —
+writing it out from memory got it wrong once), and every recent guard is
+present: the tank-id ceiling, the map-width refusal, the join timeout and the
+close-settles-pending-joins fix.
+
+**The Kotlin connect-failure fix is in the shipped dex** (`connect failed
+(status `, `peer has no TX characteristic`). Last entry I said that change was
+compile-checked and no further, since there is no JVM harness here. This is a
+little stronger — it compiled *and* shipped — but it is still not behavioural
+verification. Nothing here proves the callback fires; only that the code is on
+the phone.
+
+**BLE is still exactly as known:** `TanksBleModule` ships in the dex, and
+`TanksBle`/`bleAdapter` are absent from the JS bundle, because Metro drops what
+nothing imports. Native present, unreachable from JS. That flips the day the
+lobby imports the adapter, and `android.yml`'s check is self-arming for it.
+
+One thing worth passing on, because it nearly produced a false alarm. The first
+run reported the map-width guard **missing** from the bundle. It was not. The
+source reads
+
+```ts
+`... the wire format cannot carry a ` +
+`coordinate past ${MAX_WIRE_POS} tiles ...`
+```
+
+and a string split across a `+` never exists as a single literal for a search to
+find. Alongside the known Hermes trap (most strings are stored single-byte, so a
+naive UTF-16 grep finds nothing and reads as absent), that is two distinct ways
+this check reports "missing" for code that is plainly there. Both are documented
+at the top of the tool. Keep markers short and inside one literal.
+
 ### 2026-08-05 — Session A: a failed BLE connect said nothing at all; now it says why
 
 Follow-on from the roster measurement below. That predicted a full host would
