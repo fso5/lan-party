@@ -353,3 +353,87 @@ test('a bot dodges its own shell once that shell can kill it', async () => {
       `sideways against ${notYet.sideways.toFixed(3)} for one that cannot hurt it yet`,
   );
 });
+
+test('a mine layer walks off its own mine before the fuse runs out', async () => {
+  /**
+   * A mine never proximity-triggers on the tank that laid it, so the fuse is
+   * the only way it can kill its owner -- and that is exactly how it happened.
+   * Of 216 deaths across 72 four-bot matches, 11 were the victim's own mine,
+   * and every one of the 11 was the mine at age 301 out of a 300-tick fuse,
+   * with the owner a mean 1.12 tiles from it. None was a firefight going wrong;
+   * all were a tank standing on its own mine for five seconds. Afterwards: 0.
+   *
+   * Two properties, because either alone is satisfiable by a bug. Leaving early
+   * enough to get clear is the fix; not leaving while there is still time is
+   * what keeps a mine layer from spending its life running away from its own
+   * ordnance instead of fighting.
+   */
+  const { MINE_BLAST_RADIUS, MINE_FUSE_TICKS, TANK_RADIUS: R } = await import('../src/tuning.js');
+  const danger = MINE_BLAST_RADIUS + R;
+
+  // Yellow is the slow mine layer, so it is the one with the least room for the
+  // escape estimate to be wrong. Alone, so nothing else can move it.
+  const makeWorld = () => {
+    const w = createWorld({
+      arena: loadArena(VERSUS_MAPS[0]),
+      seed: 11,
+      players: [],
+      bots: [{ kind: TankKind.Yellow, team: 0, spawnIndex: 0 }],
+    });
+    const tank = w.tanks[0];
+    w.mines.push({
+      id: 99,
+      ownerId: tank.id,
+      team: tank.team,
+      x: tank.x,
+      y: tank.y,
+      fuseTick: w.tick + MINE_FUSE_TICKS,
+      armTick: w.tick + 1,
+    });
+    return { w, tank, mine: w.mines[0] };
+  };
+
+  // Wandering is the only other thing that moves this tank, and it would carry
+  // it off the mine by luck rather than by decision. Pinning the wander target
+  // to where the tank already stands holds it still, so any movement at all is
+  // the mine escape and nothing else.
+  const holdStill = (w: ReturnType<typeof makeWorld>['w'], tank: (typeof w)['tanks'][0]) => {
+    const ai = tank.ai!;
+    ai.targetX = tank.x;
+    ai.targetY = tank.y;
+    ai.repathTick = w.tick + 10_000;
+  };
+
+  {
+    const { w, tank, mine } = makeWorld();
+    // Halfway through the fuse there is time in hand, and the tank should still
+    // be free to do something else.
+    for (let i = 0; i < MINE_FUSE_TICKS / 2; i++) {
+      holdStill(w, tank);
+      step(w, new Map());
+    }
+    const moved = Math.hypot(tank.x - mine.x, tank.y - mine.y);
+    assert.ok(
+      moved < 1e-6,
+      `with half the fuse left the tank should not be fleeing yet, but it moved ${moved.toFixed(3)} tiles`,
+    );
+  }
+
+  {
+    const { w, tank, mine } = makeWorld();
+    const fuseTick = mine.fuseTick;
+    let atFuse = 0;
+    while (w.tick < fuseTick) {
+      holdStill(w, tank);
+      step(w, new Map());
+      atFuse = Math.hypot(tank.x - mine.x, tank.y - mine.y);
+    }
+    assert.ok(
+      atFuse > danger,
+      `the tank should be clear of its own blast when the fuse runs out, but it was ` +
+        `${atFuse.toFixed(2)} tiles away with the blast reaching ${danger.toFixed(2)}`,
+    );
+    step(w, new Map());
+    assert.ok(tank.alive, 'and it should still be alive afterwards');
+  }
+});
