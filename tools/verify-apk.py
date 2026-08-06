@@ -25,15 +25,29 @@ Two ways this check can lie, both hit for real:
    and the bundler kept the two halves apart. A marker must be a fragment that
    survives concatenation -- keep them short, and inside one literal.
 
+3. **The page the host serves is base64 inside the bundle.** `gamePage.ts`
+   embeds it as one base64 literal, so nothing in it can be found by searching
+   the bundle -- a marker plainly present in the page reads as MISSING. That
+   page is what every other phone in the room is handed, so it is decoded and
+   searched separately below. Checked once by hand before this existed: the
+   shipped APK did carry the current page.
+
 The Hermes magic is read and printed rather than asserted from memory. Writing
 it out from memory once got it wrong and reported a real Hermes bundle as plain
 JavaScript.
 """
+import base64
 import re
 import sys
 import zipfile
 
 HERMES_MAGIC = bytes.fromhex('c61fbc03c103191f')
+
+# "<!doctype html>" base64-encoded. The page the host phone serves to everyone
+# else is embedded as one base64 string literal (see gamePage.ts), so its
+# contents are invisible to a search of the bundle -- a marker that is plainly
+# in the page reads as MISSING. This is how to actually look inside it.
+PAGE_PREFIX = b'PCFkb2N0eXBlIGh0bWw+'
 
 # (dex signature, what it is). The native half, which no JS check can see.
 NATIVE = [
@@ -51,6 +65,23 @@ JS_SYMBOLS = [
     ('TanksBle', 'radio JS binding', False),
     ('bleAdapter', 'BLE adapter module', False),
 ]
+
+
+def embedded_page(bundle):
+    """The served page, decoded, or None if it is not in there.
+
+    Not a nicety: this is what every other phone in the room is handed. A build
+    where it went missing or went stale would pass every other check here, and
+    fail as a blank page on somebody else's handset.
+    """
+    i = bundle.find(PAGE_PREFIX)
+    if i < 0:
+        return None
+    run = re.match(rb'[A-Za-z0-9+/=]+', bundle[i:]).group(0)
+    try:
+        return base64.b64decode(run + b'=' * (-len(run) % 4))
+    except Exception:
+        return None
 
 
 def main(path, markers):
@@ -81,13 +112,21 @@ def main(path, markers):
         note = '' if found == expect else ('  <- now present' if found else '  <- now absent')
         print(f"  {state}  utf8={u8:<3} utf16={u16:<3} {sym:<12} ({what}){note}")
 
+    page = embedded_page(bundle)
+    print("\n-- the page the host serves to every other phone --")
+    if page is None:
+        print("  MISSING  no base64 page literal found in the bundle")
+    else:
+        print(f"  ok       {len(page):,} bytes, starts {page[:15]!r}")
+
     if markers:
-        print("\n-- markers (searched in the JS bundle, then the dex) --")
+        print("\n-- markers (JS bundle, then dex, then the served page) --")
         for m in markers:
             b = bundle.count(m.encode('utf-8')) + bundle.count(m.encode('utf-16-le'))
             d = dex.count(m.encode('utf-8'))
-            where = 'bundle' if b else ('dex' if d else '')
-            print(f"  {'ok     ' if b or d else 'MISSING'}  {m!r} {f'in {where}' if where else ''}")
+            g = page.count(m.encode('utf-8')) if page else 0
+            where = 'bundle' if b else ('dex' if d else ('served page' if g else ''))
+            print(f"  {'ok     ' if b or d or g else 'MISSING'}  {m!r} {f'in {where}' if where else ''}")
 
     libs = sorted({re.sub(r'lib/([^/]+)/.*', r'\1', n) for n in names if n.startswith('lib/')})
     print(f"\nABIs: {libs}")
