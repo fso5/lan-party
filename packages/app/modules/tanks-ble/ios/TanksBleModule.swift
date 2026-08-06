@@ -346,7 +346,7 @@ final class BleBridge: NSObject, CBPeripheralManagerDelegate, CBCentralManagerDe
     // us. Android reports its status code here for the same reason.
     let reason = error?.localizedDescription ?? "no reason given"
     emit?("onPeerDisconnected", ["peerId": id, "reason": "connect failed (\(reason))"])
-
+  }
 
   func centralManager(
     _ central: CBCentralManager,
