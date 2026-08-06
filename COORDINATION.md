@@ -39,6 +39,37 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-06 — Session A: measured which tank actually beats which
+
+`types.ts` described an escalating roster -- Brown "the tutorial enemy" through
+Black the "late-game threat" -- and nothing had checked it. `node
+tools/tank-balance.mjs` duels every pair across three maps and twelve seeds with
+the sides swapped, so a spawn advantage cannot read as a tank advantage.
+
+```
+average win rate against all others, weakest first:
+  Brown    12.2%    Green    14.4%    Grey     53.9%
+  Yellow   58.7%    Teal     77.8%    Black    82.6%
+```
+
+Green sits second from bottom while being described as a late-game threat, and
+the honest reading is not that Green is mistuned. Both bottom entries are the
+two tanks that cannot move, and one on one whoever cannot dodge loses. Green's
+threat is positional -- it punishes a player who holds still -- and a bot duel
+cannot reproduce that. The measurement is the wrong test for it, and the enum
+comments now say so rather than leaving the ordering to imply otherwise.
+
+**Two things that are real.** Among the roamers Teal takes 83% off Yellow while
+being described as the milder of the pair, so that description is now corrected.
+And `server.mjs` fills versus matches from `[Grey, Teal, Green]` -- a stationary
+turret between two roamers is a conspicuously softer opponent, which a player
+would feel as one bot being free points. **Left as it is:** whether bot fill
+should be all-roamers is a design call, not a defect, and I would rather flag it
+than quietly change how matches play.
+
+The enum order is documentation only -- maps author enemies by letter and no
+code ranks kinds -- so none of this changes behaviour.
+
 ### 2026-08-06 — Session A: a round could run forever, and now cannot
 
 Went looking at match *pacing*, which nothing had ever measured, and found a

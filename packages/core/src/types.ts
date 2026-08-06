@@ -38,17 +38,48 @@ export type TeamId = number;
  * aim error, fire cadence, and mine behaviour. The values live in tuning.ts so
  * they can be rebalanced without touching AI code.
  */
+/**
+ * The enemy roster.
+ *
+ * The order is not a difficulty ranking and nothing treats it as one -- maps
+ * author enemies by letter and no code compares kinds. It had read like one,
+ * which was misleading in a specific way now measured: `node
+ * tools/tank-balance.mjs` duels every pair across three maps and twelve seeds
+ * with sides swapped, and the average win rates come out
+ *
+ *   Brown 12%   Green 14%   Grey 54%   Yellow 59%   Teal 78%   Black 83%
+ *
+ * Read that carefully. The two at the bottom are the two that cannot move, and
+ * one on one whoever cannot dodge loses -- so the number says less about how
+ * dangerous they are than about duels being the wrong test for them. Their
+ * threat is positional and lands on a player who stops moving, which no bot
+ * duel reproduces. Noted on each below rather than left to look like tuning
+ * debt.
+ */
 export enum TankKind {
   Player = 0,
   /** Stationary, slow turret, no lead, single-bounce shells. The tutorial enemy. */
   Brown = 1,
   /** Slow roamer, fires ricochet shots, will bank shots off walls. */
   Grey = 2,
-  /** Fast, fires quick rockets that do not bounce. Pressures you constantly. */
+  /**
+   * Fast, fires quick rockets that do not bounce. Pressures you constantly.
+   *
+   * Measured as the strongest of the roamers bar Black -- it takes 83% off
+   * Yellow, so treat it as the harder of that pair despite sitting earlier here.
+   */
   Teal = 3,
   /** Roams and lays mines behind it. Area denial. */
   Yellow = 4,
-  /** Immobile turret with precise two-bounce shots. Punishes standing still. */
+  /**
+   * Immobile turret with precise two-bounce shots. Punishes standing still.
+   *
+   * Dangerous to a player who holds position, and close to harmless in a duel
+   * against anything that roams: 14% average, and it loses to Grey 97 times in
+   * 100. That is the cost of being unable to dodge, not a tuning fault -- but
+   * it does make Green conspicuously soft as versus bot fill, which is what
+   * server.mjs currently uses it for.
+   */
   Green = 5,
   /** Aggressive, fast rockets, actively closes distance. Late-game threat. */
   Black = 6,
