@@ -80,6 +80,12 @@
        dark --aim is a light orange where that same cream falls to 2.85 --
        under the 3.0 floor for large text, let alone the 4.5 for normal. */
     --on-aim:     #FFF6EC;
+    /* The round banner, which is drawn over the board rather than over a
+       panel -- so these follow the board, not the ink. Measured against the
+       floor: the fixed #4F8A3D and #C1440E they replace came to 2.43:1 and
+       2.99:1 here, under the 3.0 that even 4rem text needs. */
+    --win:        #2F5A22;
+    --lose:       #8F320A;
     --shadow:     rgba(60, 48, 30, 0.20);
     --mine-ring:  rgba(224, 122, 40, 0.55);
     --stick:      rgba(42, 37, 28, 0.30);
@@ -107,6 +113,8 @@
       --shell:      #FFD98F;
       --aim:        #E4753A;
       --on-aim:     #16140F;
+      --win:        #8FD07A;
+      --lose:       #F2A277;
       --shadow:     rgba(0, 0, 0, 0.45);
       --stick:      rgba(237, 229, 211, 0.28);
       --stick-knob: rgba(237, 229, 211, 0.18);
@@ -432,10 +440,27 @@
     letter-spacing: -0.03em;
     opacity: 0;
     transition: opacity 220ms ease;
+    /*
+     * A halo in the board's own floor colour.
+     *
+     * Colour alone cannot make this readable, and that is measured rather than
+     * assumed: sampling 3546 pixels of the band the text occupies on a versus
+     * map, the worst contrast is about 1.0 for every tone in both schemes --
+     * somewhere under the message there is always a block or a tank close
+     * enough to the text's own colour to swallow it. The median is 5.8 to 8.6,
+     * which is why it looks fine nearly all of the time and then does not.
+     *
+     * `--table` is what the floor is painted with, so the halo puts a known
+     * background behind the glyphs whatever they happen to be over.
+     */
+    text-shadow:
+      0 0 2px var(--table),
+      0 0 6px var(--table),
+      0 0 14px var(--table);
   }
   #banner[data-show="true"] { opacity: 1; }
-  #banner[data-tone="win"]  { color: #4F8A3D; }
-  #banner[data-tone="lose"] { color: var(--aim); }
+  #banner[data-tone="win"]  { color: var(--win); }
+  #banner[data-tone="lose"] { color: var(--lose); }
   /* A draw is neither, and showing it in the loss colour told half the room
      they had lost a round nobody won. --ink is the ordinary text colour, which
      is exactly the point. */

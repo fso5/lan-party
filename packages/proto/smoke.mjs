@@ -1141,6 +1141,68 @@ for (const scheme of ['light', 'dark']) {
     `the connection badge is readable in ${scheme} mode`,
     Object.entries(contrast).map(([k, v]) => `${k} ${v}:1`).join(', '),
   );
+
+  /*
+   * And the round banner, which is drawn over the board rather than a panel.
+   *
+   * Its win and lose colours were fixed whatever the scheme, and against the
+   * floor they measured 2.43:1 and 2.99:1 in light mode -- under the 3.0 that
+   * WCAG allows even for 4rem text, on the single most important message the
+   * game shows. Palette-aware now.
+   *
+   * The floor is taken as the commonest colour under the text rather than the
+   * centre pixel, which on some maps is a wall. It is also only half the
+   * story, and the file says so where the halo is defined: sampling every
+   * pixel of that band, the worst case is about 1.0 for every tone, because
+   * somewhere under the message there is always a block or a tank near enough
+   * to its colour to swallow it. No flat colour fixes that; the text-shadow
+   * is what does, and this number cannot see it.
+   */
+  const bannerContrast = await schemePage.evaluate(() => {
+    const parse = (c) => c.match(/[\d.]+/g).map(Number);
+    const lin = (v) => {
+      const x = v / 255;
+      return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+    };
+    const lum = (c) => {
+      const [r, g, b] = parse(c);
+      return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+    };
+    const ratio = (a, b) => {
+      const [hi, lo] = [lum(a), lum(b)].sort((m, n) => n - m);
+      return (hi + 0.05) / (lo + 0.05);
+    };
+
+    const cv = document.getElementById('arena');
+    const g = cv.getContext('2d');
+    const tally = new Map();
+    for (let y = Math.floor(cv.height * 0.42); y <= cv.height * 0.58; y += 8) {
+      for (let x = Math.floor(cv.width * 0.2); x <= cv.width * 0.8; x += 8) {
+        const d = g.getImageData(x, y, 1, 1).data;
+        const key = `rgb(${d[0]}, ${d[1]}, ${d[2]})`;
+        tally.set(key, (tally.get(key) ?? 0) + 1);
+      }
+    }
+    const floor = [...tally.entries()].sort((a, b) => b[1] - a[1])[0][0];
+
+    const banner = document.getElementById('banner');
+    const was = banner.dataset.tone;
+    const out = { floor, tones: {} };
+    for (const tone of ['win', 'lose', 'draw']) {
+      banner.dataset.tone = tone;
+      out.tones[tone] = Math.round(ratio(getComputedStyle(banner).color, floor) * 100) / 100;
+    }
+    if (was === undefined) delete banner.dataset.tone;
+    else banner.dataset.tone = was;
+    return out;
+  });
+  const worstTone = Math.min(...Object.values(bannerContrast.tones));
+  check(
+    worstTone >= 4.5,
+    `the round banner is readable over the board in ${scheme} mode`,
+    `over ${bannerContrast.floor}: ` +
+      Object.entries(bannerContrast.tones).map(([k, v]) => `${k} ${v}:1`).join(', '),
+  );
   await schemeCtx.close();
 }
 
