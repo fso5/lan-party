@@ -21,7 +21,33 @@ export interface Mission {
   rows: string[];
 }
 
-/** The single-player campaign, in escalating difficulty order. */
+/**
+ * The single-player campaign, in narrative order.
+ *
+ * It used to say "in escalating difficulty order", and that is not true.
+ * Measured with tools/campaign-curve.mjs, 24 seeds a mission, as the win rate
+ * of a bot stand-in in the player's seat:
+ *
+ *              First Contact  Cork Yard  The Gallery  Chasm  Last Stand
+ *     Grey               67%         0%           8%     4%          4%
+ *     Teal               96%        42%           0%    21%         13%
+ *
+ * Difficulty climbs steeply out of mission one and then wanders. Both
+ * stand-ins find the finale easier than the middle of the campaign.
+ *
+ * The obvious repair -- reorder until it climbs -- does not work, and it is
+ * worth writing down why rather than rediscovering it. The two stand-ins do
+ * not agree on the ranking: Grey finds Cork Yard hardest, Teal finds The
+ * Gallery hardest, so no single order is monotonic for both. And ordering by
+ * their average puts The Gallery last, which makes a mission called Last Stand
+ * the fourth of five.
+ *
+ * So the honest fix is retuning lineups -- The Gallery fields two Teals, the
+ * strongest pair in the game, and Last Stand pads Black with a Green that
+ * cannot move -- and that is a design decision rather than a measurement. The
+ * numbers are here so it can start from them. What is not left standing is a
+ * comment claiming an order the missions do not have.
+ */
 export const MISSIONS: Mission[] = [
   {
     id: 1,

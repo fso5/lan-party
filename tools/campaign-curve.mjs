@@ -4,8 +4,8 @@
  *     node tools/campaign-curve.mjs
  *
  * Missions are ordered as a curve and nothing had ever checked one. It does not
- * hold: difficulty climbs to mission three and then falls, so the finale is an
- * easier fight than the middle of the campaign.
+ * hold: difficulty climbs steeply out of mission one and then wanders, and the
+ * finale is an easier fight than the middle of the campaign.
  *
  * ## Read this before trusting any stand-in
  *
@@ -25,17 +25,29 @@
  * ## What they say
  *
  *   mission          Grey   Teal      lineup
- *   First Contact     63%   100%      Brown + Brown + Brown
- *   Cork Yard         13%    46%      Brown + Grey + Grey
- *   The Gallery        0%     8%      Green + Teal + Teal
- *   Chasm              0%    33%      Green + Grey + Yellow
- *   Last Stand         8%    38%      Black + Green + Grey
+ *   First Contact     67%    96%      Brown + Brown + Brown
+ *   Cork Yard          0%    42%      Brown + Grey + Grey
+ *   The Gallery        8%     0%      Green + Teal + Teal
+ *   Chasm              4%    21%      Green + Grey + Yellow
+ *   Last Stand         4%    13%      Black + Green + Grey
  *
- * Both agree the hardest mission is the third, and both put the finale easier
- * than it. The lineups explain why: The Gallery fields two Teals, and Teal
- * measures as the strongest tank bar Black (see tools/tank-balance.mjs), while
- * Last Stand pairs one Black with Green -- which cannot move and loses 86% of
- * its duels.
+ * Both put the finale easier than the middle. The lineups explain why: The
+ * Gallery fields two Teals, and Teal measures as the strongest tank bar Black
+ * (see tools/tank-balance.mjs), while Last Stand pairs one Black with Green --
+ * which cannot move and loses most of its duels.
+ *
+ * ## Where they disagree, and why that rules out the obvious repair
+ *
+ * They no longer agree on which mission is hardest: Grey says Cork Yard, Teal
+ * says The Gallery. That is not noise to be averaged away, it is the reason
+ * reordering the missions cannot fix this -- no single order climbs for both
+ * stand-ins at once. And ordering by their average puts The Gallery last,
+ * which would make a mission called Last Stand the fourth of five.
+ *
+ * (These numbers moved once already: before the enemies stopped shooting each
+ * other, Cork Yard read 13%/46% because the player was being handed 43% of
+ * that mission's kills by the enemy team. Any retune should start from a run
+ * of this tool rather than from the table above.)
  *
  * Not fixed here. Which enemies stand in which mission is content, and the
  * numbers are the input to that decision rather than the decision.
