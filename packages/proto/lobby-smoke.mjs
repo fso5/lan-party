@@ -624,6 +624,18 @@ for (const [i, p] of pages.entries()) {
    * attempt at this measured the solo layout while believing otherwise.
    */
   const isPhone = await p.evaluate(() => window.innerWidth === 844 && window.innerHeight === 390);
+  /*
+   * Wait for the scoreboard rather than sampling for it.
+   *
+   * `updateRoundsHud` reveals it on the first frame after `net.client` exists,
+   * and the check below used to read the DOM immediately after the tank
+   * appeared -- which is sometimes the frame before. It passed twice and then
+   * reported "scoreboard MISSING" on a clean tree, which is worse than not
+   * checking: a flake teaches everyone to re-run the suite.
+   */
+  await p
+    .waitForFunction(() => !document.getElementById('rounds').hidden, undefined, { timeout: 10_000 })
+    .catch(() => {});
   const hud = await p.evaluate(() => {
     const hdr = document.querySelector('header');
     const rounds = document.getElementById('rounds');

@@ -75,6 +75,11 @@
     --void:       #221E18;
     --shell:      #FFCE6E;
     --aim:        #C1440E;
+    /* Text drawn on top of --aim. The two schemes want opposite ends of the
+       range: light --aim is a dark orange and takes cream at 4.79:1, while
+       dark --aim is a light orange where that same cream falls to 2.85 --
+       under the 3.0 floor for large text, let alone the 4.5 for normal. */
+    --on-aim:     #FFF6EC;
     --shadow:     rgba(60, 48, 30, 0.20);
     --mine-ring:  rgba(224, 122, 40, 0.55);
     --stick:      rgba(42, 37, 28, 0.30);
@@ -101,6 +106,7 @@
       --void:       #0B0A08;
       --shell:      #FFD98F;
       --aim:        #E4753A;
+      --on-aim:     #16140F;
       --shadow:     rgba(0, 0, 0, 0.45);
       --stick:      rgba(237, 229, 211, 0.28);
       --stick-knob: rgba(237, 229, 211, 0.18);
@@ -227,10 +233,19 @@
   }
   #net-status[data-state="offline"] { opacity: 0.55; }
   #net-status[data-state="connecting"] { color: var(--ink); }
+  /*
+   * The filled badge, which is every state that matters: solo, connected and
+   * -- the one a player needs to read when something has gone wrong --
+   * reconnecting.
+   *
+   * `color: #FFF6EC` was fixed whatever the scheme, and measured 4.79:1 in
+   * light against 2.85:1 in dark, because dark mode's --aim is a lighter
+   * orange. `--on-aim` flips with the palette: 4.79 and 6.05.
+   */
   #net-status:not([data-state="offline"]):not([data-state="connecting"]) {
     background: var(--aim);
     border-color: var(--aim);
-    color: #FFF6EC;
+    color: var(--on-aim);
   }
 
   /*

@@ -1078,6 +1078,72 @@ check(
 );
 await phoneCtx.close();
 
+/*
+ * The status badge has to be readable in both palettes.
+ *
+ * It is the only thing that tells a player their connection dropped, and
+ * `reconnecting` is exactly when they need to read it. Its colour was fixed at
+ * `#FFF6EC` regardless of scheme, which measured 4.79:1 against the orange in
+ * light mode and 2.85:1 in dark -- under the 3.0 that WCAG allows even for
+ * large text. Dark mode's --aim is a lighter orange, so the same cream that
+ * works in one palette fails in the other.
+ *
+ * Contrast is computed here rather than eyeballed from a screenshot, and it
+ * flattens alpha and element opacity before comparing -- the dimmed `offline`
+ * state is 0.55 opacity, and comparing its colour to the header without
+ * accounting for that would report a ratio nothing on screen has.
+ */
+for (const scheme of ['light', 'dark']) {
+  const schemeCtx = await b.newContext({ viewport: { width: 844, height: 390 }, colorScheme: scheme });
+  const schemePage = await schemeCtx.newPage();
+  await schemePage.goto(PAGE);
+  await schemePage.waitForTimeout(500);
+  const contrast = await schemePage.evaluate(() => {
+    const parse = (c) => c.match(/[\d.]+/g).map(Number);
+    const lin = (v) => {
+      const x = v / 255;
+      return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+    };
+    const lum = (c) => {
+      const [r, g, b] = parse(c);
+      return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+    };
+    const over = (fg, bg, elOpacity) => {
+      const f = parse(fg);
+      const k = parse(bg);
+      const a = (f[3] ?? 1) * elOpacity;
+      return `rgb(${f[0] * a + k[0] * (1 - a)}, ${f[1] * a + k[1] * (1 - a)}, ${f[2] * a + k[2] * (1 - a)})`;
+    };
+    const ratio = (a, b) => {
+      const [hi, lo] = [lum(a), lum(b)].sort((m, n) => n - m);
+      return (hi + 0.05) / (lo + 0.05);
+    };
+
+    const el = document.getElementById('net-status');
+    const was = el.dataset.state;
+    const headerBg = getComputedStyle(document.querySelector('header')).backgroundColor;
+    const out = {};
+    // The filled states only. `offline` is deliberately dimmed to 0.55 and is
+    // the one state that says nothing is happening.
+    for (const st of ['solo', 'reconnecting', 'connected']) {
+      el.dataset.state = st;
+      const cs = getComputedStyle(el);
+      const op = parseFloat(cs.opacity);
+      const bg = cs.backgroundColor === 'rgba(0, 0, 0, 0)' ? headerBg : over(cs.backgroundColor, headerBg, op);
+      out[st] = Math.round(ratio(over(cs.color, bg, op), bg) * 100) / 100;
+    }
+    el.dataset.state = was;
+    return out;
+  });
+  const worst = Math.min(...Object.values(contrast));
+  check(
+    worst >= 4.5,
+    `the connection badge is readable in ${scheme} mode`,
+    Object.entries(contrast).map(([k, v]) => `${k} ${v}:1`).join(', '),
+  );
+  await schemeCtx.close();
+}
+
 await b.close();
 
 console.log(failures.length ? `\n${failures.length} FAILED: ${failures.join(', ')}` : '\nall checks passed');
