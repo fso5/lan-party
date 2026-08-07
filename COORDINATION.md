@@ -39,6 +39,34 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-06 — Session A: the friendly-fire fix, at the trigger rather than in the solver
+
+Follow-up to the entry below, which recorded this as measured-but-not-fixed
+after the obvious fix failed. It is fixed now, by asking the question at a
+different moment.
+
+The earlier attempt refused firing *angles* that pass through a teammate, in
+`traceShot`, next to the check that refuses angles which come back at the
+shooter. It cost 2.3x the AI's per-tick time and moved friendly-fire deaths
+from 14.8% to 15.0%.
+
+Measuring the killing shells said why: two thirds had never bounced, and the
+median was 29 ticks in the air. The aim is stale by the time the shell leaves.
+A bot solves, swings its turret onto the answer, fires, and keeps firing at
+that same answer for a whole reaction window -- so the teammate who was clear
+when the angle was chosen walks into it afterwards. Nothing the solver can see
+at solve time helps with that.
+
+One straight-line test per teammate, once per tick, at the trigger: 14.8% ->
+6.3% overall, Cork Yard 43% -> 12.5%. Cost inside run-to-run noise.
+
+**The campaign is harder now**, because the enemies had been doing some of the
+killing for the player. Stand-in win rates: Cork Yard 13% -> 0% Grey and 58%
+-> 42% Teal, Chasm 8% -> 4% and 29% -> 21%, Last Stand Teal 38% -> 13%. That
+is a bug being removed rather than a difficulty decision, and it does not fix
+the curve running backwards after mission three. If the missions want retuning
+now, `tools/campaign-curve.mjs` is the instrument.
+
 ### 2026-08-06 — Session A: the AI is nine times the sim's cost, and the enemies shoot each other
 
 Two findings from measuring the bots, one acted on and one deliberately not.
