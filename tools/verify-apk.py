@@ -2,6 +2,17 @@
 Check a *published* APK, independently of the build that made it.
 
     python3 tools/verify-apk.py tanks.apk [marker ...]
+    python3 tools/verify-apk.py tanks.apk --page packages/proto/dist/tanks-proto.html
+    python3 tools/verify-apk.py --selftest
+
+`--page` is the check worth running. Everything else here asks whether the APK
+contains *a* page; that asks whether it contains *this* one, against a local
+build of the commit you think shipped. The page build is reproducible -- two
+runs of the same commit are byte-identical -- so a difference means the
+artifact is stale, not that the build wandered.
+
+`--selftest` exercises the extractor without a 42MB download, which is the only
+reason it gets exercised at all.
 
 The Android workflow already checks the bundle it just built. This is for the
 other question: does the artifact people actually download carry what the source
@@ -67,24 +78,126 @@ JS_SYMBOLS = [
 ]
 
 
+def looks_like_the_page(text):
+    """Decoded bytes that could be the HTML page, rather than bundle spill."""
+    try:
+        s = text.decode('utf-8')
+    except UnicodeDecodeError:
+        return False
+    # Random bytes that happen to decode are still not a text document.
+    return not any(ord(c) < 32 and c not in '\t\n\r' for c in s)
+
+
 def embedded_page(bundle):
     """The served page, decoded, or None if it is not in there.
 
     Not a nicety: this is what every other phone in the room is handed. A build
     where it went missing or went stale would pass every other check here, and
     fail as a blank page on somebody else's handset.
+
+    ## Where the literal ends has to be worked out, not matched
+
+    Hermes stores strings in a table with no quotes around them, so there is no
+    delimiter to look for -- which is why this matches a run of base64
+    characters. That run does not stop where the string does: it keeps going
+    into whatever the bundle holds next, for as long as those bytes happen to
+    be base64 characters.
+
+    Caught by comparing a published APK against a local build of the same
+    commit: identical for all 200007 bytes, then six bytes of garbage this
+    function had invented (`~\\xe9\\xdc\\xb6*'`) from eight characters of
+    spill. Six bytes is harmless. Being wrong about where the page ends is not,
+    because the spill can also make the run undecodable, and this function then
+    returns None and the tool reports MISSING for a perfectly good APK -- a
+    false alarm from the one check that exists to catch a missing page.
+
+    So: take the longest prefix, on a base64 boundary, that decodes to
+    something that could be an HTML document. The page is UTF-8 text and the
+    spill is effectively random bytes, so the first prefix that survives both
+    tests is almost always the string as it was stored.
+
+    Almost. Returns (page, exact). When the literal carried padding the answer
+    is provable -- padding can only appear in the final group, so the string
+    ends there. Without padding it is not: spill that happens to decode to
+    ordinary text is indistinguishable from more page. `Zm9vYmFy` decodes to
+    `foobar`, which is valid UTF-8 with no control characters, and the
+    self-test caught it surviving within a minute of that self-test existing.
+
+    Trimming back to the document's last tag was tried and is worse. It fixes
+    the spill at the cost of silently truncating any page that does not end in
+    one, and a tool that under-reports the page is lying about content rather
+    than about a byte count. So the bias is deliberate: never lose page, and
+    say plainly when the tail is not provable. `--page` settles it exactly.
     """
     i = bundle.find(PAGE_PREFIX)
     if i < 0:
-        return None
+        return None, False
     run = re.match(rb'[A-Za-z0-9+/=]+', bundle[i:]).group(0)
-    try:
-        return base64.b64decode(run + b'=' * (-len(run) % 4))
-    except Exception:
-        return None
+
+    # Padding can only appear in the final group of a base64 literal, so when
+    # it is there it settles the question outright: the literal ends at the end
+    # of that group.
+    pad = run.find(b'=')
+    exact = pad >= 0
+    if exact:
+        run = run[:pad + (4 - pad % 4)]
+
+    for end in range(len(run) - len(run) % 4, 0, -4):
+        try:
+            out = base64.b64decode(run[:end])
+        except Exception:
+            continue
+        if looks_like_the_page(out):
+            return out, exact
+    return None, False
 
 
-def main(path, markers):
+def selftest():
+    """Prove the extractor never loses page, and is exact when it can be.
+
+    This tool exists to not lie about an APK, and it lied once -- see
+    embedded_page. A check that cannot be run without a 42MB download is a
+    check that stops being run, so the awkward part is exercised directly:
+    every page length modulo 3, which covers all three base64 padding cases,
+    each followed by bytes that keep the character run going.
+
+    Two different claims, because the extractor can only prove one of them:
+
+      - **never truncated.** Unconditional. Under-reporting the page is the
+        failure that matters, because it is a lie about content rather than
+        about a byte count, and it is what a cleverer end-of-string heuristic
+        cost when it was tried.
+      - **exact.** Only when the literal carried padding. Without it, spill
+        that decodes to ordinary text cannot be told from more page, and the
+        honest thing is to say so rather than to guess and be believed.
+    """
+    import os
+
+    bad = 0
+    for extra in range(3):
+        page = b'<!doctype html>\n<title>x</title>\n' + b'y' * (300 + extra)
+        literal = base64.b64encode(page)
+        for spill in [b'', b'AAAA', b'Zm9vYmFy', os.urandom(64), b'A' * 200]:
+            got, exact = embedded_page(literal + spill)
+            whole = got is not None and got.startswith(page)
+            claim = (got == page) if exact else whole
+            bad += not (whole and claim)
+            extraN = len(got) - len(page) if got else None
+            print(f"  {'ok     ' if whole and claim else 'WRONG  '}  len%3={len(page) % 3}  "
+                  f"spill={len(spill):<3}  {'exact' if exact else 'tail unprovable'}, "
+                  f"{'whole page kept' if whole else 'PAGE TRUNCATED'}, +{extraN} bytes")
+
+    # And the case that matters most: no page at all must read as no page,
+    # rather than as some other base64-looking run in the bundle.
+    got, _ = embedded_page(b'\x00\x01not a page here AAAABBBB')
+    print(f"  {'ok     ' if got is None else 'WRONG  '}  a bundle with no page reads as MISSING")
+    bad += got is not None
+
+    print('\nself-test FAILED' if bad else '\nself-test passed')
+    return 1 if bad else 0
+
+
+def main(path, markers, expect_page=None):
     apk = zipfile.ZipFile(path)
     names = apk.namelist()
     bundle = apk.read('assets/index.android.bundle')
@@ -112,12 +225,30 @@ def main(path, markers):
         note = '' if found == expect else ('  <- now present' if found else '  <- now absent')
         print(f"  {state}  utf8={u8:<3} utf16={u16:<3} {sym:<12} ({what}){note}")
 
-    page = embedded_page(bundle)
+    page, exact = embedded_page(bundle)
     print("\n-- the page the host serves to every other phone --")
     if page is None:
         print("  MISSING  no base64 page literal found in the bundle")
     else:
-        print(f"  ok       {len(page):,} bytes, starts {page[:15]!r}")
+        note = '' if exact else '  (+/- a few bytes of tail; see embedded_page)'
+        print(f"  ok       {len(page):,} bytes, starts {page[:15]!r}{note}")
+
+    # "A page is in there" is the weaker question. This is the real one: is it
+    # *this* page. Build one locally (node packages/proto/build.mjs) and pass
+    # it with --page, and a shipped APK that went stale says so instead of
+    # looking healthy. The build is reproducible -- two runs of the same commit
+    # are byte-identical -- so a mismatch means the artifact, not the build.
+    if expect_page is not None:
+        want = open(expect_page, 'rb').read()
+        if page == want:
+            print(f"  ok       and identical to {expect_page}")
+        elif page is None:
+            print(f"  STALE    nothing to compare against {expect_page}")
+        else:
+            n = min(len(page), len(want))
+            first = next((i for i in range(n) if page[i] != want[i]), n)
+            print(f"  STALE    differs from {expect_page}: shipped {len(page):,} bytes, "
+                  f"local {len(want):,}, first difference at byte {first:,}")
 
     if markers:
         print("\n-- markers (JS bundle, then dex, then the served page) --")
@@ -133,6 +264,20 @@ def main(path, markers):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
+    argv = sys.argv[1:]
+
+    if '--selftest' in argv:
+        print('-- extractor self-test --')
+        sys.exit(selftest())
+
+    expect = None
+    if '--page' in argv:
+        i = argv.index('--page')
+        if i + 1 >= len(argv):
+            sys.exit('--page needs a file')
+        expect = argv[i + 1]
+        argv = argv[:i] + argv[i + 2:]
+
+    if not argv:
         sys.exit(__doc__.strip())
-    main(sys.argv[1], sys.argv[2:])
+    main(argv[0], argv[1:], expect)
