@@ -260,6 +260,53 @@ function ownMineUnderfoot(w: WorldState, tank: Tank): { x: number; y: number } |
   return null;
 }
 
+/**
+ * How far ahead to look for a teammate before pulling the trigger. Measured:
+ * the median friendly kill happens 29 ticks after launch, and shells travel
+ * 10-16 tiles a second, so half a second of flight covers the bulk of them
+ * without refusing shots at a teammate on the far side of the arena.
+ */
+const FRIENDLY_CHECK_TILES = 8;
+
+/**
+ * Is one of our own directly in front of the gun, right now?
+ *
+ * This is deliberately checked at the moment of firing rather than while
+ * solving, and that distinction is the whole point. `traceShot` refuses angles
+ * that would hit the shooter, and extending it to teammates is the obvious
+ * move -- I built that and measured it: friendly-fire deaths went from 14.8% to
+ * 15.0% of enemy deaths while the AI's per-tick cost went up 2.3x, because the
+ * check sits inside 96 angles by ~104 segments.
+ *
+ * It failed because it asks at the wrong time. A bot solves, then swings its
+ * turret onto the solution, then fires, then keeps firing at that same solution
+ * until `reactionTicks` elapses. By the time a shell actually leaves, the
+ * teammate who was clear when the angle was chosen has walked into it. The
+ * measurement says so plainly: two thirds of friendly kills are by shells that
+ * never bounced, with a median of 29 ticks in the air.
+ *
+ * So: one straight-line test per teammate, once per tick, against where the gun
+ * is pointing at this instant. Line of sight is required, or a bot would refuse
+ * to fire at a teammate standing safely behind a wall.
+ */
+function mateInLineOfFire(w: WorldState, tank: Tank): boolean {
+  const nx = dcos(tank.turretAngle);
+  const ny = dsin(tank.turretAngle);
+  const reach = TANK_RADIUS + TANK_SPECS[tank.kind].shell.radius;
+
+  for (const t of w.tanks) {
+    if (!t.alive || t.id === tank.id || t.team !== tank.team) continue;
+    const dx = t.x - tank.x;
+    const dy = t.y - tank.y;
+    const along = dx * nx + dy * ny;
+    if (along <= 0 || along > FRIENDLY_CHECK_TILES) continue;
+    const perp = Math.abs(dx * -ny + dy * nx);
+    if (perp > reach) continue;
+    if (w.arena.hasShellLineOfSight(tank.x, tank.y, t.x, t.y)) return true;
+  }
+  return false;
+}
+
 /** Pick a reachable wander target near the tank. */
 function pickWanderTarget(w: WorldState, tank: Tank): { x: number; y: number } {
   for (let attempt = 0; attempt < 12; attempt++) {
@@ -308,9 +355,13 @@ export function stepAi(w: WorldState, tank: Tank): TankInput {
       input.aimX = dcos(ai.aimAngle);
       input.aimY = dsin(ai.aimAngle);
 
-      // Only shoot once the turret has actually swung onto the solution.
+      // Only shoot once the turret has actually swung onto the solution, and
+      // not through one of our own. Holding fire rather than re-solving on the
+      // spot: the periodic re-solve finds another angle soon enough, and
+      // re-solving every tick a teammate wanders past is the expensive thing
+      // the think-tick stagger exists to avoid.
       const off = Math.abs(wrapAngle(ai.aimAngle - tank.turretAngle));
-      if (off < 0.06) input.fire = true;
+      if (off < 0.06 && !mateInLineOfFire(w, tank)) input.fire = true;
     }
   }
 

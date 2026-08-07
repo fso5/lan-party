@@ -26,7 +26,7 @@ import { createWorld, step } from '../src/sim.js';
 import { loadArena, VERSUS_MAPS } from '../src/maps/index.js';
 import { dcos, dsin } from '../src/math.js';
 import { TankKind, emptyInput } from '../src/types.js';
-import { TANK_SPECS } from '../src/tuning.js';
+import { TANK_RADIUS, TANK_SPECS } from '../src/tuning.js';
 
 /** Two tanks on opposing teams, plus one bot that will do the shooting. */
 function botVsPlayer() {
@@ -492,5 +492,147 @@ test('bots of the same kind do not all think on the same tick', async () => {
   assert.ok(
     later.size > 1,
     'the bots fell back into a single phase once they started re-solving',
+  );
+});
+
+test('a bot holds fire when one of its own is in front of the gun', async () => {
+  /*
+   * Every campaign enemy is on team 1, friendly fire is on -- a shell kills
+   * whatever it sweeps into and never looks at teams -- and so the enemies
+   * used to shoot each other. Measured over 24 seeds per mission: 14.8% of all
+   * enemy deaths were by a teammate, and in Cork Yard it was 43%, on a mission
+   * where the player was only getting 27 of the 51 kills. Afterwards: 6.3%
+   * overall, 12.5% in Cork Yard.
+   *
+   * The check is at the trigger, not in the solver, and the difference is not
+   * stylistic. Refusing *angles* that pass through a teammate is the obvious
+   * design; I built it and it moved friendly-fire deaths from 14.8% to 15.0%
+   * while costing 2.3x the AI's per-tick time. It asks too early: a bot solves,
+   * swings its turret onto the answer, fires, and keeps firing at that same
+   * answer for a whole reaction window, by which time the teammate who was
+   * clear has walked into it. Two thirds of friendly kills were by shells that
+   * had never bounced, median 29 ticks in the air.
+   *
+   * Both directions are pinned. A bot that holds fire whenever it has a
+   * teammate anywhere is not fixed, it is mute.
+   */
+  const w = botVsPlayer();
+  const bot = w.tanks.find((t) => t.ai)!;
+  const mate = w.tanks.find((t) => t.team === bot.team && t.id !== bot.id)!;
+
+  /*
+   * A stretch of open floor, found rather than assumed.
+   *
+   * The first version of this placed the teammate along whatever angle the bot
+   * had solved for, at +3, -3 and +20 tiles, and asserted it fired in the last
+   * two. Both passed -- and mutation testing showed both passed for the wrong
+   * reason: from that spawn, -3 and +20 tiles land outside the arena, so the
+   * line-of-sight test failed and the teammate was invisible. Deleting the
+   * `along <= 0` guard and deleting the line-of-sight check were each caught by
+   * nothing. Two assertions that only ever exercised "the teammate is out of
+   * sight" three times over.
+   */
+  let px = -1;
+  let py = -1;
+  for (let y = 0; y < w.arena.height && px < 0; y++) {
+    for (let x = 0; x < w.arena.width && px < 0; x++) {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      if (!w.arena.canTankOccupy(cx, cy, TANK_RADIUS)) continue;
+      // Needs clear sight behind, just ahead, and well beyond the check range,
+      // so each arm below is decided by the rule and not by a wall.
+      if (!w.arena.hasShellLineOfSight(cx, cy, cx - 2, cy)) continue;
+      if (!w.arena.hasShellLineOfSight(cx, cy, cx + 2, cy)) continue;
+      if (!w.arena.hasShellLineOfSight(cx, cy, cx + 12, cy)) continue;
+      px = cx;
+      py = cy;
+    }
+  }
+  assert.ok(px > 0, 'no open east-west corridor on this map to run the test in');
+
+  // Pin the aim rather than letting it re-solve mid-test: what is under test is
+  // the trigger, and a fresh solution would move the line out from under it.
+  bot.x = px;
+  bot.y = py;
+  bot.turretAngle = 0;
+  bot.ai!.aimAngle = 0;
+  bot.ai!.aimValid = true;
+  bot.ai!.thinkTick = w.tick + 10_000;
+  assert.equal(stepAi(w, bot).fire, true, 'the bot would not fire even with the line clear');
+
+  const place = (dist: number) => {
+    mate.x = bot.x + dist;
+    mate.y = bot.y;
+    mate.alive = true;
+    assert.ok(
+      w.arena.hasShellLineOfSight(bot.x, bot.y, mate.x, mate.y),
+      `the teammate at ${dist} tiles is out of sight, so this arm tests nothing`,
+    );
+  };
+
+  place(2);
+  assert.equal(stepAi(w, bot).fire, false, 'fired straight through a teammate two tiles away');
+
+  // Behind the gun is not in the way, and a bot that treats it as if it were
+  // would fall silent any time a friend was nearby.
+  place(-2);
+  assert.equal(stepAi(w, bot).fire, true, 'held fire for a teammate standing behind it');
+
+  // Far enough ahead and it is not this shot's problem either.
+  place(12);
+  assert.equal(stepAi(w, bot).fire, true, 'held fire for a teammate right across the arena');
+
+  /*
+   * And a teammate on the far side of a wall is not in the way at all.
+   *
+   * This arm exists because deleting the line-of-sight test survived every
+   * other assertion here: all three placements above are in plain view, so a
+   * check that ignores walls agrees with one that respects them on every one
+   * of them. Without this, a bot could be silenced by a friend standing safely
+   * behind cover and no test would notice.
+   */
+  let wx = -1;
+  let wy = -1;
+  let mateAt = -1;
+  for (let y = 0; y < w.arena.height && wx < 0; y++) {
+    for (let x = 0; x < w.arena.width && wx < 0; x++) {
+      const cx = x + 0.5;
+      const cy = y + 0.5;
+      if (!w.arena.canTankOccupy(cx, cy, TANK_RADIUS)) continue;
+      let blockedAt = -1;
+      for (let d = 1; d <= 8; d += 0.5) {
+        if (!w.arena.hasShellLineOfSight(cx, cy, cx + d, cy)) { blockedAt = d; break; }
+      }
+      if (blockedAt < 0) continue;
+      // Somewhere past the wall, still inside the range the rule looks at, and
+      // open enough for a tank to be standing there.
+      for (let d = blockedAt + 0.5; d <= 8; d += 0.5) {
+        if (w.arena.canTankOccupy(cx + d, cy, TANK_RADIUS)) { mateAt = d; break; }
+      }
+      if (mateAt < 0) continue;
+      wx = cx;
+      wy = cy;
+    }
+  }
+  assert.ok(wx > 0, 'no spot on this map with a teammate reachable only through a wall');
+
+  bot.x = wx;
+  bot.y = wy;
+  bot.turretAngle = 0;
+  bot.ai!.aimAngle = 0;
+  bot.ai!.aimValid = true;
+  bot.ai!.thinkTick = w.tick + 10_000;
+  mate.x = wx + mateAt;
+  mate.y = wy;
+  mate.alive = true;
+  assert.equal(
+    w.arena.hasShellLineOfSight(bot.x, bot.y, mate.x, mate.y),
+    false,
+    'the wall this arm depends on is not actually between them',
+  );
+  assert.equal(
+    stepAi(w, bot).fire,
+    true,
+    `held fire for a teammate ${mateAt} tiles ahead on the far side of a wall`,
   );
 });
