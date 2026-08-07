@@ -234,6 +234,20 @@ export const VERSUS_MAPS: Mission[] = [
 
 const cache = new Map<string, Arena>();
 
+/**
+ * The parsed arena for a map, memoised by name.
+ *
+ * Shared and mutable: every caller gets the *same* object. That is fine for the
+ * simulation, because `createWorld` clones it before a match can destroy
+ * anything -- and only because of that. Anything else that writes to what this
+ * returns corrupts the map for the rest of the process.
+ *
+ * Not hypothetical. A probe that substituted enemy kinds in place to compare
+ * campaign lineups poisoned the cache on its first candidate, and every later
+ * measurement -- including missions it never touched -- silently read the
+ * mutated roster. The numbers looked plausible; three different substitutions
+ * scoring identically is what gave it away.
+ */
 export function loadArena(m: Mission): Arena {
   const hit = cache.get(m.name);
   if (hit) return hit;

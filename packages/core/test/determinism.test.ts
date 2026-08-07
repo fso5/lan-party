@@ -586,3 +586,54 @@ test('a cloned world keeps the RNG stream, so replay stays in lockstep', () => {
   );
   assert.deepEqual(copy.rng.save(), world.rng.save(), 'RNG streams must stay in lockstep');
 });
+
+test('a match cannot leave rubble behind for the next one', () => {
+  /*
+   * `loadArena` memoises by map name and hands the *same* Arena object to every
+   * caller. A match destroys terrain. The only thing between those two facts is
+   * one line in `createWorld` -- `cfg.arena.clone()` -- and nothing pinned it.
+   *
+   * Lose that clone and the damage is cumulative and invisible: every match on
+   * a map starts from the wreckage of the last one, walls people were using for
+   * cover are simply gone, and a phone that has hosted all evening is playing a
+   * different map from one that just launched. Nothing would throw.
+   *
+   * Found by writing a probe that mutated `loadArena`'s result and watching
+   * missions it never touched change their results -- the cache is shared, and
+   * only the clone keeps the simulation out of it.
+   */
+  const cached = loadArena(MISSIONS[1]);
+  const blocks = (a: Arena) => {
+    let n = 0;
+    for (let y = 0; y < a.height; y++) for (let x = 0; x < a.width; x++) if (a.at(x, y) === Tile.Block) n++;
+    return n;
+  };
+
+  const before = blocks(cached);
+  assert.ok(before > 0, 'Cork Yard should have destructible blocks, or this test proves nothing');
+
+  const w = createWorld({
+    arena: loadArena(MISSIONS[1]),
+    seed: 5,
+    players: [],
+    // One bot, because a mission map has a single player spawn: a second one
+    // falls back to the same square and the pair kill each other on the opening
+    // tick, which is how the first version of this destroyed nothing at all.
+    // The mission's own scripted enemies are the opposition.
+    bots: [{ kind: TankKind.Black, team: 0, spawnIndex: 0 }],
+  });
+  for (let t = 0; t < 60 * 120; t++) step(w, new Map());
+
+  // The anti-vacuity half, and the one that matters: if the match destroyed
+  // nothing, the assertion below would hold for a build with the clone removed.
+  assert.ok(
+    blocks(w.arena) < before,
+    `the match destroyed nothing (${before} blocks throughout), so this cannot detect a shared arena`,
+  );
+  assert.equal(
+    blocks(cached),
+    before,
+    'the match chewed through the arena that loadArena hands to the next match',
+  );
+  assert.notEqual(w.arena, cached, 'createWorld handed the world the cached arena itself');
+});
