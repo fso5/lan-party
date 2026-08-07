@@ -22,31 +22,49 @@ export interface Mission {
 }
 
 /**
- * The single-player campaign, in narrative order.
+ * The single-player campaign, in escalating difficulty order.
  *
- * It used to say "in escalating difficulty order", and that is not true.
- * Measured with tools/campaign-curve.mjs, 24 seeds a mission, as the win rate
- * of a bot stand-in in the player's seat:
+ * That claim was false for a long time and is now measured. Win rate of a bot
+ * stand-in in the player's seat, from tools/campaign-curve.mjs, 96 seeds a
+ * mission -- lower is harder:
  *
  *              First Contact  Cork Yard  The Gallery  Chasm  Last Stand
- *     Grey               67%         0%           8%     4%          4%
- *     Teal               96%        42%           0%    21%         13%
+ *     Grey               82%        23%          14%     8%          7%
+ *     Teal               99%        60%          50%    26%         21%
  *
- * Difficulty climbs steeply out of mission one and then wanders. Both
- * stand-ins find the finale easier than the middle of the campaign.
+ * Both stand-ins descend at every step. Two are used rather than one because
+ * neither is a player and each has its own quirks, so a conclusion is only
+ * worth drawing where both agree.
  *
- * The obvious repair -- reorder until it climbs -- does not work, and it is
- * worth writing down why rather than rediscovering it. The two stand-ins do
- * not agree on the ranking: Grey finds Cork Yard hardest, Teal finds The
- * Gallery hardest, so no single order is monotonic for both. And ordering by
- * their average puts The Gallery last, which makes a mission called Last Stand
- * the fourth of five.
+ * ## What it took, because the obvious repairs all fail
  *
- * So the honest fix is retuning lineups -- The Gallery fields two Teals, the
- * strongest pair in the game, and Last Stand pads Black with a Green that
- * cannot move -- and that is a design decision rather than a measurement. The
- * numbers are here so it can start from them. What is not left standing is a
- * comment claiming an order the missions do not have.
+ * As authored the curve read Grey [82 4 2 8 7], Teal [99 42 2 26 21]: steep out
+ * of mission one, then wandering, with the finale easier than the middle.
+ *
+ * Reordering cannot fix that. The stand-ins disagree on which mission is
+ * hardest, so no single order is monotone for both, and ordering by their
+ * average puts The Gallery last -- making a mission called Last Stand the
+ * fourth of five.
+ *
+ * Nor can hardening the finale, which is where the eye goes first. Six such
+ * substitutions were measured and not one climbed, for a reason the baseline
+ * gives away: both stand-ins were already at the floor by mission three, so
+ * monotonicity would have required missions three, four and five to sit at 0%
+ * for both -- a curve that climbs only by being unwinnable. Every candidate
+ * that hardens the back half is pushing against that floor.
+ *
+ * The direction that works is the opposite one: soften the middle so there is
+ * headroom above the finale. Two tanks change. Cork Yard drops one of its two
+ * Greys for a Brown, and The Gallery drops both Teals -- the strongest pair in
+ * the game, see tools/tank-balance.mjs -- for Greys. The geometry of every
+ * arena is untouched.
+ *
+ * ## Before re-running this
+ *
+ * 24 seeds, which the tool defaults to, is too few to rank neighbouring
+ * missions: Grey reads 67% on First Contact over 24 seeds and 82% over 96, and
+ * the screening run that proposed this retune separated two missions by four
+ * wins against three. Screen at 24, decide at 96.
  */
 export const MISSIONS: Mission[] = [
   {
@@ -77,7 +95,7 @@ export const MISSIONS: Mission[] = [
       '#......................#',
       '#...%%%%........%%%%...#',
       '#...%..............%...#',
-      '#.1.%......gg......%...#',
+      '#.1.%......bg......%...#',
       '#...%..............%...#',
       '#...%%%%........%%%%...#',
       '#......................#',
@@ -103,7 +121,7 @@ export const MISSIONS: Mission[] = [
       '#..........#...........#',
       '#....%%%...#...%%%.....#',
       '#..........#...........#',
-      '#....t.....#......t....#',
+      '#....g.....#......g....#',
       '#..........#...........#',
       '#..........#...........#',
       '########################',

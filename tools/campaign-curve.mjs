@@ -3,9 +3,11 @@
  *
  *     node tools/campaign-curve.mjs
  *
- * Missions are ordered as a curve and nothing had ever checked one. It does not
- * hold: difficulty climbs steeply out of mission one and then wanders, and the
- * finale is an easier fight than the middle of the campaign.
+ * Missions are ordered as a curve and nothing had ever checked one. It did not
+ * hold -- difficulty climbed steeply out of mission one and then wandered, with
+ * the finale an easier fight than the middle -- and the lineups were retuned
+ * until it did. It holds now, for both stand-ins. This tool is what says so, so
+ * run it after touching a mission roster.
  *
  * ## Read this before trusting any stand-in
  *
@@ -22,35 +24,47 @@
  * they are not players and each has its own quirks, so a conclusion is only
  * worth drawing where both agree.
  *
- * ## What they say
+ * ## What they say, at 96 seeds
  *
  *   mission          Grey   Teal      lineup
- *   First Contact     67%    96%      Brown + Brown + Brown
- *   Cork Yard          0%    42%      Brown + Grey + Grey
- *   The Gallery        8%     0%      Green + Teal + Teal
- *   Chasm              4%    21%      Green + Grey + Yellow
- *   Last Stand         4%    13%      Black + Green + Grey
+ *   First Contact     82%    99%      Brown + Brown + Brown
+ *   Cork Yard         23%    60%      Brown + Brown + Grey
+ *   The Gallery       14%    50%      Green + Grey + Grey
+ *   Chasm              8%    26%      Green + Grey + Yellow
+ *   Last Stand         7%    21%      Black + Green + Grey
  *
- * Both put the finale easier than the middle. The lineups explain why: The
- * Gallery fields two Teals, and Teal measures as the strongest tank bar Black
- * (see tools/tank-balance.mjs), while Last Stand pairs one Black with Green --
- * which cannot move and loses most of its duels.
+ * ## Seeds: 24 screens, 96 decides
  *
- * ## Where they disagree, and why that rules out the obvious repair
+ *     node tools/campaign-curve.mjs 24     # faster, for a quick look
  *
- * They no longer agree on which mission is hardest: Grey says Cork Yard, Teal
- * says The Gallery. That is not noise to be averaged away, it is the reason
- * reordering the missions cannot fix this -- no single order climbs for both
- * stand-ins at once. And ordering by their average puts The Gallery last,
- * which would make a mission called Last Stand the fourth of five.
+ * This used to default to 24, which is enough to see the shape and too few to
+ * rank neighbouring missions. Grey reads 67% on First Contact over 24 seeds and
+ * 82% over 96; the retune that produced the table above was proposed by a
+ * 24-seed run that separated two missions by four wins against three, and only
+ * became a result when 96 put real daylight between them. So the default is now
+ * the number that decides, and the cheap run is the one you ask for. Do not
+ * conclude anything from a gap of a few points at 24.
  *
- * (These numbers moved once already: before the enemies stopped shooting each
- * other, Cork Yard read 13%/46% because the player was being handed 43% of
- * that mission's kills by the enemy team. Any retune should start from a run
- * of this tool rather than from the table above.)
+ * ## How the ordering was reached, so it is not re-derived the hard way
  *
- * Not fixed here. Which enemies stand in which mission is content, and the
- * numbers are the input to that decision rather than the decision.
+ * Reordering the missions cannot produce a climbing curve: the stand-ins do not
+ * agree on which is hardest, so no single order is monotone for both, and
+ * ordering by their average puts The Gallery last -- making a mission called
+ * Last Stand the fourth of five.
+ *
+ * Hardening the finale cannot either, though that is where the eye goes. As
+ * authored both stand-ins were already at the floor by mission three (Grey
+ * [82 4 2 8 7], Teal [99 42 2 26 21]), so a monotone curve would have needed
+ * missions three through five at 0% for both -- unwinnable rather than hard.
+ * Six such substitutions were measured and none climbed. What worked was
+ * softening the middle instead: one of Cork Yard's Greys became a Brown and The
+ * Gallery's two Teals became Greys, which is where the headroom came from.
+ *
+ * (These numbers moved once for a reason that had nothing to do with lineups:
+ * before the enemies stopped shooting each other, Cork Yard read 13%/46%
+ * because the player was being handed 43% of that mission's kills by the enemy
+ * team. Start any retune from a run of this tool, not from a table in a
+ * comment.)
  */
 import {
   createWorld,
@@ -76,7 +90,12 @@ const YARDSTICKS = [
   ['Grey', TankKind.Grey],
   ['Teal', TankKind.Teal],
 ];
-const SEEDS = 24;
+// 96 by default: see "Seeds" above. An argument overrides it for a quick look.
+const SEEDS = Number(process.argv[2] ?? 96);
+if (!Number.isInteger(SEEDS) || SEEDS < 1) {
+  console.error(`usage: node tools/campaign-curve.mjs [seeds]   (got "${process.argv[2]}")`);
+  process.exit(2);
+}
 const CAP = TICK_HZ * 150;
 const KIND_NAMES = { 1: 'Brown', 2: 'Grey', 3: 'Teal', 4: 'Yellow', 5: 'Green', 6: 'Black' };
 

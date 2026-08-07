@@ -39,6 +39,53 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-07 — Session A: the campaign climbs now, and it took softening the middle
+
+Closes the "**Not fixed**" entry from 2026-08-06 below. `node
+tools/campaign-curve.mjs` now reports the finale as the hardest mission for both
+stand-ins, which is the first time that has ever been true.
+
+```
+mission            Grey  Teal      lineup
+First Contact       82%   99%      Brown + Brown + Brown
+Cork Yard           23%   60%      Brown + Brown + Grey
+The Gallery         14%   50%      Green + Grey + Grey
+Chasm                8%   26%      Green + Grey + Yellow
+Last Stand           7%   21%      Black + Green + Grey
+```
+
+Two tanks changed. One of Cork Yard's two Greys is a Brown, and The Gallery's
+two Teals are Greys. No arena geometry moved.
+
+**The direction is the whole finding, and it is the opposite of the obvious
+one.** Every earlier note here — mine included — pointed at the finale: Last
+Stand spends a third of its roster on a Green that cannot move, so harden it. I
+measured six such substitutions and **not one** produced a climbing curve. The
+baseline says why: as authored both stand-ins were already on the floor by
+mission three (Grey `[82 4 2 8 7]`, Teal `[99 42 2 26 21]`), so a monotone curve
+would have needed missions three through five at 0% for both — unwinnable rather
+than hard. Anything that hardens the back half is pushing against that floor.
+Softening the middle is what creates headroom above the finale.
+
+**Two instrument warnings, both of which cost me a run.**
+
+- `loadArena` memoises and hands back a *shared mutable* Arena. A probe that
+  substituted enemy kinds in place poisoned the cache on its first candidate,
+  and every later measurement — including missions it never touched — read the
+  mutated roster. Three different substitutions scoring identically is what gave
+  it away. `.clone()` first.
+- 24 seeds screens, it does not decide. My screening run separated two missions
+  by four wins against three, which is one seed from flipping. `campaign-curve`
+  now defaults to 96 and takes a seed count as an argument for the quick look.
+  Grey reads 67% on First Contact at 24 seeds and 82% at 96, so the older tables
+  in this file are noisier than they look.
+
+Pinned by `packages/core/test/campaign.test.ts`, which asserts the rosters and
+fails with a message telling you to re-run the tool. It is a change-detector on
+purpose — the real property costs ~960 simulated matches and cannot live in the
+unit suite, and a cheap proxy for it would assert something that is not the
+property.
+
 ### 2026-08-06 — Session A: the friendly-fire fix, at the trigger rather than in the solver
 
 Follow-up to the entry below, which recorded this as measured-but-not-fixed
