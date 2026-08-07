@@ -25,8 +25,8 @@
  * outside this file. server.mjs fills a versus match with bots, and the whole
  * campaign is bots.
  *
- *     8 players    p99  128us   0.77%
- *     8 bots       p99  616us   3.69%
+ *     8 players    p99  ~130us   0.85%
+ *     8 bots       p99  ~700us   4.34%
  *
  * Several times the cost, from a row that did not exist. Read the bot rows,
  * not the player ones, when asking whether a phone can hold 60Hz.

@@ -82,12 +82,23 @@ function stats(xs) {
     n: s.length,
     mean: s.reduce((a, b) => a + b, 0) / s.length,
     p50: s[Math.floor(s.length * 0.5)],
+    p95: s[Math.floor(s.length * 0.95)],
     p99: s[Math.floor(s.length * 0.99)],
     worst: s[s.length - 1],
   };
 }
 
-async function run(b, label, { dpr, seconds = 6, maps = 0 }) {
+/*
+ * Ten seconds, and p95 next to p99.
+ *
+ * Six seconds is about 360 frames, which makes p99 the fourth-worst of them --
+ * an extreme value rather than a percentile, and one stall owns it. A run of
+ * the campaign row came back at 22.50ms p99 with a 49.7ms worst frame, against
+ * 2.20ms the run before, from a single hiccup in a container with no GPU. Read
+ * p95 when the two disagree by more than a little; that is the page, and the
+ * gap between them is the machine.
+ */
+async function run(b, label, { dpr, seconds = 10, maps = 0 }) {
   const ctx = await b.newContext({
     viewport: { width: 844, height: 390 },
     deviceScaleFactor: dpr,
@@ -125,8 +136,9 @@ async function run(b, label, { dpr, seconds = 6, maps = 0 }) {
   console.log(
     `${label.padEnd(30)} ${String(got.tanks).padStart(2)} tanks  ` +
       `${String(got.backing).padStart(4)}px backing (${got.css} css)  ` +
-      `mean ${f.mean.toFixed(2)}ms  p50 ${f.p50.toFixed(2)}ms  p99 ${f.p99.toFixed(2)}ms  ` +
-      `worst ${f.worst.toFixed(1)}ms  = ${((f.p99 / BUDGET_MS) * 100).toFixed(1)}% of a frame at p99` +
+      `n ${String(f.n).padStart(3)}  mean ${f.mean.toFixed(2)}ms  p50 ${f.p50.toFixed(2)}ms  ` +
+      `p95 ${f.p95.toFixed(2)}ms  p99 ${f.p99.toFixed(2)}ms  worst ${f.worst.toFixed(1)}ms  ` +
+      `= ${((f.p95 / BUDGET_MS) * 100).toFixed(1)}% of a frame at p95` +
       (t ? `   [sim ${t.p50.toFixed(2)}ms p50]` : ''),
   );
   return { ...f, tanks: got.tanks, backing: got.backing, map: got.map };

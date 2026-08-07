@@ -216,8 +216,8 @@ they exist so a decision can start from a measurement.
 
 | | asks | currently says |
 |---|---|---|
-| `sim-bench.mjs` | can a phone hold 60Hz? | 8 players 0.8% of a frame, 8 **bots** 3.7% |
-| `render-bench.mjs` | and can the browser draw it? | 1.1ms a frame at 1x, 1.9ms at 2x |
+| `sim-bench.mjs` | can a phone hold 60Hz? | 8 players ~1% of a frame, 8 **bots** ~4% |
+| `render-bench.mjs` | and can the browser draw it? | ~0.9ms a frame at 1x, ~2.2ms at 2x (p50) |
 | `net-budget.mjs` | can the radio carry a match? | yes at every roster size — connection count caps the roster, not bandwidth |
 | `tank-balance.mjs` | is the enemy roster honest? | ranks cleanly; Teal beats Yellow, which the descriptions have backwards |
 | `campaign-curve.mjs` | does the campaign get harder? | no — it climbs out of mission one and then wanders |
@@ -236,7 +236,11 @@ now refuses to run against a stale build rather than printing numbers over a
 warning nobody reads.
 
 **This box is not a phone.** Read ratios and scaling, not absolute
-milliseconds. The container has no GPU, so `render-bench` draws in software —
+milliseconds — and the figures above are approximate on purpose. Successive
+runs of `sim-bench` on an unchanged tree have put eight bots at 3.7% and 4.3%
+of a frame; `render-bench` swung further still until it was made to sample ten
+seconds and report p95 beside p99, because at 360 frames p99 is the
+fourth-worst one and a single stall owns it. The container has no GPU, so `render-bench` draws in software —
 pessimistic rather than optimistic, which is the safer direction for a frame
 budget to be wrong in.
 
