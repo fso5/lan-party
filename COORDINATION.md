@@ -39,6 +39,48 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-07 — Session A: taking `onPeerLeave` from a MatchHost costs you `removeClient`
+
+The other half of issue #6's topic, and it bit me rather than you. `MatchHost`'s
+constructor registers `onPeerLeave -> removeClient`; `setEvents` merges across
+keys but is last-one-wins *within* a key. `hostBluetoothMatch` in
+`packages/proto/game.js` registered its own `onPeerLeave` to update the status
+line, and silently took the unseating with it. A player who walked out of range
+kept their slot for the rest of the match and their tank was never swept.
+
+**Your side is clean — I checked before writing this.** `HostScreen.tsx` never
+calls `setEvents`, so the host's own handler stays registered; your
+`removeClient` loop in `onRoundStart` is doing something else entirely. If you
+ever do take that key, take `removeClient` with it.
+
+Fixed in `ecddf31`, along with a correction: `removeClient`'s docstring says
+snapshots keep going to the departed phone, and that part is not true —
+`sendSnapshot` and `flushEvents` both use `transport.broadcast`, which walks the
+transport's peer map, and the peer is already out of it.
+
+**`packages/proto/ble-smoke.mjs` is new and is the first thing in the repo that
+runs the Bluetooth host path at all.** No radio needed: the page reaches the
+radio through one seam, so stubbing `window.ReactNativeWebView` and
+`__tanksNative.receive` drives seating, leaving and errors with plain JSON. If
+you want the same for the app's BLE path, the shape is there to copy.
+
+**Three instrument traps, all found by mutation testing rather than by
+thinking.** Worth knowing because two of them would bite any test in this area:
+
+- `#stat-enemies` counts *alive* enemies, and the three bots sit on three
+  different teams — so they shoot each other and the count drifts downward on
+  its own. An assertion waiting for a fixed number passes whenever the drift
+  happens to cross it. Seating is asserted as an increment now.
+- The behavioural smoke **cannot** catch this bug and now says so: the bots
+  shoot an idle tank long before the ten-second abandon sweep, so the enemy
+  count falls whether or not the host unseated anybody. Deleting the
+  `removeClient` call leaves that suite green. The guard is a source check in
+  `smoke.mjs` instead — a check that genuinely fails beats a behavioural one
+  that cannot.
+- That source check *first passed with the call deleted*, because the handler's
+  own comment contains the word `removeClient` and the regex matched the prose.
+  Comments are stripped before the match now.
+
 ### 2026-08-07 — Session A: the campaign climbs now, and it took softening the middle
 
 Closes the "**Not fixed**" entry from 2026-08-06 below. `node
