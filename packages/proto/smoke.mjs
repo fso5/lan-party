@@ -17,7 +17,7 @@
  */
 
 import { chromium } from 'playwright';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 
 /** The container ships a Chromium that may not match the pinned build id. */
 function findChrome() {
@@ -1246,6 +1246,49 @@ for (const scheme of ['light', 'dark']) {
 }
 
 await b.close();
+
+/*
+ * ble-wiring: taking `onPeerLeave` means taking it from MatchHost.
+ *
+ * `MatchHost`'s constructor registers `onPeerLeave -> removeClient`, and
+ * `setEvents` is documented as last-one-wins per key. So a page that registers
+ * its own `onPeerLeave` alongside a host silently removes the unseating: the
+ * departed peer keeps its slot, `stepOnce` goes on feeding its tank empty
+ * input, and the abandoned sweep never destroys it. That shipped in the
+ * Bluetooth host path.
+ *
+ * Read rather than executed, and not for want of trying. ble-smoke.mjs drives
+ * the whole path with a stubbed radio, and *still* cannot see this: the bots
+ * shoot an idle tank long before the ten-second sweep would, so the enemy count
+ * falls whether or not the host unseated anybody. Deleting the `removeClient`
+ * call leaves that suite green -- mutation-tested, not assumed. A source check
+ * that genuinely fails is worth more than a behavioural one that cannot.
+ */
+{
+  // Each `setEvents({...})` call, roughly: from the call to the line that
+  // closes it at the same indentation. Good enough to tell the three apart.
+  //
+  // Comments stripped first, and that is not tidiness. The handler in game.js
+  // carries a comment explaining why it calls `removeClient`, so the first
+  // version of this check matched the *prose* and passed with the call deleted
+  // -- it survived the mutation that motivated the whole check.
+  const src = readFileSync(new URL('./game.js', import.meta.url), 'utf8').replace(/\/\/.*$/gm, '');
+  const blocks = src.split('setEvents({').slice(1).map((s) => s.slice(0, s.indexOf('\n  });')));
+  // Host-side means "dispatches into a MatchHost". The client blocks register
+  // an `onPeerLeave` too and are right not to call `removeClient` -- they have
+  // no host to unseat anyone from -- so a looser test (anything with an
+  // `onPeerJoin`, say) fails on them and says nothing true.
+  const hostBlocks = blocks.filter((s) => /\.host\.handlePacket/.test(s));
+  check(hostBlocks.length === 1, 'ble-wiring: found the host-side setEvents block to check',
+    `matched ${hostBlocks.length} blocks of ${blocks.length} -- if a second host path was added, it needs this check too`);
+  for (const block of hostBlocks) {
+    check(
+      !/onPeerLeave/.test(block) || /removeClient/.test(block),
+      'ble-wiring: a host-side onPeerLeave calls removeClient',
+      'taking that key takes it from MatchHost, which then never unseats a departed peer',
+    );
+  }
+}
 
 console.log(failures.length ? `\n${failures.length} FAILED: ${failures.join(', ')}` : '\nall checks passed');
 if (failures.length) process.exit(1);

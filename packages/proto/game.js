@@ -961,10 +961,14 @@ function hostBluetoothMatch() {
 
   const players = [{ team: 0, spawnIndex: 0 }];
   const bots = [];
-  const kinds = [TankKind.Grey, TankKind.Teal, TankKind.Green];
-  // Same cap as couch play, and unlike couch play no smoke reaches this line:
-  // it needs a radio, so it is checked by reading it. Verified by mutation --
-  // removing the cap here is not caught by any of the four browser suites.
+  // No immobile kind, for the same measured reason as server.mjs: Green and
+  // Brown have moveSpeed 0, and over 96 seeds on each versus map they won 0-2%
+  // of rounds and lived 2.8-2.9 seconds. A turret in a free-for-all is a free
+  // kill for three shooters.
+  const kinds = [TankKind.Grey, TankKind.Teal, TankKind.Yellow];
+  // Same cap as couch play. This used to say no smoke reaches the line, which
+  // was true and is the reason a real bug lived a few lines below it -- see
+  // ble-smoke.mjs, which drives this whole path with a stubbed radio.
   for (let sIdx = 1; sIdx < Math.min(DEFAULT_MATCH_SIZE, arena.spawns.length); sIdx++) {
     bots.push({ kind: kinds[(sIdx - 1) % kinds.length], team: 90 + sIdx, spawnIndex: sIdx });
   }
@@ -982,7 +986,23 @@ function hostBluetoothMatch() {
 
   transport.setEvents({
     onPeerJoin: (peer) => seatBluetoothClient(peer),
-    onPeerLeave: () => setNetStatus('hosting'),
+    // `removeClient` explicitly, because taking this key takes it from
+    // `MatchHost`. Its constructor registers its own `onPeerLeave` and
+    // `setEvents` is last-one-wins per key, so this used to be a bare
+    // `setNetStatus` and the host never unseated anybody: the departed peer
+    // kept its slot, `stepOnce` went on feeding its tank empty input every
+    // tick, and -- the part a player sees -- the tank was never marked
+    // abandoned, so the sweep never destroyed it and it stood in the arena for
+    // the rest of the match, keeping its team alive in the round-end test.
+    //
+    // Snapshots are not part of the damage, whatever `removeClient`'s own
+    // docstring says: `sendSnapshot` and `flushEvents` both go out through
+    // `transport.broadcast`, which walks the transport's peer map, and the
+    // departed peer is already gone from that.
+    onPeerLeave: (peerId) => {
+      ble.host?.removeClient(peerId);
+      setNetStatus('hosting');
+    },
     onPacket: (from, data) => ble.host.handlePacket(from, data),
     onError: (err) => showRadioError(err.message),
   });
