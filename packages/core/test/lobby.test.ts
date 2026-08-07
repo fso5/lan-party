@@ -27,7 +27,9 @@ import {
   readRoster,
   readRoundOver,
   writeLobbyJoin,
+  writeLobbySetReady,
   writeLobbySetTeam,
+  writeLobbyWelcome,
   writeRoster,
   writeRoundOver,
   type WireRoster,
@@ -518,4 +520,75 @@ test('a hosted round that nobody can win still ends', async () => {
     `the round never ended, ${limitSeconds}s of game time in`,
   );
   assert.equal(host.match.lastRoundWinner, DRAW, 'nobody could have won it');
+});
+
+test('every client-to-host lobby message is exactly the bytes the other side reads', async () => {
+  /*
+   * These four have no reader in core. `readRoster` exists because the host
+   * broadcasts a roster and everyone parses it here, but Join, SetTeam,
+   * SetReady and Welcome are parsed by `handleLobbyPacket` in the app's
+   * LobbySession -- the other side of the lane split -- and by game.js in the
+   * browser. So the bytes are the entire contract between the two, and a
+   * round-trip test cannot be written for them: there is nothing on this side
+   * to round-trip against.
+   *
+   * Which is how two of them ended up with no test at all. Sweeping core for
+   * exported names that appear nowhere in this suite turned up
+   * `writeLobbySetReady` and `writeLobbyWelcome`, both on the path between
+   * "everyone is in the lobby" and "the match starts", and both used for real
+   * -- the browser sends SetReady when you tap ready, and Welcome is the only
+   * message that tells a client which row of the roster is theirs.
+   *
+   * So this pins the layout instead. It is a change-detector by design: if a
+   * byte here moves, the reader across the split has to move with it, and this
+   * test failing is the notice.
+   */
+  const { MAX_LOBBY_SLOTS } = await import('../src/net/protocol.js');
+  const bytes = (build: (w: InstanceType<typeof Writer>) => void, cap = 64) => {
+    const w = new Writer(cap);
+    build(w);
+    return [...w.finish()];
+  };
+
+  assert.deepEqual(
+    bytes((w) => writeLobbySetReady(w, true)),
+    [MsgType.Lobby, LobbyOp.SetReady, 1],
+    'ready',
+  );
+  assert.deepEqual(
+    bytes((w) => writeLobbySetReady(w, false)),
+    [MsgType.Lobby, LobbyOp.SetReady, 0],
+    'not ready -- the flag has to be a byte, not merely something truthy',
+  );
+
+  assert.deepEqual(
+    bytes((w) => writeLobbyWelcome(w, 0)),
+    [MsgType.Lobby, LobbyOp.Welcome, 0],
+    'welcome for the host seat',
+  );
+  // Every seat the lobby can hand out has to survive the trip, including the
+  // last one -- a client told the wrong slotId drives somebody else's tank.
+  for (let slot = 0; slot < MAX_LOBBY_SLOTS; slot++) {
+    assert.deepEqual(
+      bytes((w) => writeLobbyWelcome(w, slot)),
+      [MsgType.Lobby, LobbyOp.Welcome, slot],
+      `welcome for slot ${slot}`,
+    );
+  }
+
+  assert.deepEqual(
+    bytes((w) => writeLobbySetTeam(w, 7)),
+    [MsgType.Lobby, LobbyOp.SetTeam, 7],
+    'team change',
+  );
+
+  // Join carries a name, so only its head is fixed; the length-prefixed string
+  // after it is already covered by the Writer's own tests.
+  const join = bytes((w) => writeLobbyJoin(w, 'Forrest'));
+  assert.deepEqual(join.slice(0, 2), [MsgType.Lobby, LobbyOp.Join], 'join header');
+
+  // The four opcodes must stay distinct, or the reader dispatches on the wrong
+  // one and the failure looks like a lobby that ignores you.
+  const ops = [LobbyOp.Join, LobbyOp.SetTeam, LobbyOp.SetReady, LobbyOp.Welcome, LobbyOp.Roster];
+  assert.equal(new Set(ops).size, ops.length, 'two lobby opcodes share a value');
 });

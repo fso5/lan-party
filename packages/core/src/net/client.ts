@@ -24,7 +24,7 @@
  */
 
 import { cloneWorld, step, type WorldState } from '../sim.js';
-import { dcos, dsin, wrapAngle } from '../math.js';
+import { dcos, dsin } from '../math.js';
 import { MINE_ARM_TICKS, MINE_FUSE_TICKS, TICK_HZ } from '../tuning.js';
 import { emptyInput, type Mine, type Shell, type TankInput } from '../types.js';
 import {
@@ -622,9 +622,4 @@ export class MatchClient {
   get frameAlpha(): number {
     return this.tickAccumulatorMs / (1000 / TICK_HZ);
   }
-}
-
-/** Exposed for the debug HUD. */
-export function angleLerp(a: number, b: number, t: number): number {
-  return wrapAngle(a + wrapAngle(b - a) * t);
 }
