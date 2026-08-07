@@ -196,6 +196,13 @@
   .title span { color: var(--aim); }
 
   .mapbar { display: flex; align-items: center; gap: 0.4rem; }
+
+  /* A client in somebody else's match: see updateRoundsHud. These three only
+     drive the local world, which the next frame overwrites from the host, and
+     the room they free is what the scoreboard needs. */
+  body[data-in-match='true'] .mapbar,
+  body[data-in-match='true'] #btn-restart,
+  body[data-in-match='true'] #btn-2p { display: none; }
   #map-name {
     font-size: 0.82rem;
     font-weight: 550;

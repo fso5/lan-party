@@ -311,7 +311,12 @@ check(closest >= 25, 'no two seats wear colours that could be confused',
 const board8 = await phone.evaluate(() => {
   const rounds = document.getElementById('rounds');
   const wasHidden = rounds.hidden;
+  const wasInMatch = document.body.dataset.inMatch;
   rounds.hidden = false;
+  // A scoreboard only exists for a client in somebody's match, and that state
+  // also hides the map switcher, Restart and 2P -- so showing the chips
+  // without it measures a layout no player is ever in.
+  document.body.dataset.inMatch = 'true';
   const board = document.getElementById('scoreboard');
   const before = board.innerHTML;
   board.innerHTML = '';
@@ -333,14 +338,45 @@ const board8 = await phone.evaluate(() => {
     // 'the page lays out at the width of the phone' uses above.
     layoutWidth: window.innerWidth,
     boardWidth: Math.round(board.getBoundingClientRect().width),
+    // What the chips cost in height, which is what a phone actually pays.
+    header: Math.round(document.querySelector('header').getBoundingClientRect().height),
+    share: (() => {
+      const cv = document.getElementById('arena').getBoundingClientRect();
+      const a = window.__state.world.arena;
+      return Math.min(cv.width, cv.height * (a.width / a.height)) / window.innerWidth;
+    })(),
   };
   board.innerHTML = before;
   rounds.hidden = wasHidden;
+  if (wasInMatch === undefined) delete document.body.dataset.inMatch;
+  else document.body.dataset.inMatch = wasInMatch;
   return out;
 });
 check(board8.layoutWidth === 844,
   'a full lobby of eight scores fits the header',
   `eight chips (${board8.boardWidth}px) widened the layout to ${board8.layoutWidth}, not 844`);
+/*
+ * And fits it on one row.
+ *
+ * Width was the only thing asked here, and eight chips can fit the width while
+ * wrapping the header -- which costs height, and on this layout a row of
+ * header costs about 1.7 times its height in board width, because a 24x14
+ * arena on a 2.16:1 screen is limited by height. Eight-way free-for-all on a
+ * phone is the worst case the lobby can produce and the one nothing measured.
+ *
+ * Header height only. The board's share is printed because it is the thing
+ * anyone actually cares about, but it cannot be asserted here: the canvas is
+ * resized by a ResizeObserver, so inside one synchronous evaluate it still
+ * holds the size it had before the chips appeared. Asserting it would have
+ * added a condition that cannot move -- it read 66% either way, including
+ * against a build with the regression deliberately restored. The board-share
+ * assertions live in the checks near the end of this file, where the layout
+ * has settled.
+ */
+check(board8.header <= 44,
+  'eight scores leave the header one row',
+  `header ${board8.header}px (board ${(board8.share * 100).toFixed(0)}% of the width, ` +
+    `reported but not asserted -- see above)`);
 
 /*
  * A full lobby has to leave Ready reachable.

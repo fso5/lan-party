@@ -607,6 +607,60 @@ for (const [i, p] of pages.entries()) {
     continue;
   }
 
+
+  /*
+   * The in-match HUD has to leave room for the board.
+   *
+   * The scoreboard only exists in a networked match, so solo never shows it
+   * and nothing here had ever measured the header with it up. It is 332px
+   * wide against 585px of other header contents in 844px of phone, so it
+   * wrapped the header to a second row -- and on this layout a row of header
+   * costs about 1.7 times its height in board width, exactly when the game
+   * matters most.
+   *
+   * Measured in a real match over a real socket rather than by forcing the
+   * element visible: `updateRoundsHud` hides it again on the next frame, so
+   * anything poked into the DOM is gone before it can be read, and an earlier
+   * attempt at this measured the solo layout while believing otherwise.
+   */
+  const isPhone = await p.evaluate(() => window.innerWidth === 844 && window.innerHeight === 390);
+  const hud = await p.evaluate(() => {
+    const hdr = document.querySelector('header');
+    const rounds = document.getElementById('rounds');
+    const cv = document.getElementById('arena').getBoundingClientRect();
+    const arena = window.__state.world.arena;
+    const drawn = Math.min(cv.width, cv.height * (arena.width / arena.height));
+    return {
+      roundsShown: !rounds.hidden,
+      header: Math.round(hdr.getBoundingClientRect().height),
+      rows: new Set(
+        [...hdr.children].filter((e) => !e.hidden)
+          .map((e) => Math.round(e.getBoundingClientRect().top)),
+      ).size,
+      share: drawn / window.innerWidth,
+      vw: window.innerWidth,
+    };
+  });
+  /*
+   * Only the first browser is the phone -- `newContext(i === 0 ? PHONE :
+   * DESKTOP)`. The others run 800x600, where the board is limited by width and
+   * comes out at 100% whatever the header does, so asking them this question
+   * gets a pass that means nothing. The first version of this check did ask
+   * them, and failed on the header alone at a viewport where the header was
+   * not costing anything.
+   */
+  if (isPhone) {
+    console.log(
+      `${name} in-match HUD: header ${hud.header}px, scoreboard ` +
+        `${hud.roundsShown ? 'shown' : 'MISSING'}, board ${(hud.share * 100).toFixed(0)}% of ${hud.vw}px`,
+    );
+  }
+  check(
+    !isPhone || (hud.roundsShown && hud.header <= 44 && hud.share > 0.6),
+    `${name} keeps the board most of the width with the scoreboard up ` +
+      `(scoreboard ${hud.roundsShown ? 'shown' : 'MISSING'}, header ${hud.header}px across ` +
+      `${hud.rows} row(s), board ${(hud.share * 100).toFixed(0)}% of ${hud.vw}px)`,
+  );
   const seenTeam = await p.evaluate(
     (id) => window.__state.world.tanks.find((t) => t.id === id)?.team,
     want.tankId,

@@ -1499,9 +1499,27 @@ function updateRoundsHud() {
   // Rounds are a networked concept; solo play has none.
   if (!net.client) {
     el.hidden = true;
+    document.body.dataset.inMatch = 'false';
     return;
   }
   el.hidden = false;
+
+  /*
+   * Tell the stylesheet we are a client in somebody's match.
+   *
+   * The scoreboard is 332px wide, and the header's other contents come to
+   * 585px in an available 844px on a landscape phone -- so showing it wraps
+   * the header to a second row, and on this layout a row of header costs
+   * about 1.7 times its height in board width. That happens exactly when the
+   * game matters most, and never in solo, which is why it went unseen.
+   *
+   * What gives way is the map switcher, Restart and 2P. Not arbitrary: all
+   * three call `loadMap`, which rebuilds `state.world` -- and the frame loop
+   * assigns `state.world = net.client.world` on the very next tick. For a
+   * client they do nothing, and Restart does nothing while looking like it
+   * restarts the match, which is worse than doing nothing.
+   */
+  document.body.dataset.inMatch = 'true';
 
   const result = net.client.lastRound;
   if (result !== seenRound) {
