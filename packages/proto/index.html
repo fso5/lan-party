@@ -331,6 +331,21 @@
     background: rgba(0, 0, 0, 0.55);
     z-index: 20;
   }
+  /*
+   * The seat list scrolls; the controls do not.
+   *
+   * This panel used to scroll as a whole, and on a landscape phone -- 390px
+   * tall, so `86vh` is 335px -- a full roster comes to 410px. The 75px that
+   * fell off the bottom were the team picker's last row, the Ready button and
+   * the note under it. Ready is the only control that starts a match, and it
+   * was below the fold from six players up, behind a scroll with no visible
+   * affordance.
+   *
+   * Nothing caught it because nothing could: Playwright scrolls an element
+   * into view before clicking it, so every lobby check in the browser suite
+   * passes whether or not a thumb could have reached the button. It turned up
+   * by rendering a full roster at phone size and looking at the picture.
+   */
   #match-lobby .panel {
     background: var(--ply);
     color: var(--ink);
@@ -338,10 +353,24 @@
     border-radius: 0.6rem;
     min-width: min(22rem, 88vw);
     max-height: 86vh;
-    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    /* Not `auto`: the panel scrolling is the bug. Only the list may. */
+    overflow: hidden;
   }
   #match-lobby h2 { margin: 0 0 0.8rem; font-size: 1.2rem; }
-  #lobby-slots { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; gap: 0.35rem; }
+  #lobby-slots {
+    list-style: none;
+    margin: 0 0 1rem;
+    padding: 0;
+    display: grid;
+    gap: 0.35rem;
+    /* The one part that gives way when the roster is taller than the phone.
+       `min-height: 0` because a flex child will not shrink below its content
+       without it, which is what leaves the scroll on the panel instead. */
+    overflow-y: auto;
+    min-height: 0;
+  }
   #lobby-slots li {
     display: flex;
     align-items: center;

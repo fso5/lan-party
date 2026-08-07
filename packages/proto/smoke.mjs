@@ -346,11 +346,18 @@ check(board8.layoutWidth === 844,
  * A full lobby has to leave Ready reachable.
  *
  * Eight slots and eight team buttons is a lot of panel for a phone held
- * landscape, where there are 390px of height in total. The panel is capped at
- * 86vh and scrolls, so the content grows past the screen and the button that
- * starts the game goes below the fold -- fine, as long as scrolling actually
- * brings it back. If the cap were ever dropped the panel would simply grow off
- * the bottom and Ready would be unreachable, with nothing on screen to say so.
+ * landscape, where there are 390px of height in total.
+ *
+ * This used to settle for "scrolling brings it back", and it passed on that
+ * basis for as long as it existed. Rendering a full roster and looking at the
+ * picture is what showed what it was passing: 335px of panel against 410px of
+ * content, with the last row of team buttons, Ready and the note under it all
+ * below the fold, behind a scroll region with no visible bar on a phone. Ready
+ * is the only control that starts a match.
+ *
+ * So the seat list scrolls now and the controls do not, and this asks for that
+ * rather than for reachability -- no scrolling required, Ready and every team
+ * button inside the panel and inside the viewport.
  *
  * Rendered directly rather than by joining eight phones, because the question
  * is about the layout. Restored afterwards so the checks below still see the
@@ -380,6 +387,26 @@ const lobby8 = await phone.evaluate(() => {
   const overflows = panel.scrollHeight > panel.clientHeight + 1;
   const scrollable = ['auto', 'scroll'].includes(getComputedStyle(panel).overflowY);
 
+  /*
+   * Before any scrolling, because the line below does some.
+   *
+   * The first version of this sat in the object literal underneath
+   * `panel.scrollTop = panel.scrollHeight`, so it asked whether the button was
+   * inside the panel *after* the panel had been scrolled to the bottom -- which
+   * it always is. Named `unscrolled` and measuring the scrolled state; it
+   * passed against a build with the bug deliberately put back, which is the
+   * only reason it was caught.
+   */
+  const unscrolled = (() => {
+    const pr = panel.getBoundingClientRect();
+    const inside = (el) => {
+      const b = el.getBoundingClientRect();
+      return b.top >= pr.top - 0.5 && b.bottom <= pr.bottom + 0.5;
+    };
+    const teams = [...document.querySelectorAll('#lobby-team-buttons button')];
+    return inside(ready) && teams.length > 0 && teams.every(inside);
+  })();
+
   // What a player would do when the button is below the fold.
   panel.scrollTop = panel.scrollHeight;
   const r = ready.getBoundingClientRect();
@@ -390,6 +417,7 @@ const lobby8 = await phone.evaluate(() => {
     tappable: !!hit && (hit === ready || ready.contains(hit)),
     onScreen: r.bottom <= window.innerHeight + 1 && r.top >= -1,
     reachable: !overflows || scrollable,
+    unscrolled,
     overflows,
     scrollable,
     top: Math.round(r.top),
@@ -403,11 +431,12 @@ const lobby8 = await phone.evaluate(() => {
 check(lobby8.slots === 8 && lobby8.teamButtons === 8,
   'a full lobby shows every seat and a team for each',
   `${lobby8.slots} slot(s), ${lobby8.teamButtons} team button(s)`);
-check(lobby8.tappable && lobby8.onScreen && lobby8.reachable,
-  'Ready is reachable with a full lobby on screen',
+check(lobby8.tappable && lobby8.onScreen && lobby8.reachable && lobby8.unscrolled,
+  'a full lobby keeps Ready and every team button on screen without scrolling',
   `button top ${lobby8.top} in a ${await phone.evaluate(() => window.innerHeight)}px viewport, ` +
     `tappable=${lobby8.tappable} onScreen=${lobby8.onScreen} ` +
-    `overflows=${lobby8.overflows} userScrollable=${lobby8.scrollable}`);
+    `overflows=${lobby8.overflows} userScrollable=${lobby8.scrollable} ` +
+    `insidePanelUnscrolled=${lobby8.unscrolled}`);
 
 const cdp = await ctx.newCDPSession(phone);
 const pts = (x, y, id) => [{ x: Math.round(x), y: Math.round(y), id, radiusX: 1, radiusY: 1, force: 1 }];
