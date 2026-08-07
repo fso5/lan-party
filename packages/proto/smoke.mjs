@@ -960,6 +960,59 @@ check(
 );
 await hidpi.close();
 
+/*
+ * How much of a phone the board actually gets.
+ *
+ * Found by rendering the page at phone-landscape sizes and looking at it,
+ * which nothing here had done: the arena was drawn in the middle third with
+ * wide empty margins, at 53% of the width and 35% of the screen. Two causes,
+ * both invisible from the code -- a 22rem hint in the header that pushed the
+ * stats onto a second row, and a `<dl>` keeping the browser's default
+ * `margin: 1em 0` because the rule set only `margin-left`.
+ *
+ * It costs more than the pixels suggest. An arena is 24x14 and a landscape
+ * phone is about 2.16 wide to 1, so the board is limited by *height* -- every
+ * pixel of chrome above or below takes about 1.7 pixels of board width with
+ * it. Both of those regressions would leave every other check in this file
+ * green while the game got quietly smaller, which is the reason this exists.
+ *
+ * The bar is the consequence rather than the cause, because a header height is
+ * legitimately tunable and "can you see the board" is not. 60% against the 66%
+ * measured: slack for a font or a button changing, but the 32px of margin
+ * would drop it to 59% and fail.
+ */
+const phoneCtx = await b.newContext({
+  viewport: { width: 844, height: 390 },
+  deviceScaleFactor: 2,
+  hasTouch: true,
+  isMobile: true,
+});
+const phoneLandscape = await phoneCtx.newPage();
+await phoneLandscape.goto(PAGE);
+await phoneLandscape.waitForTimeout(600);
+const board = await phoneLandscape.evaluate(() => {
+  const cv = document.getElementById('arena').getBoundingClientRect();
+  const arena = window.__state.world.arena;
+  // The board is letterboxed into the canvas, so its drawn width is whichever
+  // of the two fits -- read the aspect off the map rather than assuming 24x14.
+  const drawn = Math.min(cv.width, cv.height * (arena.width / arena.height));
+  return {
+    share: drawn / innerWidth,
+    drawn: Math.round(drawn),
+    vw: innerWidth,
+    vh: innerHeight,
+    header: Math.round(document.querySelector('header').getBoundingClientRect().height),
+    footer: Math.round(document.querySelector('footer').getBoundingClientRect().height),
+  };
+});
+check(
+  board.share > 0.6,
+  'a phone held sideways gives the board most of its width',
+  `${board.drawn}px of ${board.vw} = ${(board.share * 100).toFixed(0)}%, ` +
+    `with ${board.header}px of header and ${board.footer}px of footer above and below it`,
+);
+await phoneCtx.close();
+
 await b.close();
 
 console.log(failures.length ? `\n${failures.length} FAILED: ${failures.join(', ')}` : '\nall checks passed');
