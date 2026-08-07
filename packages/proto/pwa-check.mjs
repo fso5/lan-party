@@ -117,6 +117,24 @@ await new Promise(r => srv.listen(8099, r));
       `${key} = ${JSON.stringify(v)}`,
     );
   }
+
+  /*
+   * Landscape, for the same reason and with the same blind spot.
+   *
+   * A home-screen launch is the only way anyone plays this without being told
+   * to turn their phone: the page's own hint covers a browser tab, and cannot
+   * cover an installed app because the manifest has already decided the
+   * orientation by then. Nothing exercises that either -- Playwright loads
+   * pages, it does not install apps -- so like start_url it is checked as
+   * text, and losing it would be silent.
+   *
+   * A 24x14 arena upright is 16.3px tiles against 23px sideways, measured.
+   */
+  check(
+    manifest.orientation === 'landscape',
+    'the manifest asks for landscape, so an installed app opens the right way up',
+    `orientation = ${JSON.stringify(manifest.orientation)}`,
+  );
 }
 
 const b = await chromium.launch({ executablePath: findChrome() });
