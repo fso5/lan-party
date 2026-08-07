@@ -11,6 +11,12 @@ build of the commit you think shipped. The page build is reproducible -- two
 runs of the same commit are byte-identical -- so a difference means the
 artifact is stale, not that the build wandered.
 
+Check out that commit before building the page to compare against. `build.mjs`
+stamps the short sha into the page, so *every* commit changes it, and comparing
+a published APK against a working tree one commit further on reports STALE over
+a seven-character marker. The bare run tells you which commit to check out: it
+prints the page it found, and the stamp is in there.
+
 `--selftest` exercises the extractor without a 42MB download, which is the only
 reason it gets exercised at all.
 
