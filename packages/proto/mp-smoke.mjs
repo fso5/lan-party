@@ -14,6 +14,7 @@
  */
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { existsSync, readdirSync } from 'node:fs';
 
 import { lanAddress } from './lan-address.mjs';
@@ -48,7 +49,21 @@ const PORT = process.env.PORT || '8137';
 // Not loopback: browsers treat localhost as a secure context and a phone's
 // address is not, so a loopback-only test is easier than reality.
 const HOST = lanAddress();
-const srv = spawn('node', ['server.mjs'], { env: { ...process.env, PORT }, stdio: 'pipe' });
+/*
+ * Resolved against this file, not the shell's working directory.
+ *
+ * `spawn('node', ['server.mjs'])` works under `npm run mp:smoke`, which runs
+ * from `packages/proto`, and dies from anywhere else -- including the repo
+ * root, which is where anyone reaching for one suite in isolation stands. The
+ * failure is `Cannot find module '<root>/server.mjs'` one second in, which
+ * reads as the multiplayer test failing rather than as the harness not
+ * finding its own server. Every other suite in here resolves off
+ * `import.meta.url`; this one had been missed.
+ */
+const srv = spawn('node', [fileURLToPath(new URL('./server.mjs', import.meta.url))], {
+  env: { ...process.env, PORT },
+  stdio: 'pipe',
+});
 const srvLog = [];
 srv.stdout.on('data', (d) => { srvLog.push(d.toString()); process.stdout.write('  [srv] ' + d); });
 srv.stderr.on('data', (d) => { srvLog.push(d.toString()); process.stdout.write('  [srv!] ' + d); });
