@@ -636,3 +636,68 @@ test('a bot holds fire when one of its own is in front of the gun', async () => 
     `held fire for a teammate ${mateAt} tiles ahead on the far side of a wall`,
   );
 });
+
+test('with the target in plain sight the solver takes the direct shot', async () => {
+  /*
+   * Closing a gap this file used to admit to. The docstring for `solveShot`
+   * says it "prefers the shortest travel distance, which naturally favours a
+   * direct shot over a bank shot", and the note on the first test above
+   * records that flipping `travel < best.travel` to `>` left the whole suite
+   * green -- between those two spawns the sweep finds exactly one valid angle,
+   * so minimum and maximum pick the same shot.
+   *
+   * That is no longer a cosmetic gap. traceShot now abandons any path already
+   * longer than the best found so far, which is only sound because the caller
+   * keeps the strict minimum. Flip the comparison and the cut silently removes
+   * the very paths the new rule would want. So the preference has to be pinned.
+   *
+   * Measured rather than assumed: dumping all 90048 solutions the AI can reach
+   * across every map, six kinds and a grid of positions, minimum and maximum
+   * disagree on 30762 of them. The widest is a Grey on First Contact with a
+   * target two tiles away -- 1.5 tiles of travel against 25.8.
+   *
+   * The position is searched for rather than written down, because a hardcoded
+   * pair would pin this map's geometry into the test. Targets are kept close:
+   * the fan samples every 3.75 degrees and a hit needs to pass within 0.32
+   * tiles, so beyond about four tiles a direct angle can fall between samples
+   * and the honest answer becomes a bank shot.
+   */
+  const w = botVsPlayer();
+  const shooter = w.tanks[0];
+  shooter.kind = TankKind.Grey;
+
+  let found = 0;
+  for (let sy = 1; sy < w.arena.height - 1 && found < 8; sy++) {
+    for (let sx = 1; sx < w.arena.width - 1 && found < 8; sx++) {
+      const px = sx + 0.5;
+      const py = sy + 0.5;
+      if (!w.arena.canTankOccupy(px, py, TANK_RADIUS)) continue;
+      for (const [dx, dy] of [[2, 1], [-2, 1], [2, -1], [-2, -1], [3, 0], [0, 3]]) {
+        const tx = px + dx;
+        const ty = py + dy;
+        if (!w.arena.canTankOccupy(tx, ty, TANK_RADIUS)) continue;
+        if (!w.arena.hasShellLineOfSight(px, py, tx, ty)) continue;
+
+        shooter.x = px;
+        shooter.y = py;
+        const s = solveShot(w, shooter, tx, ty);
+        assert.ok(s, `no solution to a target ${Math.hypot(dx, dy).toFixed(1)} tiles away in plain sight`);
+
+        // A direct shot leaves the muzzle already part of the way there and
+        // registers as soon as it passes within the hit tolerance, so its
+        // travel is always under the centre-to-centre distance. Nothing that
+        // bounces off a wall can be.
+        const straight = Math.hypot(dx, dy);
+        assert.ok(
+          s.travel < straight,
+          `chose a ${s.travel.toFixed(2)}-tile path to a target ${straight.toFixed(2)} tiles away ` +
+            `in plain sight -- that is a bank shot, so the shortest path is not winning`,
+        );
+        found++;
+      }
+    }
+  }
+  // At least eight, not exactly eight: the outer loops stop once the count is
+  // reached but the inner sweep over offsets finishes its position first.
+  assert.ok(found >= 8, `only found ${found} clear short shots on this map to check`);
+});

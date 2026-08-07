@@ -48,6 +48,11 @@ interface ShotSolution {
  *
  * Read-only with respect to the arena: destroyBlocks is false, so a
  * speculative trace can never clear a block the real shot has not hit yet.
+ *
+ * `limit` is the shortest path found so far in this sweep. A trace that has
+ * already gone further than that cannot win, because the caller keeps the
+ * strict minimum -- so it stops. This changes nothing about which angle comes
+ * out, only how long it takes to find out that a bad one is bad.
  */
 function traceShot(
   scratch: Arena,
@@ -61,6 +66,7 @@ function traceShot(
   targetY: number,
   selfX: number,
   selfY: number,
+  limit: number,
 ): number | null {
   let x = fromX;
   let y = fromY;
@@ -69,7 +75,7 @@ function traceShot(
   let bounces = maxBounces;
   let travelled = 0;
 
-  while (travelled < TRACE_DISTANCE) {
+  while (travelled < TRACE_DISTANCE && travelled < limit) {
     const r = stepShell(scratch, x, y, vx, vy, radius, bounces, TRACE_STEP, false);
 
     // Does this segment pass close to the target?
@@ -147,6 +153,7 @@ export function solveShot(w: WorldState, tank: Tank, targetX: number, targetY: n
       targetY,
       tank.x,
       tank.y,
+      best === null ? TRACE_DISTANCE : best.travel,
     );
     if (travel === null) continue;
     if (best === null || travel < best.travel) best = { angle, travel };

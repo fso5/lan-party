@@ -26,10 +26,15 @@
  * campaign is bots.
  *
  *     8 players    p99  128us   0.77%
- *     8 bots       p99 1127us   6.76%
+ *     8 bots       p99  616us   3.69%
  *
- * Nine times the cost, from a row that did not exist. Read the bot rows, not
- * the player ones, when asking whether a phone can hold 60Hz.
+ * Several times the cost, from a row that did not exist. Read the bot rows,
+ * not the player ones, when asking whether a phone can hold 60Hz.
+ *
+ * The bot figure was 2095us when this row was added. Two changes since, both
+ * driven by it: staggering when bots think so their solves stop landing on the
+ * same tick, and abandoning traced paths already longer than the best one
+ * found. Neither changes a decision the AI makes.
  *
  * A phone is slower than this box. At twenty times slower the player-only
  * figure still leaves the frame mostly free, but the bot figure does not --
