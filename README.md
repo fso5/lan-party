@@ -208,6 +208,38 @@ only uses UTF-16 for strings that need it, so `TanksLan` is found by a UTF-8
 search and *not* by a UTF-16 one. Searching only UTF-16 for a module name
 returns nothing whether or not the module ships.
 
+### Measuring rather than guessing
+
+Eight scripts in `tools/`, each answering one question and printing numbers
+rather than a verdict. None of them is a test and none of them fails a build;
+they exist so a decision can start from a measurement.
+
+| | asks | currently says |
+|---|---|---|
+| `sim-bench.mjs` | can a phone hold 60Hz? | 8 players 0.8% of a frame, 8 **bots** 3.7% |
+| `render-bench.mjs` | and can the browser draw it? | 1.1ms a frame at 1x, 1.9ms at 2x |
+| `net-budget.mjs` | can the radio carry a match? | yes at every roster size — connection count caps the roster, not bandwidth |
+| `tank-balance.mjs` | is the enemy roster honest? | ranks cleanly; Teal beats Yellow, which the descriptions have backwards |
+| `campaign-curve.mjs` | does the campaign get harder? | no — it climbs out of mission one and then wanders |
+| `map-fairness.mjs` | is a versus map fair to every seat? | fair at 2 and 4, unequal at 3 and 5–8 |
+| `verify-apk.py` | does the published APK carry what the source says? | yes, page included, `--page` compares it byte for byte |
+| `lobby-over-wifi.mjs` | does the browser lobby work against the real one? | yes, and it reproduces the team collision in issue #9 |
+
+Two traps apply to all of the ones that import `@tanks/core`, both of which
+produced a confident wrong answer before being guarded:
+
+**They measure `dist`, not `src`.** The package main is `dist/index.js`, so an
+A/B run that edits the source and forgets to rebuild compares a change against
+itself. That reads as "no effect" and there is nothing about it to doubt — it
+happened, on the balance table, in fifteen cells at once. `tools/lib/fresh-core.mjs`
+now refuses to run against a stale build rather than printing numbers over a
+warning nobody reads.
+
+**This box is not a phone.** Read ratios and scaling, not absolute
+milliseconds. The container has no GPU, so `render-bench` draws in software —
+pessimistic rather than optimistic, which is the safer direction for a frame
+budget to be wrong in.
+
 ### Checking that a test would fail
 
 ```
