@@ -226,7 +226,17 @@
     color: #FFF6EC;
   }
 
-  .stats { display: flex; gap: 1rem; margin-left: auto; }
+  /*
+   * `margin: 0 ... auto`, not `margin-left: auto`.
+   *
+   * This is a `<dl>`, so the browser gives it `margin: 1em 0` and setting only
+   * the left one leaves that in place. Those 16px above and below were the
+   * tallest thing in the header -- the row's own content is 24px -- and they
+   * took the header from 36px to 68px on every screen. On a landscape phone
+   * the arena is limited by height, so that cost about 1.7px of board width
+   * per pixel, for a margin nobody chose.
+   */
+  .stats { display: flex; gap: 1rem; margin: 0 0 0 auto; }
   .stat { display: flex; flex-direction: column; line-height: 1.15; }
   .stat dt {
     font-size: 0.58rem;
