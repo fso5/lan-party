@@ -1814,6 +1814,23 @@ if (location.protocol === 'http:') {
   // button that cannot exist.
   setNetStatus('solo');
   setNetHint('To play with others, open the http:// address the host phone shows.');
+  /*
+   * ...and then get out of the way.
+   *
+   * This one is furniture rather than news: it explains why there is no
+   * multiplayer here, which is true for as long as the page is open, so
+   * nothing ever clears it. It now sits over the board rather than in the
+   * header -- that is what stopped the header wrapping and gave the arena back
+   * a quarter of its area -- and a permanent card over the top-left corner
+   * would hide a tank spawned there.
+   *
+   * Long enough to read twice, and only this message: every other hint is set
+   * by something happening and cleared by it stopping.
+   */
+  setTimeout(() => {
+    const el = document.getElementById('net-hint');
+    if (el && /open the http:/.test(el.textContent)) setNetHint(null);
+  }, 12_000);
 }
 
 // Bluetooth only exists inside the native app; on the web there is no radio to
