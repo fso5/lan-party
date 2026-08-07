@@ -38,34 +38,84 @@ import ts from 'typescript';
  */
 const ALLOWED = new Set(['sqrt', 'abs', 'floor', 'ceil', 'round', 'min', 'max', 'PI']);
 
+/*
+ * And no clocks in the simulation, for a related but different reason.
+ *
+ * `determinism.test.ts` does catch a clock read that changes behaviour -- both
+ * of its replay tests fail when tank speed is made to depend on `Date.now()`,
+ * verified by mutation. But it catches it by luck rather than by construction:
+ * it steps its two worlds interleaved, microseconds apart, so a clock-derived
+ * term reads the same millisecond for both except on the ticks that straddle a
+ * boundary. Over 3000 ticks that is plenty and it fires -- with a coarser
+ * clock term it might not.
+ *
+ * Scoped to the simulation. `net/` is where a clock legitimately belongs: BLE
+ * join timeouts are wall-clock by nature, and nothing there feeds the stepped
+ * world, which advances on ticks handed to it rather than on time it reads.
+ */
+const NO_CLOCKS_OUTSIDE = 'net/';
+const CLOCKS = new Set(['Date', 'performance']);
+
 function sources(dir: string): string[] {
   const out: string[] = [];
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
     if (statSync(p).isDirectory()) out.push(...sources(p));
-    else if (name.endsWith('.ts')) out.push(p);
+    // `.d.ts` also ends in `.ts` and contains no implementation at all. The
+    // first version of this scanned nothing but declarations -- see below.
+    else if (name.endsWith('.ts') && !name.endsWith('.d.ts')) out.push(p);
   }
   return out;
 }
 
-test('the simulation only uses the parts of Math that every engine agrees on', () => {
-  const root = new URL('../src/', import.meta.url).pathname;
-  const files = sources(root);
-  assert.ok(files.length > 5, `only found ${files.length} sources to scan -- the walk is wrong`);
+test('the simulation reads no clock and only the parts of Math every engine agrees on', () => {
+  /*
+   * Up two, because this runs from `dist-test/test/`.
+   *
+   * `../src/` resolves to `dist-test/src/`, which holds the compiled output and
+   * the `.d.ts` files beside it -- 19 of them, all matching a `.ts` suffix
+   * check and none containing a single statement. The first version of this
+   * test scanned exactly that, found nothing, and could never have found
+   * anything. It passed, and the mutations I ran to "verify" it were caught by
+   * `determinism.test.ts` instead, which patches Math at runtime and had been
+   * doing this job all along.
+   *
+   * Hence the assertions below. A scan that silently looks at the wrong place
+   * is worse than no scan, so it names files it must find rather than counting
+   * what it got.
+   */
+  const root = new URL('../../src/', import.meta.url).pathname;
+  const files = sources(root).map((f) => f.slice(root.length));
+  for (const must of ['sim.ts', 'ai.ts', 'math.ts', 'physics.ts', 'net/protocol.ts']) {
+    assert.ok(files.includes(must), `the walk missed ${must}, so it is looking in the wrong place`);
+  }
 
   const found: string[] = [];
-  for (const file of files) {
+  for (const where of files) {
+    const file = join(root, where);
     const text = readFileSync(file, 'utf8');
     const sf = ts.createSourceFile(file, text, ts.ScriptTarget.ES2022, true);
     const visit = (node: ts.Node): void => {
+      const at = () => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
       if (
         ts.isPropertyAccessExpression(node) &&
         ts.isIdentifier(node.expression) &&
         node.expression.text === 'Math' &&
         !ALLOWED.has(node.name.text)
       ) {
-        const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
-        found.push(`${file.slice(root.length)}:${line + 1} Math.${node.name.text}`);
+        found.push(`${where}:${at()} Math.${node.name.text}`);
+      }
+      if (!where.startsWith(NO_CLOCKS_OUTSIDE)) {
+        if (
+          ts.isPropertyAccessExpression(node) &&
+          ts.isIdentifier(node.expression) &&
+          CLOCKS.has(node.expression.text)
+        ) {
+          found.push(`${where}:${at()} ${node.expression.text}.${node.name.text}`);
+        }
+        if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'Date') {
+          found.push(`${where}:${at()} new Date()`);
+        }
       }
       ts.forEachChild(node, visit);
     };
@@ -75,8 +125,10 @@ test('the simulation only uses the parts of Math that every engine agrees on', (
   assert.deepEqual(
     found,
     [],
-    'these are implementation-defined, so an Android host and a browser client would ' +
-      `disagree in the last bits and desync:\n  ${found.join('\n  ')}\n` +
-      `(use dsin/dcos/datan2 from math.ts, or add to ALLOWED with a reason)`,
+    'a stepped world may not depend on the engine or on the wall clock -- an ' +
+      'Android host and a browser client would disagree in the last bits, and a ' +
+      `replay would not reproduce:\n  ${found.join('\n  ')}\n` +
+      `(use dsin/dcos/datan2 from math.ts and the tick count for time, or add a ` +
+      `reason to ALLOWED)`,
   );
 });
