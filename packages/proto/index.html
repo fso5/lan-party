@@ -315,6 +315,43 @@
   }
   canvas { display: block; touch-action: none; }
 
+  /*
+   * A phone opens a URL upright, so this is the first thing most players see,
+   * and until now it said nothing. Portrait is not broken -- the controls are
+   * drag-anywhere, so it plays -- but a 24x14 arena on a 390x844 screen is a
+   * strip in the middle of a lot of nothing: 16.3px tiles against 23px in
+   * landscape, under a header that wraps to 138px.
+   *
+   * A hint rather than a block: some people will want to play upright, and
+   * refusing to draw the game until the phone turns is a worse answer than
+   * telling them why it looks wrong.
+   *
+   * `pointer: coarse` as well as the orientation, or a tall desktop window
+   * gets told to rotate a phone it is not.
+   */
+  #turn-phone { display: none; }
+  @media (orientation: portrait) and (pointer: coarse) {
+    #turn-phone {
+      display: block;
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      margin: 0;
+      max-width: 15rem;
+      text-align: center;
+      z-index: 4;
+      pointer-events: none;
+      color: var(--ink);
+      font-size: 0.95rem;
+      line-height: 1.35;
+      padding: 0.7rem 0.9rem;
+      border-radius: 0.5rem;
+      background: var(--panel);
+      border: 1px solid var(--hairline);
+    }
+  }
+
   #net-hint {
     /* Out of flow on purpose -- see the comment on the element. `display` is
        deliberately not set here: `hidden` hides via the UA stylesheet, and a
@@ -729,6 +766,13 @@
     the width and 35% of the screen.
   -->
   <span id="net-hint" hidden></span>
+
+  <!--
+    Shown only on a phone held upright, and by CSS alone -- no state, nothing
+    to get out of sync, and it costs the landscape layout nothing because the
+    media query leaves it display:none there.
+  -->
+  <p id="turn-phone">Turn your phone sideways &mdash; the arena is wider than it is tall.</p>
   <canvas id="arena"></canvas>
   <div id="banner" data-show="false"></div>
   <div id="debug" hidden></div>

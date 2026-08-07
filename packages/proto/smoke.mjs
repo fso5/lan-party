@@ -1079,6 +1079,45 @@ check(
 await phoneCtx.close();
 
 /*
+ * A phone held upright gets told why the game looks wrong.
+ *
+ * Portrait is the first thing most players see -- a phone opens a URL upright
+ * -- and it said nothing. It is not broken there: the controls are
+ * drag-anywhere, so it plays. But a 24x14 arena on a 390x844 screen is a strip
+ * in the middle of a lot of nothing, 16.3px tiles against 23px in landscape,
+ * under a header that wraps to 138px.
+ *
+ * All three cases, because the interesting failures are the false positives: a
+ * hint that never appears is useless, one that appears in landscape covers the
+ * game, and one keyed on orientation alone tells a tall desktop window to
+ * rotate a phone it is not.
+ */
+for (const [w, h, touch, what, want] of [
+  [390, 844, true, 'phone held upright', true],
+  [844, 390, true, 'phone held sideways', false],
+  [700, 1000, false, 'a tall desktop window', false],
+]) {
+  const turnCtx = await b.newContext({
+    viewport: { width: w, height: h },
+    deviceScaleFactor: 2,
+    isMobile: touch,
+    hasTouch: touch,
+  });
+  const turnPage = await turnCtx.newPage();
+  await turnPage.goto(PAGE);
+  await turnPage.waitForTimeout(400);
+  const shown = await turnPage.evaluate(
+    () => getComputedStyle(document.getElementById('turn-phone')).display !== 'none',
+  );
+  check(
+    shown === want,
+    `${what} ${want ? 'is told to turn it' : 'is left alone'}`,
+    `hint ${shown ? 'shown' : 'hidden'} at ${w}x${h}, touch=${touch}`,
+  );
+  await turnCtx.close();
+}
+
+/*
  * The status badge has to be readable in both palettes.
  *
  * It is the only thing that tells a player their connection dropped, and
