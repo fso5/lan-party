@@ -123,3 +123,76 @@ test('the versus bot fill has enough variety for a full match', () => {
     `${new Set(VERSUS_BOT_KINDS).size} distinct kinds for ${DEFAULT_MATCH_SIZE - 1} bot seats`,
   );
 });
+
+/**
+ * An impossible spawn index lands somewhere free rather than on somebody.
+ *
+ * `createWorld`'s last resort used to be `spawns[0]`, which is how two caller
+ * bugs -- one in each host -- became invisible ones: the tank appeared on top
+ * of whoever already had the first corner, and tanks do not collide, so nothing
+ * pushed them apart.
+ */
+test('a spawn index the map does not have does not land on another tank', () => {
+  const arena = loadArena(VERSUS_MAPS[0]);
+  const world = createWorld({
+    arena,
+    seed: 1,
+    players: [
+      { team: 0, spawnIndex: 0 },
+      /*
+       * One past the end, on a team the map does not place -- which is exactly
+       * the shape the WiFi bug produced, where the ninth browser was player 8
+       * on team 8 of an eight-spawn map.
+       *
+       * The team matters. `createWorld` tries the team's own spawn before any
+       * fallback, and these maps carry teams 0-7, so a bad index on team 1
+       * quietly finds spawn 1 and never reaches the code this is testing. The
+       * first version of this test did that and survived its mutation.
+       */
+      { team: 8, spawnIndex: arena.spawns.length },
+    ],
+  });
+
+  const [a, b] = world.tanks;
+  const d = Math.hypot(a.x - b.x, a.y - b.y);
+  assert.ok(
+    d >= TANK_RADIUS * 2,
+    `both tanks are at ${a.x},${a.y} and ${b.x},${b.y} -- ${d.toFixed(2)} apart, so they share a square`,
+  );
+});
+
+/**
+ * And the fallback has to be deterministic, which is why it is a rule rather
+ * than a throw.
+ *
+ * A client builds its world from the roster the host sent, running this same
+ * function over the same list in the same order. If the two disagreed about
+ * where a fallback tank stands, every snapshot afterwards would be correcting a
+ * tank the client had put somewhere else -- the divergence would look like
+ * netcode rather than like seating.
+ */
+test('the out-of-range fallback puts the tank in the same place every time', () => {
+  const arena = loadArena(VERSUS_MAPS[0]);
+  const roster = {
+    seed: 5,
+    players: [
+      { team: 0, spawnIndex: 0 },
+      // Teams past the map's own, so the free-spawn rule is what places these.
+      { team: 8, spawnIndex: 99 },
+      { team: 9, spawnIndex: 99 },
+    ],
+  };
+  const one = createWorld({ arena, ...roster });
+  const two = createWorld({ arena, ...roster });
+  assert.deepEqual(
+    one.tanks.map((t) => [t.x, t.y]),
+    two.tanks.map((t) => [t.x, t.y]),
+    'two builds of the same roster placed the tanks differently',
+  );
+  // And the two fallback tanks must not have been given the same free spawn.
+  const [, b, c] = one.tanks;
+  assert.ok(
+    Math.hypot(b.x - c.x, b.y - c.y) >= TANK_RADIUS * 2,
+    'two tanks with the same bad index were both sent to the same free spawn',
+  );
+});

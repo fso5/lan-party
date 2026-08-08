@@ -119,9 +119,41 @@ export function createWorld(cfg: MatchConfig): WorldState {
   const tanks: Tank[] = [];
   idCounter = 0;
 
+  /*
+   * A spawn index the map does not have lands somewhere free, not on somebody.
+   *
+   * The last resort here used to be `arena.spawns[0]`, and that is a silent
+   * wrong answer: it puts the new tank on top of whoever already had the first
+   * corner -- two tanks on one square, indistinguishable on screen, killed by
+   * the same shell, and nothing pushes them apart because tanks do not collide
+   * with each other.
+   *
+   * Both hosts reached it. The Bluetooth one indexed spawns by a count of
+   * players while bots held the other spawns; the WiFi one seated every
+   * connected browser, so the ninth on an eight-spawn map asked for index 8.
+   * Both are fixed, and both were caller bugs -- but a shared function that
+   * answers a bad index with a bad world is how a caller bug becomes an
+   * invisible one, twice.
+   *
+   * Not a throw. A client builds its world from a roster the host sent, so
+   * throwing hands any host the power to kill every client's match; landing
+   * somewhere free degrades instead. Deterministic either way, which is what
+   * matters most: host and client run this same function over the same roster
+   * in the same order, so they make the same choice.
+   */
+  const placeAt = (index: number, team: number): SpawnPoint => {
+    const exact = arena.spawns[index];
+    if (exact) return exact;
+    const byTeam = arena.spawns.find((s) => s.team === team);
+    if (byTeam) return byTeam;
+    const free = freeSpawnIndex(arena.spawns, tanks);
+    // Every spawn occupied is a roster larger than the map. Nothing left to do
+    // but stack, and the caller has already been told off by then.
+    return arena.spawns[free] ?? arena.spawns[0];
+  };
+
   for (const p of cfg.players) {
-    const spawn =
-      arena.spawns[p.spawnIndex] ?? arena.spawns.find((s) => s.team === p.team) ?? arena.spawns[0];
+    const spawn = placeAt(p.spawnIndex, p.team);
     if (!spawn) throw new Error(`arena "${arena.name}" has no spawn points`);
     tanks.push(makeTank(idCounter++, TankKind.Player, p.team, spawn.x, spawn.y, spawn.angle));
   }
@@ -136,7 +168,10 @@ export function createWorld(cfg: MatchConfig): WorldState {
   }
 
   for (const b of cfg.bots ?? []) {
-    const spawn = arena.spawns[b.spawnIndex] ?? arena.spawns[0];
+    // Same rule as the players above. Bots have no team spawn to fall back on
+    // -- versus maps put teams on the map, not on the roster -- so an unusable
+    // index goes straight to the first free start.
+    const spawn = placeAt(b.spawnIndex, b.team);
     if (!spawn) throw new Error(`arena "${arena.name}" has no spawn points`);
     tanks.push(makeTank(idCounter++, b.kind as TankKind, b.team, spawn.x, spawn.y, spawn.angle));
   }
