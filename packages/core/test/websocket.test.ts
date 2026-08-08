@@ -353,3 +353,70 @@ test('a game packet survives the full server encode path', () => {
   assert.equal(framed[0] & 0x0f, WsOpcode.Binary);
   assert.deepEqual(framed.subarray(2), snapshot);
 });
+
+/*
+ * Arbitrary bytes, from anyone on the hotspot.
+ *
+ * Everything above feeds the decoder frames -- valid ones, or ones broken in a
+ * specific way somebody thought of. This feeds it noise. Nothing announces
+ * itself before reaching this code: the host phone accepts a TCP connection
+ * and the first thing it does with whatever arrives is hand it to `push`.
+ *
+ * The property that actually matters here is termination, and it is the one
+ * the rest of the stack cannot cover for. `LanHost.pump` wraps this call in a
+ * broad `catch`, so an unexpected exception is already survivable -- the peer
+ * is dropped and the match goes on. A decoder that fails to consume its own
+ * bytes and loops instead is a different thing entirely: it freezes the host's
+ * event loop, and the game stops for everyone, with no error raised and
+ * nothing to catch. The assertion mechanism is the runner's own timeout, so a
+ * loop that never ends fails this rather than hanging CI forever.
+ *
+ * Alongside it, two properties worth stating: nothing thrown is outside the
+ * error type callers are written against, and no reply is larger than the
+ * question -- noise must not be turned into more bytes than it arrived as.
+ *
+ * Not a rejection test. Random bytes decode into real messages often enough --
+ * 298 of them across these trials -- that this reaches the framing path rather
+ * than bouncing off the first check, which is asserted below so it stays true.
+ */
+test('arbitrary noise is framed, refused or ignored -- but never loops', () => {
+  let s = 0xbeef;
+  const rnd = () => ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const ri = (n: number) => Math.floor(rnd() * n);
+
+  const TRIALS = 6000;
+  let decoded = 0;
+  const surprises: string[] = [];
+
+  for (let trial = 0; trial < TRIALS; trial++) {
+    const len = 1 + ri(80);
+    const bytes = Uint8Array.from({ length: len }, () => ri(256));
+    const dec = new WsDecoder();
+    let out = 0;
+    try {
+      // Arbitrary chunk boundaries as well: TCP splits wherever it likes, and
+      // a decoder can be correct on whole reads and wrong on split ones.
+      for (let at = 0; at < bytes.length; ) {
+        const take = 1 + ri(8);
+        for (const msg of dec.push(bytes.subarray(at, at + take))) {
+          out += msg.data.length;
+          decoded++;
+        }
+        at += take;
+      }
+      if (out > len) {
+        surprises.push(`trial ${trial}: ${len} bytes in produced ${out} bytes of payload`);
+      }
+    } catch (err) {
+      if (!(err instanceof WsProtocolError)) {
+        surprises.push(`trial ${trial} threw ${err instanceof Error ? err.name : typeof err}: ${String(err)}`);
+      }
+    }
+  }
+
+  assert.deepEqual(surprises.slice(0, 5), [], `${surprises.length} surprising outcome(s) over ${TRIALS} trials`);
+  assert.ok(
+    decoded > 50,
+    `only ${decoded} messages decoded out of ${TRIALS} noise trials, so this is not reaching the framing path`,
+  );
+});
