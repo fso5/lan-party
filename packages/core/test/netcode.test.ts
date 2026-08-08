@@ -148,6 +148,13 @@ function runMatch(profile = PERFECT_PROFILE, seconds = 10, netSeed = 5, startTic
  *
  * Live drift over a perfect link is 0.0037: nothing crosses the wire wrong, so
  * all that is left is snapshot quantisation. 0.02 is roughly five times that.
+ *
+ * What it is worth, measured rather than assumed. It catches prediction losing
+ * the local input -- stepping with an empty input map fails it. It does *not*
+ * catch a sloppier RECONCILE_EPSILON (1/64 -> 1/2 leaves it green), and it
+ * should not: a perfect link has nothing to reconcile away. The two Bluetooth
+ * convergence tests below both fail that mutation, so the threshold is covered
+ * where it means something. This one is the canary for prediction itself.
  */
 test('client stays converged with the host over a perfect link', () => {
   const { liveDrift, aliveTicks } = runMatch(PERFECT_PROFILE, 10);
