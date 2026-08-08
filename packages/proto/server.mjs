@@ -95,7 +95,25 @@ function startMatch() {
   const arena = loadArena(MAP);
   const peers = [...sockets.keys()];
 
-  const players = peers.map((_, i) => ({ team: i, spawnIndex: i }));
+  /*
+   * Only as many players as the map has places to put them.
+   *
+   * This used to seat every connected peer, and `spawnIndex` is a plain index:
+   * with nine browsers on an eight-spawn map the ninth was handed index 8,
+   * `createWorld` fell back to `spawns[0]`, and two tanks stood on one square
+   * -- measured, not feared. Worse here than in the Bluetooth host, because the
+   * roster is broadcast, so every client rebuilds the same stacked world.
+   *
+   * The extras stay connected and unseated rather than being disconnected;
+   * `announce` already skips anyone past the roster, so they simply get no
+   * MatchStart and sit on the waiting hint until a seat frees up and the next
+   * join rebuilds the match.
+   */
+  const seats = Math.min(peers.length, arena.spawns.length);
+  const players = peers.slice(0, seats).map((_, i) => ({ team: i, spawnIndex: i }));
+  if (peers.length > seats) {
+    console.log(`  ${peers.length - seats} peer(s) unseated: "${MAP.name}" has ${arena.spawns.length} spawns`);
+  }
 
   // Top the match up with bots, so a solo tester still has something to shoot
   // at. Up to a good match size rather than up to the map's capacity -- the

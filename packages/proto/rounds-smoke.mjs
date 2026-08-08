@@ -1,5 +1,6 @@
 /**
- * What the host puts on the wire between rounds, and between matches.
+ * What the host puts on the wire: between rounds, between matches, and to a
+ * room with more people in it than the map has places to stand.
  *
  * mp-smoke drives real browsers and checks the thing a player would notice --
  * the arena refills for round two. It cannot check what the round-two
@@ -22,7 +23,7 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
-import { Reader, MsgType, readMatchStart } from '@tanks/core';
+import { Reader, MsgType, readMatchStart, loadArena, missionById } from '@tanks/core';
 
 const failures = [];
 const check = (cond, msg) => {
@@ -35,7 +36,7 @@ const check = (cond, msg) => {
  * `until` stops the wait early once enough have arrived, so the slow default
  * budget is only spent when something is wrong.
  */
-async function collect({ port, env = {}, budgetMs, until, label }) {
+async function collect({ port, env = {}, budgetMs, until, label, clients = 1 }) {
   const srv = spawn('node', [fileURLToPath(new URL('./server.mjs', import.meta.url))], {
     env: { ...process.env, PORT: port, ...env },
     stdio: 'pipe',
@@ -66,22 +67,31 @@ async function collect({ port, env = {}, budgetMs, until, label }) {
     await new Promise((r) => setTimeout(r, 250));
   }
 
-  const sock = new WebSocket(`ws://127.0.0.1:${port}`);
-  sock.binaryType = 'arraybuffer';
+  // One socket unless asked for more. Extra clients join one at a time, since
+  // every join rebuilds the match and the last roster is the one that counts.
+  const socks = [];
   const starts = [];
-  sock.on('message', (data) => {
-    const r = new Reader(new Uint8Array(data));
-    if (r.u8() !== MsgType.MatchStart) return;
-    const s = readMatchStart(r);
-    starts.push(s);
-    console.log(`  ${label} #${starts.length}: seed ${s.seed}, hostTick ${s.hostTick}, tank ${s.yourTankId}`);
-  });
-  await new Promise((res) => sock.on('open', res));
+  for (let i = 0; i < clients; i++) {
+    const sock = new WebSocket(`ws://127.0.0.1:${port}`);
+    sock.binaryType = 'arraybuffer';
+    sock.on('message', (data) => {
+      const r = new Reader(new Uint8Array(data));
+      if (r.u8() !== MsgType.MatchStart) return;
+      const s = readMatchStart(r);
+      starts.push(s);
+      if (clients === 1) {
+        console.log(`  ${label} #${starts.length}: seed ${s.seed}, hostTick ${s.hostTick}, tank ${s.yourTankId}`);
+      }
+    });
+    await new Promise((res) => sock.on('open', res));
+    socks.push(sock);
+    if (clients > 1) await new Promise((r) => setTimeout(r, 200));
+  }
 
   const stopAt = Date.now() + budgetMs;
   while (Date.now() < stopAt && !until(starts)) await new Promise((r) => setTimeout(r, 250));
 
-  sock.close();
+  for (const s of socks) s.close();
   srv.kill();
   return { starts, log };
 }
@@ -157,12 +167,59 @@ check(
     `host ticks ${matches.starts.map((m) => m.hostTick).join(', ')}`,
 );
 
+/*
+ * More people than the map has places to stand.
+ *
+ * `spawnIndex` is a plain index into the arena's spawn list, and `createWorld`
+ * falls back to `spawns[0]` when it is out of range -- so a roster that seats
+ * more players than the map has starts puts two tanks on one square, and every
+ * client rebuilds that same stacked world from the broadcast roster. Measured
+ * before the cap: nine sockets on an eight-spawn map produced a roster whose
+ * ninth player carried spawnIndex 8.
+ *
+ * Nine, because eight is the largest versus map's capacity and the bug needs
+ * exactly one more than fits.
+ */
+const crowd = await collect({
+  port: '8145',
+  clients: 9,
+  budgetMs: 6_000,
+  until: (s) => s.length >= 9,
+  label: 'crowd',
+});
+
+const roster = crowd.starts[crowd.starts.length - 1];
+check(!!roster, 'nobody was seated at all with nine clients connected');
+if (roster) {
+  const idx = roster.players.map((p) => p.spawnIndex);
+  console.log(`  crowd: 9 clients -> ${roster.players.length} players, spawn indices ${idx.join(',')}`);
+  check(
+    new Set(idx).size === idx.length,
+    `two players share a spawn index (${idx.join(',')}) -- they would stand on the same square`,
+  );
+  /*
+   * Bounded against the *map*, not against the roster.
+   *
+   * The first version of this check read `i < roster.players.length`, and that
+   * bound grows with the bug: nine seated players carry indices 0-8, every one
+   * of them "in range" of a nine-long roster. It survived the mutation it was
+   * written for. The roster carries `mapId`, so the real bound is one lookup
+   * away.
+   */
+  const arena = loadArena(missionById(roster.mapId));
+  check(
+    idx.every((i) => i < arena.spawns.length),
+    `a player was given spawn index ${Math.max(...idx)} on "${arena.name}", ` +
+      `which has ${arena.spawns.length} spawns -- createWorld falls back to spawns[0] and they stack`,
+  );
+}
+
 if (failures.length) {
   console.error('FAILED:\n  ' + failures.join('\n  '));
-  console.error('server said:\n' + rounds.log + matches.log);
+  console.error('server said:\n' + rounds.log + matches.log + crowd.log);
   process.exit(1);
 }
 console.log(
   'rounds smoke passed: round two carried its own seed and the clock forward, ' +
-    'and a won match started a fresh one',
+    'a won match started a fresh one, and a crowd was seated without stacking',
 );
