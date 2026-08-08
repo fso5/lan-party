@@ -262,13 +262,28 @@ console.log('scoreboard B:', JSON.stringify(c.chips), 'label', c.roundLabel);
  * arena starts full, so "three alive" is the opening position too.
  */
 const alive = 'window.__state?.world?.tanks.filter((t) => t.alive).length ?? 0';
+/*
+ * Sized from the measured distribution, not from a guess.
+ *
+ * This wait is on a round *finishing*, which is a simulated quantity with a
+ * long tail: tools/round-length.mjs puts a four-tank free-for-all at a 12.7s
+ * median but a 61.8s p99 and a 106s longest over 600 rounds. It was 25s, and
+ * the identical wait in ble-smoke was 30s -- which turned out to be under the
+ * 33s that scenario actually takes, so it passed by luck until the first run on
+ * a loaded box. This one has not flaked yet; that is not evidence it would not.
+ *
+ * Generous costs nothing: waitForFunction returns the moment the round ends.
+ */
+const ROUND_BUDGET_MS = 150_000;
 const roundTwo = async (p, label) => {
   const ended = await p
-    .waitForFunction(`(${alive}) <= 1`, null, { timeout: 25_000 })
+    .waitForFunction(`(${alive}) <= 1`, null, { timeout: ROUND_BUDGET_MS })
     .then(() => true)
     .catch(() => false);
   check(ended, `${label}: round one never resolved, so there was nothing to rebuild`);
   const rebuilt = await p
+    // The rebuild follows immediately once the round ends, so this half needs
+    // no such allowance.
     .waitForFunction(`(${alive}) >= 3`, null, { timeout: 25_000 })
     .then(() => true)
     .catch(() => false);

@@ -30,6 +30,21 @@ const check = (cond, msg) => {
   if (!cond) failures.push(msg);
 };
 
+/*
+ * How long to allow for a round to finish, sized from measurement.
+ *
+ * Every wait here is on a simulated round ending, and that has a long tail:
+ * tools/round-length.mjs puts a four-tank free-for-all at a 12.7s median, a
+ * 61.8s p99 and a 106s longest over 600 rounds. These budgets were 40s. The
+ * same shape of wait in ble-smoke was 30s against a scenario that takes 33s, so
+ * it passed by luck until the first run on a loaded box -- 40s is the same bet
+ * with slightly better odds.
+ *
+ * Costs nothing when things work: each phase stops the moment its `until`
+ * condition holds.
+ */
+const ROUND_BUDGET_MS = 150_000;
+
 /**
  * Run a server, listen as one client, and collect every MatchStart it sends.
  *
@@ -99,18 +114,19 @@ async function collect({ port, env = {}, budgetMs, until, label, clients = 1 }) 
 /*
  * Round two, on the default rules.
  *
- * Nothing is ever pressed here; the bots resolve round one among themselves in
- * roughly six seconds of game time. Forty is slack for a loaded runner.
+ * Nothing is ever pressed here; the bots resolve round one among themselves,
+ * typically in about six seconds of game time. The budget above is the tail,
+ * not the typical case.
  */
 const rounds = await collect({
   port: '8143',
-  budgetMs: 40_000,
+  budgetMs: ROUND_BUDGET_MS,
   until: (s) => s.length >= 2,
   label: 'round',
 });
 
 check(rounds.starts.length >= 1, 'no MatchStart at all -- the client was never seated');
-check(rounds.starts.length >= 2, `round two never announced (${rounds.starts.length} MatchStart(s) in 40s)`);
+check(rounds.starts.length >= 2, `round two never announced (${rounds.starts.length} MatchStart(s) in ${ROUND_BUDGET_MS / 1000}s)`);
 
 if (rounds.starts.length >= 2) {
   const [one, two] = rounds.starts;
@@ -155,7 +171,7 @@ if (rounds.starts.length >= 2) {
 const matches = await collect({
   port: '8144',
   env: { ROUNDS: '1' },
-  budgetMs: 40_000,
+  budgetMs: ROUND_BUDGET_MS,
   until: (s) => s.length >= 2 && s.slice(1).some((m) => m.hostTick === 0),
   label: 'match',
 });
