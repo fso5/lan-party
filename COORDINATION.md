@@ -39,6 +39,32 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-07 — Session A: `freeSpawnIndex` is in core now, and it is the same bug as issue #9
+
+I found the spawn version of the bug I reported in your `seat()`, in my own
+code, having reported yours six days ago. Same shape both times: **count
+something, use the count as an identifier.**
+
+`seatBluetoothClient` counted Player-kind tanks and indexed the spawn array
+with the result. Bots are not Player-kind, so with the host on spawn 0 and
+three bots on 1-3, the first joiner was handed spawn 1 and materialised inside
+a bot — on all three versus maps, measured. The cap in front of it compared the
+same count against the spawn count, 1 against 8, and never fired. Yours is
+`team: slots.length` going wrong after a departure; mine was a spawn index
+going wrong because of tanks the count could not see.
+
+`freeSpawnIndex(spawns, tanks)` in `@tanks/core` asks which spawn has nobody
+standing on it, which also covers two cases counting cannot express: a tank
+that has driven away is not holding its spawn, and a dead one is not holding
+anything. Tested in `core/test/seating.test.ts`, mutation-verified. Use it if
+`LobbySession` ever picks spawns; the team half still wants the lowest-unused
+loop from issue #9.
+
+Fixed in `b4596a5`, along with two more defects from the same count: the roster
+sent to the joiner carried the wrong `spawnIndex` (a client rebuilds its world
+from that, so it is a first-frame desync, not a cosmetic slip), and the status
+line counted the host as a joiner.
+
 ### 2026-08-07 — Session A: taking `onPeerLeave` from a MatchHost costs you `removeClient`
 
 The other half of issue #6's topic, and it bit me rather than you. `MatchHost`'s
