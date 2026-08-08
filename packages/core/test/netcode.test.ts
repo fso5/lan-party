@@ -136,21 +136,50 @@ test('client stays converged with the host over a perfect link', () => {
   assert.ok(drift < 0.25, `client drifted ${drift.toFixed(3)} tiles from the host`);
 });
 
+/**
+ * 45ms latency, 30ms jitter, 3% loss. The link the game has to survive, and the
+ * test that matters most in this file.
+ *
+ * Sixteen network seeds rather than one. Loss and jitter come from a seeded
+ * Rng, so a single seed is one draw from the distribution of links -- it says
+ * the netcode survived *a* Bluetooth link, not Bluetooth. Swept over 120 seeds
+ * while writing this: drift ran a 0.003 median to a 0.009 worst, every seed
+ * dropped packets and applied snapshots, and no seed ever needed a resync.
+ *
+ * The threshold follows from that sweep. It was 0.5, which is fifty-five times
+ * the worst drift ever observed -- a bound that only fails on a catastrophe,
+ * and passes a netcode that has quietly become fifty times worse. 0.05 keeps
+ * roughly five times headroom over the measured worst, which is slack for a
+ * seed unluckier than the 120, and still tight enough to notice a regression.
+ *
+ * The other two assertions are the vacuity guards: a run that dropped nothing
+ * or applied no snapshots proves nothing about a lossy link, however small its
+ * drift.
+ */
 test('client stays converged over a simulated Bluetooth link', () => {
-  // 45ms latency, 30ms jitter, 3% loss, 4 KB/s. This is the link the game has
-  // to survive, and the test that matters most in this file.
-  const { host, client, net } = runMatch(BLE_PROFILE, 20);
+  let worst = { drift: 0, seed: -1, reconciles: 0, drops: 0 };
 
-  const h = host.world.tanks.find((t) => t.id === 1)!;
-  const c = client.world.tanks.find((t) => t.id === 1)!;
-  const drift = Math.hypot(h.x - c.x, h.y - c.y);
+  for (let i = 0; i < 16; i++) {
+    const netSeed = 1 + i * 7;
+    const { host, client, net } = runMatch(BLE_PROFILE, 20, netSeed);
 
-  assert.ok(net.droppedPackets > 0, 'the test link should actually have dropped packets');
-  assert.ok(client.snapshotsApplied > 0, 'client should have applied snapshots');
+    const h = host.world.tanks.find((t) => t.id === 1)!;
+    const c = client.world.tanks.find((t) => t.id === 1)!;
+    const drift = Math.hypot(h.x - c.x, h.y - c.y);
+
+    assert.ok(net.droppedPackets > 0, `seed ${netSeed}: the link dropped nothing, so it was not lossy`);
+    assert.ok(client.snapshotsApplied > 0, `seed ${netSeed}: the client applied no snapshots`);
+
+    if (drift > worst.drift) {
+      worst = { drift, seed: netSeed, reconciles: client.reconciles, drops: net.droppedPackets };
+    }
+  }
+
   assert.ok(
-    drift < 0.5,
-    `client drifted ${drift.toFixed(3)} tiles over BLE ` +
-      `(${client.reconciles} reconciles, ${net.droppedPackets} drops)`,
+    worst.drift < 0.05,
+    `worst drift ${worst.drift.toFixed(3)} tiles over BLE on network seed ${worst.seed} ` +
+      `(${worst.reconciles} reconciles, ${worst.drops} drops). Measured worst over 120 seeds was ` +
+      `0.009 when this bound was set, so this is a real change rather than an unlucky draw.`,
   );
 });
 
