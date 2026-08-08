@@ -330,6 +330,53 @@ jobs:
               state = 'present' if (u8 or u16) else 'no JS importer yet; native class ships'
               print(f"note      {sym:<20} utf8={u8} utf16={u16}  ({state})")
 
+          # The page itself, which nothing above can see.
+          #
+          # This is what every other phone in the room is handed. It is not a JS
+          # symbol and not a native class, so a build where it went missing or
+          # went stale passes every check above and fails as a blank screen on
+          # somebody else's handset -- the one player who cannot see the host's
+          # console to find out why.
+          #
+          # Checked as the base64 literal rather than the decoded HTML, and the
+          # difference matters. Hermes stores strings in a table with no
+          # delimiters, so looking for the decoded page means guessing where the
+          # string ends by scanning for a run of plausible characters, and that
+          # run does not stop where the string does (see tools/verify-apk.py,
+          # which has to do exactly that and documents six bytes of invented
+          # spill). The literal is its own delimiter: either the whole 289KB of
+          # it is in there or it is not.
+          #
+          # Two separate facts, and both are worth having:
+          #   - embed-page.mjs turned the page that was just built into this
+          #     literal, byte for byte;
+          #   - Metro carried that literal into the bundle intact.
+          import base64, re
+          src = open('packages/app/src/net/gamePage.ts').read()
+          m = re.search(r"GAME_PAGE_BASE64\s*=\s*'([A-Za-z0-9+/=]+)'", src)
+          if not m:
+              print("\nno GAME_PAGE_BASE64 literal in src/net/gamePage.ts")
+              sys.exit(1)
+          b64 = m.group(1)
+          built = open('packages/proto/dist/tanks-proto.html', 'rb').read()
+          decoded = base64.b64decode(b64)
+          if decoded != built:
+              print(f"\nembedded page does not match the page just built: "
+                    f"{len(decoded):,} bytes embedded, {len(built):,} bytes built")
+              print("scripts/embed-page.mjs builds the page first, so this means it "
+                    "ran against a different tree than the one being packaged.")
+              sys.exit(1)
+          # ASCII, so Hermes keeps it one byte per character -- the same reason
+          # TanksLan is found by a UTF-8 search and not a UTF-16 one.
+          hits = data.count(b64.encode('utf-8'))
+          print(f"\n{'ok  ' if hits == 1 else 'MISSING'}  the served page      "
+                f"{len(built):,} bytes, {len(b64):,} base64 chars, {hits} copy in the bundle")
+          if hits != 1:
+              print("The host phone would serve nothing. Metro drops what nothing "
+                    "imports: check src/net/gamePage.ts is still reached from the "
+                    "host screen.")
+              sys.exit(1)
+
           if missing:
               print(f"\n{len(missing)} required symbol(s) absent from the shipped bundle: "
                     f"{', '.join(missing)}")
