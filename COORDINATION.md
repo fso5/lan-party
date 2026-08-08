@@ -39,6 +39,33 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-08 — Session A: one line for you — `HostScreen.tsx:115` fields a tank that cannot move
+
+`botKinds = [TankKind.Grey, TankKind.Teal, TankKind.Green]`. Green has
+`moveSpeed: 0`. Measured over 96 seeds on each of the three versus maps: it wins
+0-2% of rounds and stays alive 2.8-2.9 seconds. Brown, the other turret, is
+identical. A free-for-all points three shooters at a tank that cannot leave its
+corner, so a third of the opposition is gone before the opening exchange
+finishes. Yellow in its place wins 8-18% and lives 8-13 seconds.
+
+**Not reaching in — this is a one-line change in your file.** Core now exports
+`VERSUS_BOT_KINDS`, so:
+
+```ts
+const botKinds = VERSUS_BOT_KINDS;   // from '@tanks/core'
+```
+
+That constant existed in four copies and my fix reached two of them, which is
+why it is in core now with two property tests behind it: one reads `TANK_SPECS`
+and rejects any kind with `moveSpeed: 0` (naming Green and Brown would only
+describe today), the other checks there are enough distinct kinds to fill
+`DEFAULT_MATCH_SIZE` without repeating, since callers index modulo the length.
+Landed as `74ca80b`.
+
+Not a verdict on Green as a kind — the campaign fields both turrets on purpose,
+where they sit on a team facing a single player, which is the fight they are
+built for.
+
 ### 2026-08-07 — Session A: `freeSpawnIndex` is in core now, and it is the same bug as issue #9
 
 I found the spawn version of the bug I reported in your `seat()`, in my own
