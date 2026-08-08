@@ -72,6 +72,26 @@ export interface MatchConfig {
 let idCounter = 0;
 
 function makeTank(id: number, kind: TankKind, team: number, x: number, y: number, angle: number): Tank {
+  /*
+   * `kind` is a byte off the wire, so it can be anything.
+   *
+   * A roster arrives in `MatchStart` and every tank's kind is read as a `u8`;
+   * nothing between the socket and here narrows it to a real `TankKind`. An
+   * unknown one used to surface as `TypeError: Cannot read properties of
+   * undefined (reading 'reactionTicks')` from deep inside the AI setup, which
+   * says nothing about rosters, wires or versions.
+   *
+   * That matters beyond tidiness. The browser client wraps this call and
+   * reports *any* throw as "version mismatch" -- so a genuine bug in the same
+   * path wore the same label, and the one case that really is a version
+   * mismatch (an older phone handed a kind a newer host knows) was
+   * indistinguishable from it. Named here, the message says which.
+   */
+  if (!TANK_SPECS[kind]) {
+    throw new Error(
+      `unknown tank kind ${kind} in the roster; this build knows ${Object.keys(TANK_SPECS).join(', ')}`,
+    );
+  }
   const t: Tank = {
     id,
     kind,

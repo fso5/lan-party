@@ -196,3 +196,41 @@ test('the out-of-range fallback puts the tank in the same place every time', () 
     'two tanks with the same bad index were both sent to the same free spawn',
   );
 });
+
+/**
+ * A roster carrying a tank kind this build does not know says so.
+ *
+ * `kind` is a `u8` off the wire and nothing between the socket and `makeTank`
+ * narrows it. It used to surface as `TypeError: Cannot read properties of
+ * undefined (reading 'reactionTicks')` from inside the AI setup -- a message
+ * about none of the things that went wrong.
+ *
+ * The browser client reports any throw from this path as "version mismatch",
+ * so an unnamed failure made a real bug and a real version mismatch read
+ * identically. The assertion is on the *message* for that reason.
+ */
+test('a roster with an unknown tank kind is refused by name', () => {
+  const arena = loadArena(VERSUS_MAPS[0]);
+  assert.throws(
+    () =>
+      createWorld({
+        arena,
+        seed: 1,
+        players: [{ team: 0, spawnIndex: 0 }],
+        bots: [{ kind: 99, team: 1, spawnIndex: 1 }],
+      }),
+    /unknown tank kind 99/,
+    'an unknown kind should name itself rather than fail somewhere downstream',
+  );
+});
+
+/** And every kind the game actually ships still builds. */
+test('every known tank kind can be seated', () => {
+  const arena = loadArena(VERSUS_MAPS[0]);
+  for (const kind of Object.keys(TANK_SPECS).map(Number)) {
+    assert.doesNotThrow(
+      () => createWorld({ arena, seed: 1, players: [], bots: [{ kind, team: 0, spawnIndex: 0 }] }),
+      `kind ${kind} is in TANK_SPECS but cannot be seated`,
+    );
+  }
+});
