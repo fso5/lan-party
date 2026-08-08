@@ -31,7 +31,14 @@ jobs:
     # Browser runs can hang rather than fail -- a rejected WebSocket handshake
     # produces no error, the socket simply never opens. Cap it so a hang costs
     # minutes rather than the job's full default hour.
-    timeout-minutes: 15
+    #
+    # 20 rather than 15 since the Bluetooth and round suites joined: the job
+    # runs in about 2.5 minutes today and those two add roughly 45 seconds of
+    # measured work, but each waits on a simulated round ending and those waits
+    # are budgeted from the 106s tail (see rounds-smoke.mjs). A pathological
+    # run spends its budgets rather than its typical time, and the cap has to
+    # clear that or a slow box reads as a hang.
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4
@@ -70,6 +77,28 @@ jobs:
       - name: Lobby, end to end
         working-directory: packages/proto
         run: npm run lobby:smoke
+
+      # The Bluetooth host path, driven through the page's radio stub.
+      #
+      # This is the only thing in the repo that exercises seating a BLE peer,
+      # unseating it when it leaves, and rebuilding for a second round -- the
+      # `removeClient` fix in 78f1586 is guarded by this suite and nothing
+      # else. It was written, mutation-verified, and then never run outside a
+      # developer's shell, which is the same as not having it.
+      - name: Bluetooth host, end to end
+        working-directory: packages/proto
+        run: npm run ble:smoke
+
+      # What the host puts on the wire between rounds and between matches.
+      #
+      # No browser: a raw socket reading MatchStart. mp:smoke cannot see a
+      # stale round-two seed, because both its clients rebuild from the same
+      # message and would agree with each other perfectly -- verified by
+      # mutation. Also the only check that a crowd larger than the map's spawn
+      # list gets seated without two tanks on one square.
+      - name: Rounds and matches, on the wire
+        working-directory: packages/proto
+        run: npm run rounds:smoke
 
       # The installable version, with the network switched off mid-test.
       #
