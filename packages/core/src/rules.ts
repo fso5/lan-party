@@ -65,9 +65,16 @@ export const DEFAULT_RULES: MatchRules = {
   // is the reason not to tighten it on the strength of a median.
   //
   // What the tail *is* made of: 13.8% of rounds ran past 30s and 1.7% past 60s,
-  // which is the last two survivors circling. People close and shoot, so a
-  // human round should end sooner -- these numbers bound the bot case, and are
-  // where to start if the endgame ever needs hurrying along.
+  // and it is the last two survivors -- 82% of a long round is the 1v1. They
+  // are not circling, which is what this comment used to say before anyone
+  // looked: over the duel they fire three times as many shells as in a short
+  // round, move faster, and close further, with a shell in the air 98% of
+  // ticks. The rounds are long because the shots miss at a mean 12.5 tiles on
+  // a 24-tile map. So the lever, if the endgame ever wants hurrying along, is
+  // accuracy or arena size rather than pursuit -- and none of it is a defect.
+  //
+  // People close and shoot, so a human round should end sooner still; these
+  // numbers bound the bot case rather than predicting play.
   roundTimeLimitTicks: TICK_HZ * 120,
 };
 

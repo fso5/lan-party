@@ -24,6 +24,29 @@
  * and press the trigger, so a human round should end sooner than these. A tail
  * measured here is a lower bound on how bad the human-free case gets, not a
  * prediction of play.
+ *
+ * ## What the tail is made of, watched rather than assumed
+ *
+ * I first wrote that the long rounds were "the last two survivors circling".
+ * The first half is right and the second is wrong, and the difference decides
+ * whether there is anything to fix. Traced over 360 rounds, comparing the ones
+ * past 30 seconds against the rest:
+ *
+ *                          >30s      <30s
+ *     duel, two left       33.0s      6.6s      (82% of the long round)
+ *     shells fired          41.6      13.3
+ *     shell in the air       98%       99%
+ *     movement per tank  1.60 t/s  1.31 t/s
+ *     closest approach    6.2 til  11.1 til
+ *
+ * So it is the last two, and they are not circling: they fire more, move more,
+ * and close further than in a short round. A shell is in the air essentially
+ * always. What makes these rounds long is that the shots miss -- a firefight
+ * at a mean 12.5 tiles on a 24-tile map, which is the game working rather than
+ * an AI that has stopped trying.
+ *
+ * Worth knowing before anyone "hurries the endgame along", including me: the
+ * lever is accuracy or arena size, not pursuit. Nothing here is a defect.
  */
 import {
   createWorld,
