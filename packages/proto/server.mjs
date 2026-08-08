@@ -28,6 +28,7 @@ import {
   MatchHost,
   TankKind,
   DEFAULT_MATCH_SIZE,
+  DEFAULT_RULES,
   Writer,
   createWorld,
   loadArena,
@@ -64,6 +65,23 @@ const transport = new BridgeTransport((to, data) => {
 
 let host = null;
 let match = null;
+let restartTimer = null;
+
+/**
+ * Rounds a side must win, overridable because a full best-of-three is long.
+ *
+ *   ROUNDS=1 npm run mp --workspace @tanks/proto
+ *
+ * Measured before adding this: with one idle client and three bots on separate
+ * teams, round one resolved in 6 seconds and round two took 70, and a
+ * best-of-three had not finished 150 seconds in. That is fine for playing and
+ * useless for checking what happens at the *end* of a match, which is a
+ * distinct code path from the end of a round.
+ */
+const RULES = { ...DEFAULT_RULES, roundsToWin: Number(process.env.ROUNDS || DEFAULT_RULES.roundsToWin) };
+
+/** Long enough to read who won, short enough that nobody wanders off. */
+const MATCH_OVER_PAUSE_MS = 5000;
 
 /**
  * (Re)build the match around whoever is currently connected.
@@ -106,8 +124,27 @@ function startMatch() {
   const seed = 1000 + peers.length * 7;
   const world = createWorld({ arena, seed, players, bots });
 
-  host = new MatchHost(world, transport);
+  host = new MatchHost(world, transport, RULES);
   match = { mapId: MAP.id, seed, players, bots };
+
+  /*
+   * Play again, rather than leaving everyone on a finished match.
+   *
+   * A won match leaves `MatchHost` stepping a world nobody can affect, and the
+   * browser hides its Restart button while a match is running -- so the round
+   * that decided it was the last thing that ever happened, on every phone, with
+   * no control on screen to do anything about it. "Restarting keeps the harness
+   * always playable" is this file's own principle; it just did not cover the
+   * one ending it cannot recover from.
+   *
+   * A pause first, so the result is readable rather than snatched away.
+   */
+  host.onMatchOver = () => {
+    clearTimeout(restartTimer);
+    restartTimer = setTimeout(() => {
+      if (sockets.size > 0) startMatch();
+    }, MATCH_OVER_PAUSE_MS);
+  };
 
   /*
    * Rounds, because "everything above the transport is identical" has to
