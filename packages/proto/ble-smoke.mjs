@@ -12,8 +12,12 @@
  * No radio is needed to test any of that. The page talks to the radio through
  * one seam -- `window.__tanksNative.receive(json)` in, `ReactNativeWebView
  * .postMessage` out -- so stubbing that seam drives the whole path with
- * ordinary JSON. What is exercised here is the page's own wiring: seating,
- * unseating, and the abandoned-tank sweep.
+ * ordinary JSON. What is exercised here is the page's own wiring: seating a
+ * peer, surviving one leaving, and rebuilding the world for a second round.
+ *
+ * Not the abandoned-tank sweep, despite that being the bug above. See the note
+ * further down: the bots shoot an idle tank long before the ten-second sweep
+ * would, so the count falls either way and the assertion would be theatre.
  *
  * Exits non-zero on failure.
  */
@@ -202,6 +206,57 @@ check(
 );
 check((await status()).length > 0, 'the status line was blanked by a disconnect');
 
+/*
+ * A second round, on the host's own screen.
+ *
+ * A MatchHost with no `roundBuilder` plays one round and calls the match over,
+ * which left a Bluetooth match best-of-one under a best-of-three scoreboard.
+ * The rebuild has a trap the headless WiFi server does not: this host *draws*
+ * the match it runs, so `MatchHost` swapping its own world is not enough --
+ * `state.world` has to follow or the screen sits on the corpses of the round
+ * that ended while the simulation carries on somewhere else.
+ *
+ * Asserted on living tanks, not on the round label. "Round 2" is a client-side
+ * counter that advances when round one *ends*, so it reads Round 2 even when
+ * the match is over and nothing was rebuilt -- that mistake was made and
+ * mutation-caught in mp-smoke. Round one wipes the arena down to one tank; only
+ * a real rebuild refills it. Both halves are needed, since a full arena is also
+ * the opening position.
+ */
+/*
+ * A phone that stays, so the rebuild has somebody to re-announce to.
+ *
+ * Without this the only peer has already left, `ble.seats` is empty, and
+ * `announceRound` runs its loop zero times -- the round rebuild would be
+ * covered and the announcement path beside it would not be executed at all. It
+ * runs inside the host's update loop, so anything it throws surfaces as a page
+ * error and fails this run.
+ *
+ * What is still NOT covered here is what that announcement *says*. The frames
+ * leave through the BLE framer, fragmented and base64'd, so reading a seed back
+ * out would mean reassembling them. The equivalent property on the WiFi side --
+ * round two carries its own seed -- is checked on the wire in rounds-smoke.mjs,
+ * against the same single-source-of-truth pattern this host uses.
+ */
+await fromNative({ type: 'ble.connected', peerId: 'phone-3', name: 'Carol' });
+await page.waitForTimeout(300);
+
+const aliveExpr = '(window.__state?.world?.tanks.filter((t) => t.alive).length ?? 0)';
+const settled = async (expr, ms) =>
+  page.waitForFunction(expr, null, { timeout: ms }).then(() => true).catch(() => false);
+
+check(await settled(`${aliveExpr} <= 1`, 30_000), 'round one never resolved, so there was nothing to rebuild');
+const rebuilt = await settled(`${aliveExpr} >= 3`, 30_000);
+const seen = await page.evaluate(
+  (e) => ({ alive: eval(e), label: document.getElementById('round-label').textContent }),
+  aliveExpr,
+);
+check(
+  rebuilt,
+  `the host never rebuilt its world for a second round (${seen.alive} alive, label "${seen.label}")`,
+);
+console.log(`  round two on the host: ${seen.alive} tanks alive, label "${seen.label}"`);
+
 await browser.close();
 server.close();
 
@@ -210,4 +265,4 @@ if (failures.length) {
   console.error('FAILED:\n  ' + failures.join('\n  '));
   process.exit(1);
 }
-console.log('ble smoke passed: the bridge came up, a peer seated into a tank, and a leave did not break the host');
+console.log('ble smoke passed: a peer seated, a leave unseated it, and the host rebuilt for a second round');

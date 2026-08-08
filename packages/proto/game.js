@@ -983,6 +983,47 @@ function hostBluetoothMatch() {
   ble.host.localTankId = world.tanks[0].id;
   ble.role = 'host';
   ble.match = { mapId: map.id, seed, players, bots };
+  /*
+   * peerId -> its index in `ble.match.players`, which is also its tank id.
+   *
+   * A round rebuild needs to hand every seated phone the same slot it had, and
+   * neither the transport nor MatchHost can answer that: the transport knows
+   * peers but not slots, and MatchHost keeps its client map private. Held as
+   * the index rather than the tank object because the rebuild replaces every
+   * tank -- `createWorld` restarts its ids at zero and creates players first,
+   * so slot `i` is tank `i` in whatever world is current.
+   */
+  ble.seats = new Map();
+
+  /*
+   * Rounds, the same as the WiFi harness now does.
+   *
+   * A MatchHost with no `roundBuilder` plays one round and declares the match
+   * over, which left a Bluetooth match best-of-one underneath a scoreboard
+   * showing best-of-three.
+   *
+   * A new seed per round: the simulation is deterministic, so replaying one
+   * seed is the same fight every time. `ble.match` is rewritten with it rather
+   * than the seed being computed separately, because `announceRound` sends
+   * `{...ble.match}` -- keeping two copies is how the WiFi version shipped a
+   * round-two world the clients rebuilt from round one's numbers.
+   */
+  ble.host.roundBuilder = (round) => {
+    ble.match = { ...ble.match, seed: seed + round * 101 };
+    return createWorld({
+      arena,
+      seed: ble.match.seed,
+      players: ble.match.players,
+      bots: ble.match.bots,
+    });
+  };
+
+  // Only the announcement. The renderer needs no help -- the frame loop
+  // re-reads `ble.host.world` every tick, so it follows the swap on its own;
+  // an assignment here looked necessary and was measured to be a no-op.
+  // `localTankId` needs none either: `createWorld` restarts ids at zero and
+  // creates players first, so the host is tank 0 in every round it builds.
+  ble.host.onRoundStart = (w) => announceRound(w);
 
   transport.setEvents({
     onPeerJoin: (peer) => seatBluetoothClient(peer),
@@ -1001,6 +1042,10 @@ function hostBluetoothMatch() {
     // departed peer is already gone from that.
     onPeerLeave: (peerId) => {
       ble.host?.removeClient(peerId);
+      // Their slot stays in `ble.match.players` -- the roster only grows, and a
+      // rebuilt round still needs a tank there for the ids to line up -- but
+      // drop the seat so the next rebuild does not address a phone that left.
+      ble.seats.delete(peerId);
       setNetStatus('hosting');
     },
     onPacket: (from, data) => ble.host.handlePacket(from, data),
@@ -1011,6 +1056,25 @@ function hostBluetoothMatch() {
   document.getElementById('lobby').hidden = true;
   document.getElementById('map-name').textContent = map.name;
   resize();
+}
+
+/**
+ * Reseat every still-connected phone in a freshly built round and tell them.
+ *
+ * `MatchStart` is the only thing that says "here is the new world"; without it
+ * a client keeps simulating the round that already ended, holding tank ids
+ * that no longer exist. `removeClient` first because the old slots point into
+ * the world that just finished.
+ */
+function announceRound(world) {
+  for (const [peerId, slot] of ble.seats) {
+    ble.host.removeClient(peerId);
+    if (slot >= ble.match.players.length) continue;
+    ble.host.addClient(peerId, slot);
+    const w = new Writer(64);
+    writeMatchStart(w, { ...ble.match, hostTick: world.tick, yourTankId: slot });
+    ble.transport.send(peerId, w.finish(), true);
+  }
 }
 
 /**
@@ -1070,6 +1134,8 @@ function seatBluetoothClient(peer) {
   // world from, so a spawn index that disagrees with where the host actually
   // put the tank desyncs the two on the first frame.
   ble.match.players = ble.match.players.concat([{ team: taken, spawnIndex: seat }]);
+  // Remember the slot, so a round rebuild can give this phone the same one.
+  ble.seats.set(peer.id, ble.match.players.length - 1);
 
   const w = new Writer(64);
   writeMatchStart(w, { ...ble.match, hostTick: world.tick, yourTankId: tankId });
