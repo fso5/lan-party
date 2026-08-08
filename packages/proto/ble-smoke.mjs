@@ -245,8 +245,33 @@ const aliveExpr = '(window.__state?.world?.tanks.filter((t) => t.alive).length ?
 const settled = async (expr, ms) =>
   page.waitForFunction(expr, null, { timeout: ms }).then(() => true).catch(() => false);
 
-check(await settled(`${aliveExpr} <= 1`, 30_000), 'round one never resolved, so there was nothing to rebuild');
-const rebuilt = await settled(`${aliveExpr} >= 3`, 30_000);
+/*
+ * The budget comes from the measured distribution, not from a guess.
+ *
+ * This wait was 30 seconds when it was written, and the wipeout takes 33 on an
+ * idle machine -- so it passed by luck and failed the first time it ran after
+ * five other suites had warmed the box up. tools/round-length.mjs puts a
+ * four-tank free-for-all at a 12.7s median but a 61.8s p99 and a 106s longest
+ * over 600 rounds, and this scenario is worse than that sample: six tanks, two
+ * of them idle players nobody is steering.
+ *
+ * So the bound is the measured tail with room over it. It costs nothing on a
+ * normal run -- the wait ends the moment the round does -- and the run it saves
+ * is the one on a loaded CI box.
+ */
+const ROUND_BUDGET_MS = 150_000;
+const t0 = Date.now();
+const resolved = await settled(`${aliveExpr} <= 1`, ROUND_BUDGET_MS);
+check(
+  resolved,
+  `round one never resolved in ${ROUND_BUDGET_MS / 1000}s of wall clock -- the host reached tick ` +
+    `${await page.evaluate('window.__state?.world?.tick ?? -1')}, which is ` +
+    `${(Number(await page.evaluate('window.__state?.world?.tick ?? 0')) / 60).toFixed(0)}s of game time. ` +
+    `If the tick count is high the round is genuinely long (see tools/round-length.mjs); ` +
+    `if it is low the page is not simulating.`,
+);
+if (resolved) console.log(`  round one resolved after ${((Date.now() - t0) / 1000).toFixed(1)}s wall`);
+const rebuilt = await settled(`${aliveExpr} >= 3`, 30_000); // The rebuild is immediate once the round ends.
 const seen = await page.evaluate(
   (e) => ({ alive: eval(e), label: document.getElementById('round-label').textContent }),
   aliveExpr,

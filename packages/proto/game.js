@@ -88,6 +88,8 @@ const state = {
   particles: [],
   shake: 0,
   tickTimes: [],
+  /** Which of sim/host/client `tickTimes` is currently measuring. */
+  tickLabel: null,
 };
 
 const input = {
@@ -1700,12 +1702,49 @@ function updateHud() {
     const c = net.client;
     dbg.textContent =
       `tick ${w.tick}  shells ${w.shells.length}  mines ${w.mines.length}  ` +
-      `sim ${(avg * 1000).toFixed(0)}µs/tick` +
+      // Named by what was measured, and per frame rather than per tick outside
+      // solo -- a host or client update covers however many ticks the clock
+      // owed plus, on a client, any rollback.
+      `${state.tickLabel ?? 'sim'} ${(avg * 1000).toFixed(0)}µs/${state.tickLabel === 'sim' || !state.tickLabel ? 'tick' : 'frame'}` +
       (c
         ? `  |  snap ${c.snapshotsApplied} stale ${c.snapshotsStale} ` +
           `reconcile ${c.reconciles} resync ${c.resyncs} err ${c.lastError.toFixed(3)}`
         : '');
   }
+}
+
+/**
+ * Time the work that advances the world, and record *which* work it was.
+ *
+ * The debug readout used to say `sim ...µs/tick` in every mode while only the
+ * solo branch ever recorded anything. In a networked match it therefore showed
+ * either leftover solo numbers from before the match started -- one run read
+ * 4929µs/tick, which is seven times what tools/sim-bench.mjs measures for a
+ * fuller world -- or a flat 0 when there had been no solo play to leave any.
+ * A number with a plausible unit and nothing behind it.
+ *
+ * The three modes do not measure the same thing, so the label says which:
+ *
+ *   sim     one `step` in solo play, per tick
+ *   host    one `MatchHost.update`, per frame: however many ticks the clock
+ *           owed, plus snapshot sends
+ *   client  one `MatchClient.update`, per frame, and the interesting one -- it
+ *           includes a rollback re-simulating every tick since the snapshot,
+ *           which is the part that could actually miss a frame on a phone
+ *
+ * Kept as one function so a fourth mode cannot quietly go unmeasured while
+ * still displaying a figure.
+ */
+function timeStep(label, work) {
+  const t0 = performance.now();
+  work();
+  const dur = performance.now() - t0;
+  if (state.tickLabel !== label) {
+    state.tickLabel = label;
+    state.tickTimes.length = 0;
+  }
+  state.tickTimes.push(dur);
+  if (state.tickTimes.length > 120) state.tickTimes.shift();
 }
 
 // --- Loop ----------------------------------------------------------------
@@ -1721,7 +1760,7 @@ function frame(now) {
   if (state.running && ble.host) {
     // The host runs the authoritative simulation; its own input is local.
     ble.host.setLocalInput(gatherInput());
-    ble.host.update(elapsed);
+    timeStep('host', () => ble.host.update(elapsed));
     state.world = ble.host.world;
     consumeEvents();
     updateParticles(elapsed / 1000);
@@ -1729,7 +1768,7 @@ function frame(now) {
     // MatchClient reassigns .world when it rewinds to reconcile, so re-read it
     // every frame rather than holding a reference that goes stale mid-match.
     net.client.setInput(gatherInput());
-    net.client.update(elapsed);
+    timeStep('client', () => net.client.update(elapsed));
     state.world = net.client.world;
     consumeEvents();
     updateParticles(elapsed / 1000);
@@ -1739,11 +1778,7 @@ function frame(now) {
     let budget = 8;
     while (accumulator >= TICK_MS && budget-- > 0) {
       accumulator -= TICK_MS;
-      const t0 = performance.now();
-      step(state.world, gatherAllInputs());
-      const dur = performance.now() - t0;
-      state.tickTimes.push(dur);
-      if (state.tickTimes.length > 120) state.tickTimes.shift();
+      timeStep('sim', () => step(state.world, gatherAllInputs()));
       consumeEvents();
 
       if (!state.outcome && isMatchOver(state.world)) {

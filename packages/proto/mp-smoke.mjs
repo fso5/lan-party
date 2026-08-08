@@ -349,6 +349,31 @@ if (after[0].tanks.length && after[1].tanks.length) {
     applied > 0,
     `a seated client has applied snapshots, but the readout says ${applied}`,
   );
+
+  /*
+   * The cost figure has to be measuring *this* mode.
+   *
+   * It used to say `sim ...µs/tick` in every mode while only the solo branch
+   * recorded anything, so a networked client displayed leftover numbers from
+   * the solo play before the match -- one run read 4929µs/tick, seven times
+   * what tools/sim-bench.mjs measures for a fuller world -- or a flat 0 when
+   * there had been none to leave. Both are a plausible unit with nothing behind
+   * it, and the second is what a stale reading looks like once someone
+   * "cleans up" the first.
+   *
+   * So: labelled `client`, and a positive number. Not bounded above -- this
+   * suite is not a benchmark and a loaded runner would make that flap; the
+   * budget question belongs to tools/sim-bench.mjs.
+   */
+  const cost = text.match(/(sim|host|client) (\d+)µs\/(tick|frame)/);
+  check(!!cost, `the readout carries a labelled cost figure, got "${text}"`);
+  if (cost) {
+    check(
+      cost[1] === 'client',
+      `a networked client's readout says "${cost[1]}", so it is reporting another mode's numbers`,
+    );
+    check(Number(cost[2]) > 0, `the client cost reads ${cost[2]}µs, so nothing is being measured`);
+  }
 }
 
 for (const e of errors) failures.push('console error: ' + e);
