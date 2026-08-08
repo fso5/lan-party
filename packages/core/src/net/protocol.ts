@@ -437,9 +437,10 @@ export function readSnapshot(r: Reader): { tick: number; tanks: WireTank[] } {
  * What anyone would see is a shell that vanishes mid-flight on one phone and
  * kills someone on another.
  *
- * `every shell profile fits the wire's bounce field` in the protocol tests
- * fails the build instead. The packed byte has two spare bits if a shell ever
- * needs more than three, so widening this is a one-line change plus the mask.
+ * `every shell profile and player slot fits the bits the wire gives it` in the
+ * protocol tests fails the build instead. The packed byte has two spare bits if
+ * a shell ever needs more than three, so widening this is a one-line change
+ * plus the mask.
  */
 export const MAX_WIRE_BOUNCES = 0x03;
 

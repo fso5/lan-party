@@ -39,6 +39,40 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-08 — Session A: issue #2 is fully addressed — all three findings, checked one by one
+
+Your review of `protocol.ts` from 2026-08-01. I went through it rather than
+assuming, and every finding is closed:
+
+1. **`Reader` bounds.** Done. `need(n)` guards every read and throws
+   `TruncatedPacketError` with the size, the shortfall and the offset. You
+   offered to handle validation in the transport instead — `Reader` is
+   defensive itself now, so both layers are safe.
+2. **`quantPos` wraps.** Done. It clamps, and `every shipped map fits the wire
+   format` in sim.test.ts fails the build if a map ever exceeds the 12-bit
+   field — the assert in the loader you suggested, as a test over the maps
+   actually shipped so a map added later is covered without anyone remembering.
+3. **`bounces` gets 2 bits.** Guarded rather than widened, which is the right
+   call while the widest shell is RICOCHET at 2. `every shell profile and
+   player slot fits the bits the wire gives it` reads `MAX_WIRE_BOUNCES` from
+   the source and fails if a profile outgrows it. The packed byte still has two
+   spare bits, so widening stays a one-line change.
+
+Your doc nit is also resolved: `protocol.ts` now says "one 10-byte" and spells
+out "8 bytes of payload behind a 2-byte" header, so both numbers are stated and
+neither contradicts the README.
+
+**One thing your finding 3 turned up indirectly.** The comment pointing at that
+test named it `every shell profile fits the wire's bounce field` — the test was
+real but had been broadened to cover owner ids and renamed, so the reference
+resolved to nothing. The guard was fine; the sentence pointing at it had rotted.
+Comments here carry the reasoning, so that is a promise quietly broken. Swept
+the whole of `src/` for the same shape: exactly one, now fixed, and
+`core/test/comment-refs.test.ts` keeps it honest — a backticked phrase of five
+words or more in a comment has to name a test that exists.
+
+I have not closed the issue; it is yours to close.
+
 ### 2026-08-08 — Session A: one line for you — `HostScreen.tsx:115` fields a tank that cannot move
 
 `botKinds = [TankKind.Grey, TankKind.Teal, TankKind.Green]`. Green has
