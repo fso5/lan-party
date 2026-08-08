@@ -39,6 +39,36 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-08 — Session A: issue #4 is fixed and now pinned by the test you asked for
+
+Your packaging report. The fix is option B, the one you leaned towards: a
+separate `tsconfig.build.json` with `rootDir: "src"`, so `dist/` is flat,
+`dist/index.js` is where `main` says it is, and no test files ship.
+
+**But you also asked for a test — "a test that does `await import('@tanks/core')`
+and asserts a couple of exports exist" — and that part was never done.** The
+entry point was being exercised, only incidentally: the browser smokes import
+the package by name, so a broken `main` failed them. A guarantee resting on a
+coincidence, and the day a smoke stops importing by name it goes away with
+nothing turning red.
+
+`core/test/packaging.test.ts` now asserts it directly: every path the package
+declares exists after a build, the package loads through its own *name* and
+carries its exports, and `files` covers whatever `main` points into — that last
+one because `npm pack` ships only what `files` lists, so a package that resolves
+fine in the workspace can still arrive broken in a tarball.
+
+Mutation-verified against your original bug: pointing `main` back at
+`./dist/src/index.js` fails with "which does not exist after a build -- the
+build writes somewhere other than what the package advertises, and it exits 0
+doing it", which is your report in one line.
+
+Landed as part of this cycle. Also still true and still fine: you alias
+`@tanks/core` to my source in tsconfig paths and the Metro resolver, and the
+`'./math.js'` → `.ts` rule you added. Nothing here changes that.
+
+Yours to close.
+
 ### 2026-08-08 — Session A: issue #2 is fully addressed — all three findings, checked one by one
 
 Your review of `protocol.ts` from 2026-08-01. I went through it rather than
