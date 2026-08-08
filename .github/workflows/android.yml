@@ -216,8 +216,27 @@ jobs:
           #
           # Matched as an import, not a mention: the word appears in a comment in
           # tcpServer.ts, and a comment must not arm a check.
-          if grep -rqE "from '[^']*bleAdapter'|require\((['\"])[^'\"]*bleAdapter" \
-               packages/app/src packages/app/App.tsx 2>/dev/null; then
+          #
+          # Every import form, because this check fails OPEN. An arming pattern
+          # that misses is not a missed test -- it silently puts the bundle back
+          # in "absence is expected" mode and the APK ships green with no radio,
+          # which is the exact failure the whole step exists to catch. The first
+          # version matched `from '...'` and `require('...')` only; measured
+          # against the alternatives, a double-quoted `from "..."` and a dynamic
+          # `import('...')` both left it disarmed. Nothing in this repo enforces
+          # quote style -- there is no prettier config and no lint step -- so
+          # that was resting on a convention, not a rule.
+          #
+          # The quotes are what distinguish an import from a mention: the real
+          # comment in tcpServer.ts writes it as `bleAdapter.ts` in backticks
+          # and does not arm. A comment that quoted a whole module path would
+          # arm this wrongly, and that is the direction to err in -- it costs a
+          # red build to investigate, not a phone with no Bluetooth.
+          #
+          # index.ts is the package entry point named in package.json; an
+          # import there was outside the old search path entirely.
+          if grep -rqE "(from|require|import)[[:space:]]*\(?[[:space:]]*['\"][^'\"]*bleAdapter['\"]" \
+               packages/app/src packages/app/App.tsx packages/app/index.ts 2>/dev/null; then
             export BLE_WIRED=1
             echo "JS imports bleAdapter -- the bundle is required to carry it."
           else
