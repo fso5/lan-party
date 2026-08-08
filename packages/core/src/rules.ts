@@ -56,6 +56,18 @@ export const DEFAULT_RULES: MatchRules = {
   // map and count, and the slowest of 72 runs took 100s. Two minutes sits well
   // clear of legitimate play while still ending a stalemate inside the span of
   // somebody's patience.
+  //
+  // Re-measured later over 600 free-for-all rounds, three versus maps, all bots
+  // (tools/round-length.mjs), because two minutes is a long time to be told the
+  // round is still going: median 12.7s, p90 34.6s, p99 61.8s, longest 106.2s.
+  // Not one round reached this limit. So it is a backstop rather than a
+  // participant -- and 106 against 120 says it is not dead code either, which
+  // is the reason not to tighten it on the strength of a median.
+  //
+  // What the tail *is* made of: 13.8% of rounds ran past 30s and 1.7% past 60s,
+  // which is the last two survivors circling. People close and shoot, so a
+  // human round should end sooner -- these numbers bound the bot case, and are
+  // where to start if the endgame ever needs hurrying along.
   roundTimeLimitTicks: TICK_HZ * 120,
 };
 
