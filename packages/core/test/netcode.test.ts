@@ -138,14 +138,29 @@ function runMatch(profile = PERFECT_PROFILE, seconds = 10, netSeed = 5, startTic
   return { net, host, client, liveDrift, aliveTicks };
 }
 
+/**
+ * The same correction as the Bluetooth test below, applied here.
+ *
+ * This compared the two worlds once, after ten seconds, and the tank is alive
+ * for 130 of those 600 ticks -- dead for the last four fifths, and a dead tank
+ * agrees with the host for free. The 0.25 bound was therefore sitting around a
+ * quantity that mostly was not being produced.
+ *
+ * Live drift over a perfect link is 0.0037: nothing crosses the wire wrong, so
+ * all that is left is snapshot quantisation. 0.02 is roughly five times that.
+ */
 test('client stays converged with the host over a perfect link', () => {
-  const { host, client } = runMatch(PERFECT_PROFILE, 10);
+  const { liveDrift, aliveTicks } = runMatch(PERFECT_PROFILE, 10);
 
-  const h = host.world.tanks.find((t) => t.id === 1)!;
-  const c = client.world.tanks.find((t) => t.id === 1)!;
-  const drift = Math.hypot(h.x - c.x, h.y - c.y);
-
-  assert.ok(drift < 0.25, `client drifted ${drift.toFixed(3)} tiles from the host`);
+  assert.ok(
+    aliveTicks > 60,
+    `only ${aliveTicks} ticks with the tank alive, so there is next to nothing being compared`,
+  );
+  assert.ok(
+    liveDrift < 0.02,
+    `client drifted ${liveDrift.toFixed(4)} tiles from the host while alive over ${aliveTicks} ticks ` +
+      `(measured 0.0037 when this bound was set)`,
+  );
 });
 
 /**
