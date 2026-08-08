@@ -100,6 +100,18 @@ jobs:
         working-directory: packages/proto
         run: npm run rounds:smoke
 
+      # The server the host phone actually runs, against a real browser.
+      #
+      # Every step above points Chromium at server.mjs, which is node:http and
+      # the `ws` package -- neither of which ships. The Android host serves the
+      # page and carries the game through LanHost and our own WebSocket code.
+      # So browsers were testing code that does not ship, and the code that
+      # does ship was only ever tested against Node's client. This is the one
+      # step where those meet.
+      - name: A real browser against LanHost
+        working-directory: packages/proto
+        run: npm run lan:smoke
+
       # The installable version, with the network switched off mid-test.
       #
       # `pages.yml` builds this and deploys it without ever loading it, so a
