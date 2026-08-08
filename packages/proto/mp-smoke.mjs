@@ -228,6 +228,90 @@ console.log('scoreboard A:', JSON.stringify(a.chips), 'label', a.roundLabel);
 console.log('scoreboard B:', JSON.stringify(c.chips), 'label', c.roundLabel);
 
 /*
+ * A second round, which nothing has ever checked.
+ *
+ * The server had no `roundBuilder`, so a MatchHost with no way to build a
+ * second world declared the match over after one round -- while the browser
+ * sat there showing a best-of-three scoreboard. That also meant the round
+ * transition was untested on both sides, and it is the most intricate thing a
+ * host does: build a new world, reseat everyone, and send a fresh MatchStart
+ * while the clock keeps running.
+ *
+ * Asserted on both clients, because the interesting half is the *client*:
+ * `net.dispatch` has to notice a MatchStart arriving long after MatchClient
+ * took over and rebuild the world from it. If it forwarded that packet to
+ * MatchClient like any other, the phone would keep simulating the round that
+ * already ended.
+ *
+ * The bots resolve a round in roughly six seconds of game time on their own,
+ * with these clients pressing nothing. Twenty-five is slack, not an
+ * expectation.
+ */
+/*
+ * Asserted on living tanks, NOT on the round label.
+ *
+ * "Round 2" is a client-side counter that advances when round one *ends*, and
+ * it advances just the same when the host had no way to build a second world
+ * and declared the match over instead. The first version of this check waited
+ * for that label and passed with `roundBuilder` removed -- it was reading the
+ * counter, not the round.
+ *
+ * A real new round is visible in the world: round one ends with at most one
+ * tank standing, and the rebuild brings them all back. So wait for the wipeout
+ * first and the recovery second. Neither half alone means anything -- the
+ * arena starts full, so "three alive" is the opening position too.
+ */
+const alive = 'window.__state?.world?.tanks.filter((t) => t.alive).length ?? 0';
+const roundTwo = async (p, label) => {
+  const ended = await p
+    .waitForFunction(`(${alive}) <= 1`, null, { timeout: 25_000 })
+    .then(() => true)
+    .catch(() => false);
+  check(ended, `${label}: round one never resolved, so there was nothing to rebuild`);
+  const rebuilt = await p
+    .waitForFunction(`(${alive}) >= 3`, null, { timeout: 25_000 })
+    .then(() => true)
+    .catch(() => false);
+  const now = await p.evaluate(() => ({
+    label: document.getElementById('round-label').textContent,
+    tick: window.__state?.world?.tick ?? null,
+    alive: window.__state?.world?.tanks.filter((t) => t.alive).length ?? 0,
+  }));
+  check(
+    rebuilt,
+    `${label}: the world was never rebuilt for a second round ` +
+      `(${now.alive} tanks alive, label "${now.label}")`,
+  );
+  return now;
+};
+// Both watched at once, not one after the other. Waiting on A first spends
+// twenty seconds of wall clock, and B's wipeout happens during it -- so B was
+// already back in a full arena by the time anyone looked, and the run failed
+// claiming B's round one "never resolved" when it had resolved and rebuilt
+// while the test was busy.
+const [r2a, r2b] = await Promise.all([roundTwo(pages[0], 'A'), roundTwo(pages[1], 'B')]);
+console.log(`round two: A "${r2a.label}" tick ${r2a.tick} ${r2a.alive} alive, B "${r2b.label}" tick ${r2b.tick} ${r2b.alive} alive`);
+
+/*
+ * And the new world has to be the *host's* new world. The round-two MatchStart
+ * carries a different seed from round one -- replaying the same seed would be
+ * the same fight three times -- so a client that rebuilt from a stale seed is
+ * running a different match while looking perfectly healthy. Both clients
+ * agreeing on tank positions is what rules that out.
+ */
+const after = await Promise.all(pages.map(snap));
+if (after[0].tanks.length && after[1].tanks.length) {
+  let worst = 0;
+  for (const [id, x, y] of after[0].tanks) {
+    const other = after[1].tanks.find((t) => t[0] === id);
+    if (!other) continue;
+    worst = Math.max(worst, Math.hypot(x - other[1], y - other[2]));
+  }
+  console.log(`round two cross-client disagreement: ${worst.toFixed(3)} tiles`);
+  check(worst < 1.5, `the two clients disagree by ${worst.toFixed(2)} tiles after the round rebuild`);
+}
+
+/*
  * The connection numbers have to be the real ones.
  *
  * smoke.mjs already checks the readout opens and carries a live tick, but it

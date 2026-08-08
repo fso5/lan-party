@@ -13,7 +13,8 @@
     "mp:smoke": "node build.mjs && node mp-smoke.mjs",
     "lobby:smoke": "node build.mjs && node lobby-smoke.mjs",
     "ble:smoke": "node build.mjs && node ble-smoke.mjs",
-    "smoke:all": "node build.mjs && node smoke.mjs && node mp-smoke.mjs && node lobby-smoke.mjs && node ble-smoke.mjs && node build-pwa.mjs && node pwa-check.mjs"
+    "rounds:smoke": "node build.mjs && node rounds-smoke.mjs",
+    "smoke:all": "node build.mjs && node smoke.mjs && node mp-smoke.mjs && node lobby-smoke.mjs && node ble-smoke.mjs && node rounds-smoke.mjs && node build-pwa.mjs && node pwa-check.mjs"
   },
   "dependencies": {
     "@tanks/core": "*",

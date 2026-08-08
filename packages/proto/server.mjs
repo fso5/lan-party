@@ -109,8 +109,59 @@ function startMatch() {
   host = new MatchHost(world, transport);
   match = { mapId: MAP.id, seed, players, bots };
 
-  peers.forEach((peerId, i) => {
-    host.addClient(peerId, i); // players were created first, so ids are 0..n-1
+  /*
+   * Rounds, because "everything above the transport is identical" has to
+   * include them.
+   *
+   * Without a `roundBuilder` a MatchHost plays exactly one round and then
+   * declares the match over -- a truthful outcome, and one this harness was
+   * quietly living with while the browser showed a best-of-three scoreboard.
+   * It also meant nothing here exercised the round transition, which is the
+   * most intricate thing a host does: build a new world, reseat everyone, and
+   * tell them, all while the clock keeps running. The app's own host
+   * (HostScreen) does all three; this now does the same, so the two agree.
+   *
+   * A new seed per round. Reusing it replays the same round, and a bot match
+   * is deterministic, so a best-of-three would be the same fight three times.
+   *
+   * `match` is rewritten with that seed, and it has to be: `announce` sends
+   * `{...match}`, so leaving the original seed in there ships the client a
+   * world built from different numbers than the host's. Measured before it was
+   * fixed -- both MatchStarts went out reading seed 1007 while round two was
+   * running on 1209, which is every bot diverging on its first decision.
+   */
+  host.roundBuilder = (round) => {
+    match = { ...match, seed: seed + round * 101 };
+    return createWorld({ arena, seed: match.seed, players, bots });
+  };
+
+  /*
+   * Reseat and re-announce. A new world means new tank objects, so a client
+   * holding the old ids is driving nothing -- and `MatchStart` is the only
+   * thing that tells it otherwise. `removeClient` first because the old slots
+   * point into the world that just ended.
+   */
+  host.onRoundStart = (w, round) => {
+    for (const peerId of [...sockets.keys()]) host.removeClient(peerId);
+    announce(w);
+    console.log(`  round ${round}`);
+  };
+
+  announce(world);
+  console.log(`  match started: ${peers.length} player(s), ${bots.length} bot(s) on "${MAP.name}"`);
+}
+
+/**
+ * Seat every connected peer in the current world and tell them about it.
+ *
+ * Players are created before bots and in peer order, so peer `i` owns tank
+ * `i` -- the same assumption `startMatch` builds the roster on, kept in one
+ * place now that a round rebuild needs it too.
+ */
+function announce(world) {
+  [...sockets.keys()].forEach((peerId, i) => {
+    if (i >= match.players.length) return;
+    host.addClient(peerId, i);
     const w = new Writer(64);
     // Include the host's current tick so the client can start its clock ahead
     // of ours rather than at zero -- a client running behind the host can never
@@ -119,8 +170,6 @@ function startMatch() {
     const sock = sockets.get(peerId);
     if (sock && sock.readyState === sock.OPEN) sock.send(w.finish());
   });
-
-  console.log(`  match started: ${peers.length} player(s), ${bots.length} bot(s) on "${MAP.name}"`);
 }
 
 wss.on('connection', (sock) => {
