@@ -555,7 +555,10 @@ function loadMap(i) {
   for (let p = 0; p < seats; p++) players.push({ team: p, spawnIndex: p });
 
   const bots = [];
-  const kinds = [TankKind.Grey, TankKind.Teal, TankKind.Green];
+  // VERSUS_BOT_KINDS, not a local list: this one still read [Grey, Teal, Green]
+  // after the measured fix reached the two networked hosts, so the solo game --
+  // the most played path here -- kept fielding a tank that cannot move.
+  const kinds = VERSUS_BOT_KINDS;
   if (arena.enemies.length === 0) {
     // Up to a good match, not up to the map's capacity. The maps carry eight
     // starts so a full lobby has somewhere to stand; that is not a reason to
@@ -961,11 +964,7 @@ function hostBluetoothMatch() {
 
   const players = [{ team: 0, spawnIndex: 0 }];
   const bots = [];
-  // No immobile kind, for the same measured reason as server.mjs: Green and
-  // Brown have moveSpeed 0, and over 96 seeds on each versus map they won 0-2%
-  // of rounds and lived 2.8-2.9 seconds. A turret in a free-for-all is a free
-  // kill for three shooters.
-  const kinds = [TankKind.Grey, TankKind.Teal, TankKind.Yellow];
+  const kinds = VERSUS_BOT_KINDS;
   // Same cap as couch play. This used to say no smoke reaches the line, which
   // was true and is the reason a real bug lived a few lines below it -- see
   // ble-smoke.mjs, which drives this whole path with a stubbed radio.

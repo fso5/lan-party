@@ -26,9 +26,9 @@ import { WebSocketServer } from 'ws';
 import {
   BridgeTransport,
   MatchHost,
-  TankKind,
   DEFAULT_MATCH_SIZE,
   DEFAULT_RULES,
+  VERSUS_BOT_KINDS,
   Writer,
   createWorld,
   loadArena,
@@ -101,20 +101,7 @@ function startMatch() {
   // at. Up to a good match size rather than up to the map's capacity -- the
   // maps carry eight starts so a full lobby has somewhere to stand, which is
   // not a reason to put seven bots in front of one tester.
-  //
-  // No immobile kind in here, which is measured rather than assumed. This used
-  // to read [Grey, Teal, Green], and Green has moveSpeed 0: over 96 seeds on
-  // each of the three versus maps it won 0-2% of rounds and stayed alive for
-  // 2.8-2.9 seconds. Brown, the other turret, is identical. A tank that cannot
-  // move is a free kill for three shooters in a free-for-all, so the tester was
-  // really facing two opponents after the opening exchange. Yellow, in its
-  // place, wins 8-18% and lives 8-13 seconds -- an opponent rather than a
-  // three-second decoration.
-  //
-  // Note this is a versus-map judgement, not a verdict on Green. The campaign
-  // fields both turrets deliberately: there they sit on a team facing a single
-  // player, which is a fight they are built for. See tools/campaign-curve.mjs.
-  const botKinds = [TankKind.Grey, TankKind.Teal, TankKind.Yellow];
+  const botKinds = VERSUS_BOT_KINDS;
   const bots = [];
   const fillTo = Math.min(DEFAULT_MATCH_SIZE, arena.spawns.length);
   for (let s = players.length; s < fillTo; s++) {

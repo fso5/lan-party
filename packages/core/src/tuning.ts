@@ -172,3 +172,24 @@ export const TANK_SPECS: Record<TankKind, TankSpec> = {
     bankShotDepth: 1,
   },
 };
+
+/**
+ * The kinds a versus map is filled up with when there are spare spawns.
+ *
+ * Here rather than in each caller because it was written out in four places
+ * and drifted: a measured fix reached two of them and left the solo path and
+ * the app's host still fielding a tank that cannot move.
+ *
+ * No immobile kind, which is measured rather than assumed. It used to read
+ * [Grey, Teal, Green], and Green has `moveSpeed: 0` -- over 96 seeds on each of
+ * the three versus maps it won 0-2% of rounds and stayed alive for 2.8-2.9
+ * seconds. Brown, the other turret, is identical. A free-for-all points three
+ * shooters at a tank that cannot leave its corner, so a third of the opposition
+ * was gone before the opening exchange finished. Yellow, in its place, wins
+ * 8-18% and lives 8-13 seconds.
+ *
+ * Not a verdict on Green as a kind, and the campaign is why this is scoped to
+ * versus: there both turrets sit on a team facing a single player, which is the
+ * fight they are built for. See tools/campaign-curve.mjs.
+ */
+export const VERSUS_BOT_KINDS: readonly TankKind[] = [TankKind.Grey, TankKind.Teal, TankKind.Yellow];

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createWorld, freeSpawnIndex } from '../src/sim.js';
 import { loadArena, VERSUS_MAPS } from '../src/maps/index.js';
 import { TankKind } from '../src/types.js';
-import { DEFAULT_MATCH_SIZE, TANK_RADIUS } from '../src/tuning.js';
+import { DEFAULT_MATCH_SIZE, TANK_RADIUS, TANK_SPECS, VERSUS_BOT_KINDS } from '../src/tuning.js';
 import type { Tank } from '../src/types.js';
 
 /** Only the fields `freeSpawnIndex` reads. */
@@ -88,4 +88,38 @@ test('a joiner is never seated on top of a bot the host placed', () => {
       );
     }
   }
+});
+
+/**
+ * The versus fill must not contain a tank that cannot move.
+ *
+ * A property, not a spelling check. `moveSpeed: 0` is what makes Green and
+ * Brown turrets, and a free-for-all points every other shooter at one -- so a
+ * roster containing one is a seat that is over before the opening exchange
+ * finishes. Reading `TANK_SPECS` rather than naming the forbidden kinds keeps
+ * this true if a kind is ever retuned to or away from standing still.
+ */
+test('no versus bot fill uses a tank that cannot move', () => {
+  assert.ok(VERSUS_BOT_KINDS.length > 0, 'the fill is empty, so it fills nothing');
+  for (const kind of VERSUS_BOT_KINDS) {
+    assert.ok(
+      TANK_SPECS[kind].moveSpeed > 0,
+      `the versus bot fill contains kind ${kind}, which has moveSpeed ` +
+        `${TANK_SPECS[kind].moveSpeed} -- it cannot leave its spawn and is a free kill`,
+    );
+  }
+});
+
+/**
+ * And it has to be able to fill a match without repeating itself immediately.
+ *
+ * Callers index it modulo its length, so a one-kind fill puts three of the same
+ * tank in every game. `DEFAULT_MATCH_SIZE` is the size they fill to, minus the
+ * one seat the human takes.
+ */
+test('the versus bot fill has enough variety for a full match', () => {
+  assert.ok(
+    new Set(VERSUS_BOT_KINDS).size >= DEFAULT_MATCH_SIZE - 1,
+    `${new Set(VERSUS_BOT_KINDS).size} distinct kinds for ${DEFAULT_MATCH_SIZE - 1} bot seats`,
+  );
 });
