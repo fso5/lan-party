@@ -1024,27 +1024,30 @@ function seatBluetoothClient(peer) {
   if (!ble.host) return;
   const world = ble.host.world;
   const arena = world.arena;
-  const taken = world.tanks.filter((t) => t.kind === TankKind.Player).length;
 
   /*
    * Refuse rather than stack.
    *
-   * There are four spawn points on every versus map and the roster message
-   * carries eight slots, so this runs out. It used to fall back to spawns[0],
-   * which puts the new arrival on top of whoever already had that corner --
-   * two tanks on one square, indistinguishable on screen, killed by the same
-   * shell. A player told the match is full can go and watch; a player secretly
-   * sharing someone else's tank cannot work out what is happening.
+   * A player told the match is full can go and watch; a player secretly sharing
+   * someone else's tank cannot work out what is happening -- two tanks on one
+   * square, indistinguishable on screen, killed by the same shell.
    *
-   * Correct whichever way the seat count is settled later: if the maps grow
-   * spawn points to match the roster, this simply stops triggering.
+   * This used to count Player-kind tanks and use the count as both the spawn
+   * index and the cap. Bots are not Player-kind, so with the host on spawn 0
+   * and three bots on spawns 1-3 the first joiner was handed spawn 1 and landed
+   * on a bot -- measured on all three versus maps -- while the cap compared 1
+   * against 8 and never fired. `freeSpawnIndex` asks what is occupied instead,
+   * which also handles the two cases counting cannot: a tank that has driven
+   * away is not holding its spawn, and a dead one is not holding anything.
    */
-  if (taken >= arena.spawns.length) {
+  const taken = world.tanks.filter((t) => t.kind === TankKind.Player).length;
+  const seat = freeSpawnIndex(arena.spawns, world.tanks);
+  if (seat < 0) {
     setNetStatus(`hosting · ${taken} joined · full`);
     return;
   }
 
-  const spawn = arena.spawns[taken];
+  const spawn = arena.spawns[seat];
 
   const tankId = world.nextEntityId++;
   world.tanks.push({
@@ -1063,12 +1066,19 @@ function seatBluetoothClient(peer) {
   });
 
   ble.host.addClient(peer.id, tankId);
-  ble.match.players = ble.match.players.concat([{ team: taken, spawnIndex: taken }]);
+  // `seat`, not the player count: this roster is what the joiner rebuilds its
+  // world from, so a spawn index that disagrees with where the host actually
+  // put the tank desyncs the two on the first frame.
+  ble.match.players = ble.match.players.concat([{ team: taken, spawnIndex: seat }]);
 
   const w = new Writer(64);
   writeMatchStart(w, { ...ble.match, hostTick: world.tick, yourTankId: tankId });
   ble.transport.send(peer.id, w.finish(), true);
-  setNetStatus(`hosting · ${taken} joined`);
+  // Players other than the host, counted after the push -- `taken` is the
+  // count before it and includes the host, so this line used to say "1 joined"
+  // the moment the host started, before anyone had.
+  const joined = world.tanks.filter((t) => t.kind === TankKind.Player).length - 1;
+  setNetStatus(`hosting · ${joined} joined`);
 }
 
 /** Look for a host and show what turns up. */

@@ -1288,6 +1288,30 @@ await b.close();
       'taking that key takes it from MatchHost, which then never unseats a departed peer',
     );
   }
+
+  /*
+   * Seating must ask what is free, not count something and index with it.
+   *
+   * `seatBluetoothClient` counted Player-kind tanks and used the count as a
+   * spawn index. Bots are not Player-kind, so with the host on spawn 0 and
+   * three bots on 1-3 the first joiner was handed spawn 1 and materialised on
+   * top of a bot, on all three versus maps -- and the cap in front of it
+   * compared the same count against the spawn count, so it never fired.
+   *
+   * Read rather than executed, for the same reason as above and verified the
+   * same way: two tanks sharing a square is invisible to a browser smoke, and
+   * reverting this line leaves both suites green. `freeSpawnIndex` itself is
+   * properly tested in core/test/seating.test.ts -- what cannot be tested there
+   * is whether this page still calls it.
+   */
+  const seatFn = src.slice(src.indexOf('function seatBluetoothClient'));
+  const body = seatFn.slice(0, seatFn.indexOf('\n}\n'));
+  check(body.length > 0, 'ble-wiring: found seatBluetoothClient to check');
+  check(
+    /freeSpawnIndex\(/.test(body),
+    'ble-wiring: the Bluetooth host picks a seat with freeSpawnIndex',
+    'indexing spawns by a count of players puts a joiner on top of a bot',
+  );
 }
 
 console.log(failures.length ? `\n${failures.length} FAILED: ${failures.join(', ')}` : '\nall checks passed');

@@ -16,7 +16,7 @@
  * cannot drive through a shell that was about to hit it.
  */
 
-import { Arena } from './map.js';
+import { Arena, type SpawnPoint } from './map.js';
 import { Rng, datan2, dcos, dsin, rotateToward, wrapAngle } from './math.js';
 import { circlesOverlap, moveTank, stepShell, sweepCircleHit } from './physics.js';
 import {
@@ -457,4 +457,39 @@ export function livingTeams(w: WorldState): Set<number> {
 
 export function isMatchOver(w: WorldState): boolean {
   return livingTeams(w).size <= 1;
+}
+
+/**
+ * A spawn point with nobody standing on it, or -1 if there is none.
+ *
+ * For seating a player into a match that is already running. The obvious
+ * version of this counts something and uses the count as an index, and that is
+ * what shipped in the Bluetooth host: it counted *players* and indexed the
+ * spawn array with the result. Bots are not players, so with the host at spawn
+ * 0 and three bots on spawns 1-3, the first person to join was handed spawn 1
+ * and materialised on top of a bot -- measured on all three versus maps. The
+ * cap in front of it compared the same player count against the spawn count,
+ * so it never fired either.
+ *
+ * Asking what is *occupied* rather than counting anything gets all of that
+ * right at once, and one case a fixed index cannot: tanks move. A spawn whose
+ * original occupant has driven away is free, and a dead tank does not hold a
+ * spawn at all.
+ *
+ * Occupied means "a living tank is close enough to overlap": two tank radii,
+ * which is the distance at which two bodies touch. Tanks do not collide with
+ * each other, so a spawn judged free by a smaller margin would still produce
+ * two tanks sharing one square -- indistinguishable on screen and killed by the
+ * same shell.
+ */
+export function freeSpawnIndex(spawns: readonly SpawnPoint[], tanks: readonly Tank[]): number {
+  return spawns.findIndex(
+    (s) =>
+      !tanks.some((t) => {
+        if (!t.alive) return false;
+        const dx = t.x - s.x;
+        const dy = t.y - s.y;
+        return dx * dx + dy * dy < (TANK_RADIUS * 2) * (TANK_RADIUS * 2);
+      }),
+  );
 }
