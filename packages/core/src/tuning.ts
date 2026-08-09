@@ -191,5 +191,22 @@ export const TANK_SPECS: Record<TankKind, TankSpec> = {
  * Not a verdict on Green as a kind, and the campaign is why this is scoped to
  * versus: there both turrets sit on a team facing a single player, which is the
  * fight they are built for. See tools/campaign-curve.mjs.
+ *
+ * ## Re-measuring this needs the lineup it was measured against
+ *
+ * The numbers above do not say who the other three tanks were, and that is
+ * enough to make them unreproducible. Checked by trying: a four-tank
+ * free-for-all against Grey, Teal and Black, 96 seeds on each versus map, puts
+ * Green at 0% and a 1.5s median life and Yellow at 6-14% and 2.9-7.3s. The
+ * conclusion is the same one -- an immobile kind contributes nothing to a
+ * versus fill and Yellow plainly does -- but the lifetimes are about half those
+ * recorded, and there is no way to tell from here whether the game changed or
+ * the opposition did.
+ *
+ * So: opponents decide survival time as much as the kind under test does. Any
+ * re-measurement that wants to compare against the figures above has to fix
+ * the lineup first and say what it was. The ranking is what this constant
+ * rests on, and that has been re-confirmed; the seconds are context, not a
+ * threshold anything checks.
  */
 export const VERSUS_BOT_KINDS: readonly TankKind[] = [TankKind.Grey, TankKind.Teal, TankKind.Yellow];
