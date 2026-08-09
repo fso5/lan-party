@@ -162,6 +162,56 @@ test('a corrupt slot count is refused rather than read as garbage', () => {
   assert.throws(() => readRoster(new Reader(bad)), /over the 8 limit/);
 });
 
+/**
+ * And the host cannot build one either.
+ *
+ * The reader has refused an over-long count since it was written, and for a
+ * while the writer would still produce one -- so a host that seated a ninth
+ * player sent a packet every client threw on. That is a much quieter failure
+ * than it sounds. The roster is the only way a lobby screen learns who is in
+ * it, so what the other phones show is a roster that stops updating: a lobby
+ * that has apparently hung, with no error anywhere except on the host, which is
+ * the one screen still displaying the right thing.
+ *
+ * The host is where the seating decision was made and the only place with
+ * enough context to say so, which is why this is a writer guard and not a
+ * larger limit.
+ */
+test('a host cannot send a roster its own reader would refuse', () => {
+  const slot = (i: number) => ({
+    slotId: i,
+    name: `P${i}`,
+    team: i,
+    ready: false,
+    isHost: i === 0,
+  });
+  const roster = (n: number): WireRoster => ({
+    mapId: 0,
+    mode: 0,
+    roundsToWin: 3,
+    slots: Array.from({ length: n }, (_, i) => slot(i)),
+  });
+
+  assert.throws(
+    () => writeRoster(new Writer(256), roster(MAX_LOBBY_SLOTS + 1)),
+    /over the 8 limit/,
+    'a ninth seat produced a packet no client can parse',
+  );
+
+  // The boundary in the other direction, so a full lobby stays sendable.
+  assert.doesNotThrow(() => writeRoster(new Writer(256), roster(MAX_LOBBY_SLOTS)));
+
+  // And the guard really is the thing standing between the two: what it refuses
+  // is exactly what the reader refuses, rather than a stricter limit that would
+  // reject rosters the wire can carry.
+  const w = new Writer(256);
+  writeRoster(w, roster(MAX_LOBBY_SLOTS));
+  const r = new Reader(w.finish());
+  r.u8();
+  r.u8();
+  assert.equal(readRoster(r).slots.length, MAX_LOBBY_SLOTS);
+});
+
 test('a truncated roster throws instead of yielding half a player list', () => {
   const w = new Writer(128);
   writeRoster(w, ROSTER);

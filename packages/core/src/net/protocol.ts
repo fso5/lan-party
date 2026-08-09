@@ -611,6 +611,18 @@ export interface WireMatchStart {
 }
 
 export function writeMatchStart(w: Writer, m: WireMatchStart): void {
+  // Tank ids are creation order over players then bots, so this roster decides
+  // the id space every later snapshot has to fit into. Both sides of this
+  // message would accept a larger one; the failure would arrive one tick later,
+  // as `writeSnapshot` refusing a tank id, on the host, mid-match, with the
+  // arena already built and everyone already in it. Refusing here puts it at
+  // the moment the roster was assembled, which is the moment it can be fixed.
+  const tanks = m.players.length + m.bots.length;
+  if (tanks > MAX_WIRE_TANKS) {
+    throw new Error(
+      `match starts with ${tanks} tanks (${m.players.length} players, ${m.bots.length} bots), over the ${MAX_WIRE_TANKS} the wire can name -- the first snapshot would throw instead`,
+    );
+  }
   w.u8(MsgType.MatchStart);
   w.u8(PROTOCOL_VERSION);
   w.u16(m.mapId);
@@ -731,6 +743,17 @@ export interface WireRoster {
 }
 
 export function writeRoster(w: Writer, r: WireRoster): void {
+  // `readRoster` refuses a count over the limit, and until this guard existed
+  // the writer would happily produce one -- so seating a ninth player made a
+  // packet every client throws on. The host is the only place with enough
+  // context to say what went wrong; on the receiving side it arrives as a
+  // roster that stops updating, which is what a lobby looks like when it has
+  // simply hung.
+  if (r.slots.length > MAX_LOBBY_SLOTS) {
+    throw new Error(
+      `roster has ${r.slots.length} slots, over the ${MAX_LOBBY_SLOTS} limit -- readRoster refuses this, so every client would drop it`,
+    );
+  }
   w.u8(MsgType.Lobby).u8(LobbyOp.Roster);
   w.u8(r.mapId).u8(r.mode).u8(r.roundsToWin);
   w.u8(r.slots.length);

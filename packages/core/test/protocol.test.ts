@@ -512,6 +512,51 @@ test('a tank the wire cannot name is refused, not silently renumbered', () => {
   }
 });
 
+/**
+ * The roster that decides the id space is checked when it is assembled.
+ *
+ * `writeSnapshot` refuses a tank id past MAX_WIRE_TANKS, which is right but
+ * late. Tank ids are creation order over players then bots, so the roster in
+ * MatchStart is what fixes them -- and both sides of that message would accept
+ * a roster of twenty. The failure then lands one tick later, as a snapshot the
+ * host cannot write, mid-match, with the arena built and everyone in it. The
+ * comment on `the id space is wider than the lobby can fill` calls that out as
+ * the bad outcome; this is the guard that makes MatchStart the place it stops
+ * instead.
+ *
+ * Not reachable through the lobby, which caps at MAX_LOBBY_SLOTS. Bots are the
+ * way in: nothing bounds how many a host appends, and versus fill decides that
+ * number from the map's spawn count.
+ */
+test('a match cannot start with more tanks than the wire can name', () => {
+  const start = (players: number, bots: number) => ({
+    mapId: 1,
+    seed: 99,
+    hostTick: 10,
+    yourTankId: 0,
+    players: Array.from({ length: players }, (_, i) => ({ team: i, spawnIndex: i })),
+    bots: Array.from({ length: bots }, (_, i) => ({ kind: 0, team: i, spawnIndex: i })),
+  });
+
+  assert.throws(
+    () => writeMatchStart(new Writer(256), start(MAX_LOBBY_SLOTS, MAX_WIRE_TANKS)),
+    /over the 16 the wire can name/,
+    'the first snapshot would have thrown instead, mid-match',
+  );
+
+  // Counted across both lists, not each on its own: eight players and nine bots
+  // is seventeen tanks even though neither list is over on its own.
+  assert.throws(
+    () => writeMatchStart(new Writer(256), start(MAX_LOBBY_SLOTS, MAX_WIRE_TANKS - MAX_LOBBY_SLOTS + 1)),
+    /over the 16 the wire can name/,
+  );
+
+  // Exactly full is legal -- the ceiling is a ceiling, not a fence short of it.
+  assert.doesNotThrow(() =>
+    writeMatchStart(new Writer(256), start(MAX_LOBBY_SLOTS, MAX_WIRE_TANKS - MAX_LOBBY_SLOTS)),
+  );
+});
+
 test('the id space is wider than the lobby can fill', () => {
   // If a seat-cap rise ever takes MAX_LOBBY_SLOTS past this, snapshots start
   // throwing mid-match rather than at the point the cap was changed. This is
