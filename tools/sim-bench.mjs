@@ -25,11 +25,17 @@
  * outside this file. server.mjs fills a versus match with bots, and the whole
  * campaign is bots.
  *
- *     8 players    p99  ~130us   0.85%
- *     8 bots       p99  ~700us   4.34%
+ *     8 players    p99  ~135us   0.8%
+ *     8 bots       p99  ~510us   3.0%
  *
  * Several times the cost, from a row that did not exist. Read the bot rows,
  * not the player ones, when asking whether a phone can hold 60Hz.
+ *
+ * The bot row read ~700us / 4.34% here until it was re-measured, and it had
+ * simply not been updated after the path abandon below landed. Two runs today:
+ * 520us/3.12% and 501us/3.01%. Worth stating because the surrounding text
+ * argues from the *ratio* between the two rows, and an overstated bot figure
+ * makes that argument by more than it is entitled to.
  *
  * The bot figure was 2095us when this row was added. Two changes since, both
  * driven by it: staggering when bots think so their solves stop landing on the

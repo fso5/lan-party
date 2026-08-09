@@ -232,8 +232,8 @@ threw away the signal worth having.
 
 | | asks | currently says |
 |---|---|---|
-| `sim-bench.mjs` | can a phone hold 60Hz? | 8 players ~1% of a frame, 8 **bots** ~4% |
-| `render-bench.mjs` | and can the browser draw it? | ~0.9ms a frame at 1x, ~2.2ms at 2x (p50) |
+| `sim-bench.mjs` | can a phone hold 60Hz? | 8 players ~0.8% of a frame, 8 **bots** ~3% |
+| `render-bench.mjs` | and can the browser draw it? | ~1.0ms a frame at 1x, ~1.9ms at 2x (p50) — 2x costs 1.9x the frame for 4x the pixels |
 | `net-budget.mjs` | can the radio carry a match? | yes at every roster size — connection count caps the roster, not bandwidth |
 | `tank-balance.mjs` | is the enemy roster honest? | ranks cleanly; Teal beats Yellow, which the descriptions have backwards |
 | `campaign-curve.mjs` | does the campaign get harder? | yes, since the retune — a stand-in wins 82% of mission one and 7% of the finale, falling every step |
@@ -254,8 +254,11 @@ warning nobody reads.
 
 **This box is not a phone.** Read ratios and scaling, not absolute
 milliseconds — and the figures above are approximate on purpose. Successive
-runs of `sim-bench` on an unchanged tree have put eight bots at 3.7% and 4.3%
-of a frame; `render-bench` swung further still until it was made to sample ten
+runs of `sim-bench` on an unchanged tree land within about a tenth of a point
+of each other (3.01% and 3.12% for eight bots today), but the spread across
+*days* is wider and is not noise: it read 3.7-4.3% before the path-abandon
+optimisation landed, and the recorded figure sat at 4.34% for a while
+afterwards because nobody re-ran it; `render-bench` swung further still until it was made to sample ten
 seconds and report p95 beside p99, because at 360 frames p99 is the
 fourth-worst one and a single stall owns it. The container has no GPU, so `render-bench` draws in software —
 pessimistic rather than optimistic, which is the safer direction for a frame
