@@ -1070,6 +1070,19 @@ const board = await phoneLandscape.evaluate(() => {
     footer: Math.round(document.querySelector('footer').getBoundingClientRect().height),
   };
 });
+/*
+ * Printed on success, not only on failure.
+ *
+ * The bar is 60% and the comment above records 66% as what was measured. Those
+ * can part company silently: drift to 61% and the check still passes, so the
+ * figure in the comment quietly becomes a claim about the past that reads like
+ * one about the present. Logging it every run makes the gap visible in CI
+ * without anybody re-deriving it. 65.6% today.
+ */
+console.log(
+  `  board: ${board.drawn}px of ${board.vw} = ${(board.share * 100).toFixed(1)}% ` +
+    `(header ${board.header}px, footer ${board.footer}px, bar 60%)`,
+);
 check(
   board.share > 0.6,
   'a phone held sideways gives the board most of its width',
