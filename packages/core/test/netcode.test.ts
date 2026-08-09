@@ -9,6 +9,7 @@ import {
   LoopbackNetwork,
   LoopbackTransport,
   BLE_PROFILE,
+  LAN_PROFILE,
   PERFECT_PROFILE,
 } from '../src/net/loopback.js';
 import { MatchHost } from '../src/net/host.js';
@@ -1971,4 +1972,110 @@ test('three clients each stay converged with the host over Bluetooth', () => {
       );
     }
   }
+});
+
+
+/**
+ * How deep a rewind goes must follow the link, not something else.
+ *
+ * `replayFrom` runs one `step` per tick between the corrected tick and now, on
+ * the client, on a phone, at snapshot rate. So depth is the cost of
+ * reconciliation, and it should be a function of latency: a 45ms link puts the
+ * correction further back than a 6ms one, and nothing else should move it.
+ *
+ * Measured over 20s of a two-player match, per rewind:
+ *
+ *     bluetooth (45ms)   median 5   p90 8   max 15
+ *     lan (6ms)          median 1   p90 2   max 4
+ *
+ * The ceiling is HISTORY_TICKS = 64, so both sit well inside the ring.
+ *
+ * ## What this catches, and what it does not
+ *
+ * Stated because the first version of this comment claimed more than the test
+ * delivers, and the mutations said so.
+ *
+ * Caught: a history search that lands on the wrong entry. Forcing `replayFrom`
+ * to start at index 0 fails this -- though four convergence tests fail with it
+ * too, so this is not the only net.
+ *
+ * NOT caught: a trim that stops trimming. Raising the ring to `HISTORY_TICKS *
+ * 8` passes every test in this file including this one, and the reasoning is
+ * plain once seen -- depth is set by how far back the snapshot's tick is, not
+ * by how much history is kept behind it. A bigger ring only rescues snapshots
+ * that would otherwise have been too old to apply, which is rare. That case is
+ * genuinely uncovered, and a bound on depth is the wrong shape to cover it.
+ *
+ * ## `reconciles` is a different number
+ *
+ * It counts corrections that crossed RECONCILE_EPSILON. Spawn rewinds go
+ * through `replayFrom` too and never touch it, so the two count different
+ * events: 591 rewinds against 12 reconciles on LAN, 583 against 291 on
+ * Bluetooth. Dividing gives 55.8 ticks per reconcile on the 6ms link against
+ * 10.5 on the 45ms one, which reads as though the fast link rewinds five times
+ * deeper. It does not; the counters were never comparable.
+ */
+test('rewind depth follows the link, and stays inside the history ring', () => {
+  const depthsFor = (profile: typeof BLE_PROFILE) => {
+    const net = new LoopbackNetwork(profile, 5);
+    const hostT = new LoopbackTransport('host', 'Host', net);
+    const clientT = new LoopbackTransport('client', 'Client', net);
+    const hostWorld = versusWorld();
+    const host = new MatchHost(hostWorld, hostT);
+    host.localTankId = 0;
+    const client = new MatchClient(cloneWorld(hostWorld), clientT, 'host', 1);
+    net.connect('host', 'client');
+    host.addClient('client', 1);
+
+    const stepMs = 1000 / 60;
+    const depths: number[] = [];
+    for (let i = 0; i < 60 * 20; i++) {
+      // Both alive throughout: a match that ends early stops producing the
+      // disagreements this is here to measure.
+      for (const t of hostWorld.tanks) t.alive = true;
+      for (const t of client.world.tanks) t.alive = true;
+      host.setLocalInput({ ...emptyInput(), moveX: Math.sin(i / 17), aimX: 1, fire: true });
+      client.setInput({ ...emptyInput(), moveY: Math.cos(i / 13), aimY: 1, fire: true });
+
+      client.update(stepMs);
+      // The rewind happens here, not in update: the transport delivers packets
+      // from advance, so handlePacket -> applySnapshot -> replayFrom all run
+      // inside it. Sampling around update sees no rewinds at all, which is how
+      // the first measurement of this reported zero.
+      const before = client.replayedTicks;
+      net.advance(stepMs);
+      if (client.replayedTicks > before) depths.push(client.replayedTicks - before);
+
+      host.update(stepMs);
+      net.advance(0);
+    }
+    depths.sort((a, b) => a - b);
+    return { depths, client };
+  };
+
+  const ble = depthsFor(BLE_PROFILE);
+  const lan = depthsFor(LAN_PROFILE);
+
+  // Vacuity first: a run where nothing rewound reports a maximum of zero, which
+  // reads exactly like a very tight bound.
+  for (const [name, r] of [['bluetooth', ble], ['lan', lan]] as const) {
+    assert.ok(
+      r.depths.length > 100,
+      `only ${r.depths.length} rewinds in 20s on ${name} -- nothing was being corrected, so nothing below means anything`,
+    );
+    assert.equal(r.client.resyncs, 0, `${name} resynced, and a resync clears history, so these are not rewind depths`);
+  }
+
+  const median = (a: number[]) => a[Math.floor(a.length / 2)];
+  assert.ok(
+    median(ble.depths) > median(lan.depths),
+    `rewind depth stopped tracking latency: 45ms link median ${median(ble.depths)}, 6ms link median ${median(lan.depths)}. ` +
+      `Depth is how far back the correction lands, so the slower link must be the deeper one.`,
+  );
+
+  // Both inside the ring, with room. HISTORY_TICKS is 64; the measured worst is
+  // 15. A search returning the wrong index replays most of a second, 15 times a
+  // second, and the client still agrees with the host the whole time.
+  const worst = Math.max(ble.depths.at(-1)!, lan.depths.at(-1)!);
+  assert.ok(worst <= 32, `deepest rewind replayed ${worst} ticks; measured worst is 15 and the ring holds 64`);
 });

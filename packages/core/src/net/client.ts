@@ -112,6 +112,30 @@ export class MatchClient {
   snapshotsApplied = 0;
   snapshotsStale = 0;
   resyncs = 0;
+  /**
+   * Ticks re-simulated by rewinds, cumulative.
+   *
+   * Deliberately not "reconciles times the average depth". The two count
+   * different events, and dividing one by the other gives a number that means
+   * nothing -- 55.8 ticks per reconcile on a 6ms link against 10.5 on a 45ms
+   * one, which is backwards until you notice `reconciles` only counts rewinds
+   * that crossed RECONCILE_EPSILON. Spawn rewinds go through `replayFrom` too
+   * and do not touch it. Over 30s: Bluetooth 583 rewinds against 291
+   * reconciles, LAN 591 rewinds against 12.
+   *
+   * What this counts is the work, which is one `step` per tick replayed and
+   * scales with how deep the link makes the rewind. Measured depths, 30s each:
+   *
+   *     bluetooth (45ms)   median 5   p90 8   max 15
+   *     lan (6ms)          median 1   p90 2   max 4
+   *
+   * Here because it is the number a regression would move without moving
+   * anything else. A change that made the history search land on the wrong
+   * entry, or that stopped trimming history, would leave `reconciles` and every
+   * behavioural test exactly as they are and quietly replay the whole
+   * HISTORY_TICKS ring on every snapshot.
+   */
+  replayedTicks = 0;
   private consecutiveStale = 0;
 
   /**
@@ -320,6 +344,7 @@ export class MatchClient {
    * worlds as it goes so a later rewind lands on the corrected timeline.
    */
   private replayFrom(idx: number): void {
+    this.replayedTicks += this.history.length - idx;
     for (let i = idx; i < this.history.length; i++) {
       const h = this.history[i];
       // Before the state at this tick is recorded, put back anything the host
