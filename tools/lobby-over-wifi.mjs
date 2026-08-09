@@ -77,10 +77,34 @@ function findChrome() {
   }
 }
 
+/*
+ * Two kinds of failure, kept apart on purpose.
+ *
+ * This script runs their unmerged lobby over my transport, so a red line can
+ * mean either "their seating is wrong" or "my transport stopped carrying it",
+ * and those want opposite reactions. Lumping them together is why this used to
+ * exit 0 whatever happened: a known finding about an unmerged branch must not
+ * turn anything red, and the only way to honour that with one bucket was to
+ * make nothing red at all -- which also throws away the signal I do want.
+ *
+ * `check` is mine: `BridgeTransport`, the lobby protocol, the seating
+ * mechanics, the rendering, the lobby-to-match handover. Those are a
+ * regression in `packages/core` if they break, and they set the exit code.
+ * (The WebSocket carriage here is the `ws` package, not `LanHost` — real
+ * browsers against `LanHost` are `packages/proto/lanhost-smoke.mjs`.)
+ *
+ * `check.finding` is theirs: a fact about `b/lobby` as it stands. Printed just
+ * as loudly, reported separately, and never the exit code.
+ */
 const failures = [];
+const findings = [];
 const check = (ok, what, detail) => {
   console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}${ok || !detail ? '' : ` -- ${detail}`}`);
   if (!ok) failures.push(what);
+};
+check.finding = (ok, what, detail) => {
+  console.log(`  ${ok ? 'ok  ' : 'FIND'} ${what}${ok || !detail ? '' : ` -- ${detail}`}`);
+  if (!ok) findings.push(detail ? `${what} (${detail})` : what);
 };
 
 const httpServer = createServer((_req, res) => {
@@ -178,7 +202,7 @@ check(rows.length === session.get().roster.slots.length,
 const SKIP_FINDING_1 = NAMES.length < 2;
 if (!SKIP_FINDING_1) console.log('\n-- finding 1, over the transport that actually ships --');
 const teams = session.get().roster.slots.map((s) => s.team);
-check(new Set(teams).size === teams.length,
+check.finding(new Set(teams).size === teams.length,
   'free-for-all puts everyone on their own team',
   `teams ${JSON.stringify(teams)}`);
 
@@ -197,7 +221,7 @@ await lp.waitForTimeout(600);
 const after = session.get().roster.slots.map((s) => `${s.name}=t${s.team}`);
 const afterTeams = session.get().roster.slots.map((s) => s.team);
 console.log('after a leave and a join:', JSON.stringify(after));
-check(new Set(afterTeams).size === afterTeams.length,
+check.finding(new Set(afterTeams).size === afterTeams.length,
   'still one team each after somebody leaves and somebody joins',
   `teams ${JSON.stringify(afterTeams)} -- finding 1 reproduces over WiFi`);
 live = [pages[0], pages[2], { p: lp, name: 'Dre' }];
@@ -284,7 +308,7 @@ if (entered) {
     teams: window.__state.world.tanks.map((t) => t.team),
   }));
   console.log(`\nthe match everyone is now in: ${world.tanks} tanks on teams ${JSON.stringify(world.teams)}`);
-  check(new Set(world.teams).size === world.tanks,
+  check.finding(new Set(world.teams).size === world.tanks,
     'and every tank in the running match is on its own team',
     `${new Set(world.teams).size} teams for ${world.tanks} tanks -- two players who cannot hurt each other`);
 }
@@ -293,7 +317,14 @@ await browser.close();
 httpServer.close();
 wss.close();
 
-console.log(failures.length ? `\nFAILED: ${failures.join('; ')}` : '\nall checks passed');
-// Exit 0 either way. A failure here is a finding about an unmerged branch, not
-// a broken main, and this is not wired into any suite that should go red for it.
+if (findings.length) {
+  console.log(`\nFINDINGS about b/lobby (${findings.length}): ` + findings.join('; '));
+  console.log('These are theirs. See issue #9. They do not set the exit code.');
+}
+if (failures.length) {
+  console.log(`\nFAILED (mine): ${failures.join('; ')}`);
+  console.log('The lobby protocol or BridgeTransport stopped carrying their lobby -- a regression in packages/core.');
+  process.exit(1);
+}
+console.log(`\nthe lobby protocol carried their session end to end${findings.length ? ', findings above notwithstanding' : ''}`);
 process.exit(0);

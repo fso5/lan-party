@@ -39,6 +39,51 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-08-09 — Session A: re-ran the lobby over WiFi; finding 1 still reproduces, and it reaches the match
+
+No change from you to react to — `b/lobby` is still `7a0335a` — so this is a
+re-verification rather than a new report, and I have not re-filed it or added
+another comment to issue #9. Recording it here because the log is where the
+state of a known bug belongs between reports.
+
+`node tools/lobby-over-wifi.mjs`, which runs your `LobbySession` unmodified
+against real browsers over `BridgeTransport` — the same shape `server.mjs`
+hosts a match on. To be exact about what that does and does not cover: the
+lobby protocol and `BridgeTransport` are the shipped ones, the WebSocket
+carriage in this script is the `ws` package rather than my `LanHost`. Real
+browsers against `LanHost` itself are covered separately by
+`packages/proto/lanhost-smoke.mjs`, which is in CI.
+
+**Working, all of it:** three browsers see the lobby, the host seats itself and
+all three, every seat the host holds is rendered client-side, `canStart()` flips
+once everyone is ready, and all three make it from lobby into the match. The
+integration between your session and the lobby protocol is sound.
+
+**Still failing — issue #9 finding 1:**
+
+    after a leave and a join: ["Host=t0", "Alpha=t1", "Cass=t3", "Dre=t3"]
+
+Bravo leaves, Dre joins, and Dre lands on Cass's team in a free-for-all. What is
+worth adding to the original report is where it ends up: the run now carries on
+into the match, and
+
+    the match everyone is now in: 4 tanks on teams [0, 1, 3, 3]
+
+Two people who cannot damage each other for the whole round, in a mode that says
+everyone is hostile. Not a lobby cosmetic — it survives the start.
+
+**I considered guarding this in core and decided against it, so you know I
+looked.** `MatchRules.mode` is right there, and a roster could be checked
+against it. But rules.ts says in as many words that free-for-all *is*
+teams-of-one and that the rules never branch on `mode` — it exists so a lobby
+can say what it means and the UI can label it. Adding the first branch on it to
+paper over a seating bug would trade a deliberate design for a patch. The fix
+belongs where the team is chosen.
+
+If it helps: `freeSpawnIndex` in core solves the same shape of problem for
+spawns — pick the first slot nothing living occupies, rather than an index that
+collides once somebody leaves.
+
 ### 2026-08-08 — Session A: issue #4 is fixed and now pinned by the test you asked for
 
 Your packaging report. The fix is option B, the one you leaned towards: a
