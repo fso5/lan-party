@@ -463,6 +463,31 @@ export class MatchClient {
     this.resyncs++;
   }
 
+  /**
+   * Spawn events are applied once because they only arrive once.
+   *
+   * Nothing below checks whether a shell or mine with this id is already in
+   * the world, and the two `push`es look careless without the reason written
+   * down. A repeated ShellSpawn from another tank would put a second shell at
+   * the same id alongside the first -- drawn twice, and able to kill you twice
+   * over -- and there is no id check anywhere to stop it.
+   *
+   * What stops it is that neither transport can deliver a packet twice.
+   * Reliable BLE traffic is an indication or a write-with-response, both
+   * confirmed by the link layer, and ble.ts says plainly why we do not put our
+   * own retransmit on top of that. The WiFi host runs over TCP. Neither the
+   * host nor the client replays events either: a client joining mid-match is
+   * caught up with world state, not with the events that produced it.
+   *
+   * So this is an invariant held by the transports rather than by this method,
+   * which makes it exactly the kind that breaks quietly. Anything that ever
+   * introduces an application-level retransmit, or a transport that can
+   * redeliver, has to add the id check here at the same time.
+   *
+   * The de-duplication that *is* here, immediately below, is a different
+   * problem: our own spawns arrive as confirmation of something already on
+   * screen, once.
+   */
   private applyEvent(r: Reader): void {
     const kind = r.u8();
 
