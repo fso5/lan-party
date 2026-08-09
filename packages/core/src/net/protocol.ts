@@ -462,6 +462,30 @@ export function readSnapshot(r: Reader): { tick: number; tanks: WireTank[] } {
  */
 export const MAX_WIRE_BOUNCES = 0x03;
 
+/**
+ * How many entities the wire can tell apart before ids start repeating.
+ *
+ * A shell's and a mine's id is one byte, and `world.nextEntityId` is a counter
+ * that never resets -- so `host.ts` truncates, and every 256th spawn reuses a
+ * number. That is fine as long as the entity holding it is already dead, which
+ * is what makes this a margin rather than a bug.
+ *
+ * Spend the margin and the failure is not a duplicate on screen. `replaySpawns`
+ * in client.ts skips a spawn whose id is already live, so of two live shells
+ * sharing a low byte the second is simply not put back after a rewind: it is
+ * lethal on the host and invisible on the phone. Rollback happens constantly,
+ * so this would be a shell that vanishes at 45ms of latency and not at 5.
+ *
+ * Measured rather than assumed -- `entity-ids.test.ts` runs ten minutes of the
+ * busiest match the game allows and reports the worst churn a live entity sees.
+ * At the seat cap that is 172 of the 256 available, which is two thirds spent
+ * and the reason this is written down. A faster reload, a higher seat cap or a
+ * longer-lived shell all eat directly into what is left.
+ *
+ * Widening it is one byte per spawn event and a PROTOCOL_VERSION bump.
+ */
+export const MAX_WIRE_ENTITY_IDS = 256;
+
 export interface WireShellSpawn {
   shellId: number;
   ownerId: number;

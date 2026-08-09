@@ -32,6 +32,7 @@ import { MINE_ARM_TICKS, TICK_HZ } from '../tuning.js';
 import { emptyInput, EventKind, type TankInput } from '../types.js';
 import {
   MsgType,
+  MAX_WIRE_ENTITY_IDS,
   NetEvent,
   Reader,
   Writer,
@@ -375,7 +376,10 @@ export class MatchHost {
       // client must start its local simulation from world.tick to match.
       const w = new Writer(16);
       writeShellSpawn(w, {
-        shellId: shell.id & 0xff,
+        // Truncated on purpose: nextEntityId never resets, and the byte only
+        // has to tell live entities apart. MAX_WIRE_ENTITY_IDS says what that
+        // costs and entity-ids.test.ts holds the margin.
+        shellId: shell.id % MAX_WIRE_ENTITY_IDS,
         ownerId: shell.ownerId,
         x: shell.x,
         y: shell.y,
@@ -398,7 +402,7 @@ export class MatchHost {
       if (laidOn !== this.world.tick - 1) continue;
       const w = new Writer(16);
       writeMineSpawn(w, {
-        mineId: mine.id & 0xff,
+        mineId: mine.id % MAX_WIRE_ENTITY_IDS,
         ownerId: mine.ownerId,
         x: mine.x,
         y: mine.y,
