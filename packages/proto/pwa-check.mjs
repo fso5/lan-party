@@ -25,6 +25,7 @@ import { chromium } from 'playwright';
 import { createServer } from 'node:http';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, extname } from 'node:path';
+import { createHash } from 'node:crypto';
 
 /**
  * The container ships a Chromium at a fixed path; CI does not, and installs one
@@ -187,6 +188,38 @@ check(
  * is the real trigger and not a shortcut past it.
  */
 const oldCache = cached.cache;
+
+/*
+ * The claim just above, asserted rather than assumed.
+ *
+ * Everything below renames the cache by hand, which proves the *worker*
+ * updates correctly and says nothing about whether a real deploy ever produces
+ * a new name. Those are different failures. If build-pwa hashed something
+ * constant -- the template, a fixed string, the file list -- every deploy would
+ * emit the same CACHE, no browser would ever see a new worker, and every check
+ * in this file would still pass while phones served last week's client against
+ * this week's wire protocol.
+ *
+ * So: the generated name must actually be the content hash.
+ */
+{
+  const page = readFileSync(new URL('./dist/tanks-proto.html', import.meta.url).pathname);
+  const want = `tanks-${createHash('sha256').update(page).digest('hex').slice(0, 12)}`;
+  const sw = readFileSync(join(root, 'sw.js'), 'utf8');
+  const declared = /const CACHE = '([^']+)'/.exec(sw)?.[1];
+  check(!!declared, 'sw.js declares a cache name at all', 'no `const CACHE` found to compare');
+  check(
+    declared === want,
+    'the cache name is the hash of the page, so a new build is a new cache',
+    `sw.js says ${declared}, the page hashes to ${want} -- if these can differ, ` +
+      'a content change may not evict anything and the update below is only testing itself',
+  );
+  check(
+    oldCache === want,
+    'and that is the cache the browser actually populated',
+    `browser holds ${oldCache}, build emitted ${want}`,
+  );
+}
 const NEW_CACHE = `${oldCache}-next`;
 redeploy = (path, body) => {
   if (path.endsWith('sw.js')) {
