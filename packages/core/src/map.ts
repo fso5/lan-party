@@ -212,6 +212,23 @@ export function parseArena(name: string, rows: string[]): ArenaDef {
 
   const enemyChars: Record<string, number> = { b: 1, g: 2, t: 3, y: 4, n: 5, k: 6 };
 
+  /*
+   * Rows must all be the same length.
+   *
+   * A short row is padded with floor below, which is right for a rectangle read
+   * off a ragged string but wrong as a thing to accept quietly: measured, a row
+   * two characters short of its neighbours turns the end of the bottom wall
+   * into open floor, and the map still parses. None of the eight maps is
+   * ragged, so nothing is authored this way on purpose.
+   */
+  const lengths = [...new Set(rows.map((r) => r.length))];
+  if (lengths.length > 1) {
+    throw new Error(
+      `arena '${name}' has rows of ${lengths.sort((a, b) => a - b).join(', ')} characters -- ` +
+        'a short row is padded with floor, which silently opens whatever wall it was meant to draw',
+    );
+  }
+
   for (let y = 0; y < height; y++) {
     const row = rows[y];
     for (let x = 0; x < width; x++) {
@@ -228,6 +245,23 @@ export function parseArena(name: string, rows: string[]): ArenaDef {
         spawns.push({ x: wx, y: wy, angle: 0, team: ch.charCodeAt(0) - 49 });
       } else if (enemyChars[ch] !== undefined) {
         enemies.push({ kind: enemyChars[ch], x: wx, y: wy, angle: 0, team: 1 });
+      } else if (ch !== '.' && ch !== ' ') {
+        /*
+         * Anything else is a typo, and used to be floor.
+         *
+         * This is the whole hazard of authoring levels as pictures: a wrong
+         * character still looks like a level. Measured before the guard --
+         * 'H' typed where '#' was meant left a five-wide row with four walls
+         * and a gap in the arena, and 'G' typed for 'g' deleted an enemy from
+         * a mission outright, both without a word.
+         *
+         * '.' and ' ' are the two ways to write floor and are deliberate; '.'
+         * is what the maps actually use, 1775 times.
+         */
+        throw new Error(
+          `arena '${name}' has '${ch}' at column ${x}, row ${y}, which is not a map character -- ` +
+            "'#' wall, '%' block, 'O' hole, '.' or ' ' floor, '1'-'8' starts, 'bgtynk' enemies",
+        );
       }
     }
   }

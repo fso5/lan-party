@@ -274,3 +274,52 @@ test('a map that writes the same start twice is refused', () => {
   );
   assert.equal(ordered.spawns[0].x, 3.5, 'seat 0 must be the tile holding the 1');
 });
+
+/*
+ * A character that is not a map character.
+ *
+ * Same hazard as the duplicate start above, and the reason both exist: levels
+ * are authored as pictures, so a wrong character still looks like a level.
+ * Measured before the guard, both silent -- 'H' typed where '#' was meant left
+ * a gap in the arena wall, and 'G' typed for 'g' deleted an enemy from a
+ * mission outright.
+ */
+test('a map character that is not a map character is refused', () => {
+  assert.throws(
+    () => parseArena('typo', ['#####', 'H1.2#', '#####']),
+    /has 'H' at column 0, row 1/,
+    "a wall typo'd as 'H' parsed as floor, opening the arena",
+  );
+
+  assert.throws(
+    () => parseArena('caps', ['#####', '#1G2#', '#####']),
+    /has 'G' at column 2, row 1/,
+    "an enemy typo'd as 'G' vanished instead of being placed",
+  );
+
+  // Both ways of writing floor stay legal, and '.' is the one the maps use.
+  const dots = parseArena('dots', ['#####', '#1.2#', '#####']);
+  assert.equal(dots.spawns.length, 2);
+  const spaces = parseArena('spaces', ['#####', '#1 2#', '#####']);
+  assert.equal(spaces.spawns.length, 2);
+
+  // And every character the maps actually use is still accepted together.
+  const all = parseArena('all', ['######', '#1%O.#', '#bgty#', '#nk..2', '######']);
+  assert.equal(all.spawns.length, 2);
+  assert.equal(all.enemies.length, 6, 'all six enemy letters must still place an enemy');
+});
+
+/*
+ * A row shorter than its neighbours.
+ *
+ * Padded with floor, which is the right reading of a ragged string and the
+ * wrong thing to accept quietly: two characters short turns the end of the
+ * bottom wall into open floor and still parses.
+ */
+test('a map with ragged rows is refused', () => {
+  assert.throws(
+    () => parseArena('ragged', ['#####', '#1.2#', '###']),
+    /rows of 3, 5 characters/,
+    'a short row was padded with floor instead of being refused',
+  );
+});
