@@ -337,6 +337,15 @@ somebody watching "reconnecting" for seconds after unlocking their phone.
 Reproducing that needs a genuinely backgrounded page with throttled timers,
 which Playwright does not do — dispatching the event by hand from a visible
 page tests the four lines of the handler against a state no phone is ever in.
+
+The obvious way around that does not work either, and is written down here so
+nobody spends the afternoon I did finding out. Opening a second page in the
+same context and calling `bringToFront()` looks like it should background the
+first; in headless Chromium it does not. Measured: `document.visibilityState`
+stays `'visible'` on the backgrounded page and no `visibilitychange` event
+fires at all, so a test built that way would be asserting against the same
+never-happens state, only with more machinery in the way.
+
 So it is deliberately unverified rather than covered by something that only
 looks like a test. What *is* covered is the ladder underneath it: a dropped
 client comes back in about 600ms, and a mutation pinning the backoff to its
