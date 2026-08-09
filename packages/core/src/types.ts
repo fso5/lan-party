@@ -47,7 +47,16 @@ export type TeamId = number;
  * tools/tank-balance.mjs` duels every pair across three maps and twelve seeds
  * with sides swapped, and the average win rates come out
  *
- *   Brown 12%   Green 14%   Grey 54%   Yellow 59%   Teal 78%   Black 83%
+ *   Brown 12%   Green 13%   Grey 55%   Yellow 57%   Teal 76%   Black 86%
+ *
+ * A snapshot, and it drifts. This copy still read 12/14/54/59/78/83 after the
+ * bot-think stagger moved every one of them -- the tool's own header and the
+ * README were corrected and this was missed, which is the four-copies problem
+ * this codebase has already been bitten by once. The duels are deterministic,
+ * so `node tools/tank-balance.mjs` settles it in a minute; treat the figures
+ * here as the last time somebody looked, not as a fact. What has not moved
+ * through any of it is the ranking, which is the only thing the paragraph
+ * below actually leans on.
  *
  * Read that carefully. The two at the bottom are the two that cannot move, and
  * one on one whoever cannot dodge loses -- so the number says less about how
