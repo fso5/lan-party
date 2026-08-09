@@ -441,10 +441,17 @@ test('a full-roster snapshot stays within its fragment budget on the worst link'
  * The wire can only name sixteen tanks, and says so rather than masking.
  *
  * Four bits, used for a tank's id in every snapshot and for a shell's and a
- * mine's owner. `& 0x0f` in all three places means tank 16 travels as tank 0:
- * two tanks drawn on each other, kills credited to the wrong player, and a
- * shell arming against a stranger while passing through its owner. The failure
- * is silent and looks nothing like a wire format out of bits.
+ * mine's owner. Left to `& 0x0f`, tank 16 travels as tank 0: two tanks drawn on
+ * each other, kills credited to the wrong player, and a shell arming against a
+ * stranger while passing through its owner. The failure is silent and looks
+ * nothing like a wire format out of bits.
+ *
+ * All three writers, deliberately. Only the snapshot was guarded for a while,
+ * and that is the wrong one to pick if you are only picking one: a renumbered
+ * tank in a snapshot is visible the moment anyone looks at the arena, whereas a
+ * renumbered `ownerId` is a kill credited to a stranger and reads as a scoring
+ * bug. A shell's and a mine's owner is a `tank.id` off the same roster, so the
+ * three share an id space and now share the guard on it.
  *
  * Not reachable today -- measured across every shipped map, the worst assembles
  * eight tanks counting authored enemies, against sixteen available. That is the
@@ -461,15 +468,48 @@ test('a tank the wire cannot name is refused, not silently renumbered', () => {
     alive: true,
   });
 
-  assert.throws(
-    () => writeSnapshot(new Writer(256), 1, [tank(MAX_WIRE_TANKS)]),
-    /cannot be sent/,
-    'id 16 would have gone out as id 0',
-  );
+  // Each writer that packs a tank id into those four bits, keyed by the field
+  // it names, so a new one added without a guard shows up as a missing row
+  // rather than as nothing at all.
+  const writers: { field: string; write: (id: number) => void }[] = [
+    { field: 'tank id', write: (id) => writeSnapshot(new Writer(256), 1, [tank(id)]) },
+    {
+      field: 'shell owner id',
+      write: (id) =>
+        writeShellSpawn(new Writer(256), {
+          shellId: 3,
+          ownerId: id,
+          x: 5.5,
+          y: 4.5,
+          angle: 1,
+          bounces: 1,
+          tick: 7,
+        }),
+    },
+    {
+      field: 'mine owner id',
+      write: (id) =>
+        writeMineSpawn(new Writer(256), { mineId: 3, ownerId: id, x: 5.5, y: 4.5, tick: 7 }),
+    },
+  ];
 
-  // The boundary in the other direction, so the guard cannot be tightened into
-  // rejecting a legal tank without a test noticing.
-  assert.doesNotThrow(() => writeSnapshot(new Writer(256), 1, [tank(MAX_WIRE_TANKS - 1)]));
+  for (const { field, write } of writers) {
+    assert.throws(
+      () => write(MAX_WIRE_TANKS),
+      /cannot be sent/,
+      `${field} ${MAX_WIRE_TANKS} would have gone out as 0`,
+    );
+
+    // Below the floor as well as above the ceiling. `-1 & 0x0f` is 15, so an
+    // unset or sentinel owner does not arrive as an absent one -- it arrives as
+    // the last seat in the lobby, which is a real player.
+    assert.throws(() => write(-1), /cannot be sent/, `${field} -1 would have gone out as 15`);
+
+    // The boundary in the other direction, so the guard cannot be tightened
+    // into rejecting a legal tank without a test noticing.
+    assert.doesNotThrow(() => write(MAX_WIRE_TANKS - 1), `${field} refuses a legal id`);
+    assert.doesNotThrow(() => write(0), `${field} refuses id 0`);
+  }
 });
 
 test('the id space is wider than the lobby can fill', () => {

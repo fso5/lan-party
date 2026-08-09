@@ -362,10 +362,11 @@ export interface WireTank {
  * How many tanks the wire can tell apart.
  *
  * A tank id is four bits, and the same four bits name a shell's and a mine's
- * owner. Masked on the way out in all three places, so tank 16 goes out as tank
- * 0: two tanks drawn on top of each other, kills credited to the wrong player,
- * and a shell that passes through its real owner while arming against a
- * stranger. Nothing about that resembles running out of bits.
+ * owner. Unchecked, all three would mask on the way out and tank 16 would go
+ * out as tank 0: two tanks drawn on top of each other, kills credited to the
+ * wrong player, and a shell that passes through its real owner while arming
+ * against a stranger. Nothing about that resembles running out of bits, so all
+ * three refuse instead -- see `refuseUnnameableTank`.
  *
  * Sixteen against the eight `MAX_LOBBY_SLOTS` allows, so there is real headroom
  * -- the largest shipped map assembles eight tanks counting authored enemies.
@@ -374,18 +375,35 @@ export interface WireTank {
  */
 export const MAX_WIRE_TANKS = 16;
 
+/**
+ * Refuse loudly rather than mask and hand back a packet that is well-formed and
+ * wrong.
+ *
+ * Shared by the three writers that pack a tank id into four bits, because they
+ * are one rule rather than three: a shell's and a mine's `ownerId` is a
+ * `tank.id`, from the same roster and the same id space the snapshot carries.
+ * Guarding only the snapshot -- which is what this file did for a while -- fails
+ * in the worse direction of the two. A renumbered tank in a snapshot is visible
+ * the moment anyone looks at the arena; a renumbered shell owner is a kill
+ * credited to a stranger, which looks like a scoring bug.
+ *
+ * `what` names the field, so the error points at the writer that refused rather
+ * than at a number with no home.
+ */
+function refuseUnnameableTank(id: number, what: string): void {
+  if (id >= MAX_WIRE_TANKS || id < 0) {
+    throw new Error(
+      `${what} ${id} cannot be sent -- the wire names at most ${MAX_WIRE_TANKS} tanks (0..${MAX_WIRE_TANKS - 1})`,
+    );
+  }
+}
+
 export function writeSnapshot(w: Writer, tick: number, tanks: WireTank[]): void {
   w.u8(MsgType.Snapshot);
   w.u16(tick & 0xffff);
   w.u8(tanks.length);
   for (const t of tanks) {
-    if (t.id >= MAX_WIRE_TANKS || t.id < 0) {
-      // Same reasoning as the roster count guard below: refuse loudly rather
-      // than mask and hand back a packet that is well-formed and wrong.
-      throw new Error(
-        `tank id ${t.id} cannot be sent -- the wire names at most ${MAX_WIRE_TANKS} tanks (0..${MAX_WIRE_TANKS - 1})`,
-      );
-    }
+    refuseUnnameableTank(t.id, 'tank id');
     const qx = quantPos(t.x);
     const qy = quantPos(t.y);
     w.u8((t.id & 0x0f) | (t.alive ? 0x10 : 0));
@@ -455,6 +473,7 @@ export interface WireShellSpawn {
 }
 
 export function writeShellSpawn(w: Writer, s: WireShellSpawn): void {
+  refuseUnnameableTank(s.ownerId, 'shell owner id');
   w.u8(MsgType.Event);
   w.u8(NetEvent.ShellSpawn);
   w.u16(s.tick & 0xffff);
@@ -513,6 +532,7 @@ export interface WireMineSpawn {
 }
 
 export function writeMineSpawn(w: Writer, m: WireMineSpawn): void {
+  refuseUnnameableTank(m.ownerId, 'mine owner id');
   w.u8(MsgType.Event);
   w.u8(NetEvent.MineSpawn);
   w.u16(m.tick & 0xffff);
