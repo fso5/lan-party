@@ -186,10 +186,13 @@ npm test  --workspace @tanks/core      # headless, ~2s
 npm test  --workspace @tanks/app       # vitest
 npm run build --workspace @tanks/proto # -> packages/proto/dist/tanks-proto.html
 npm run smoke --workspace @tanks/proto # drives the built page in a real browser
-npm run mp:smoke    --workspace @tanks/proto  # two browsers against a real host
-npm run lobby:smoke --workspace @tanks/proto  # the lobby, teams, and a round change
-npm run pwa:check   --workspace @tanks/proto  # the installed app, with the network cut
-npm run smoke:all   --workspace @tanks/proto  # all four of the above, ~60s
+npm run mp:smoke     --workspace @tanks/proto  # two browsers against a real host
+npm run lobby:smoke  --workspace @tanks/proto  # the lobby, teams, and a round change
+npm run ble:smoke    --workspace @tanks/proto  # the Bluetooth host path, via the page's radio stub
+npm run rounds:smoke --workspace @tanks/proto  # what the host puts on the wire between rounds
+npm run lan:smoke    --workspace @tanks/proto  # a real browser against LanHost, the server a phone runs
+npm run pwa:check    --workspace @tanks/proto  # the installed app, with the network cut
+npm run smoke:all    --workspace @tanks/proto  # all six of the above plus the PWA check, ~130s
 npm run serve --workspace @tanks/proto  # single-player, serve on your LAN
 npm run mp    --workspace @tanks/proto  # multiplayer: host + serve on your LAN
 ```
@@ -198,8 +201,16 @@ The browser runs are the only things that exercise the multiplayer client at
 all — the scoreboard and the lobby are both invisible in solo play, so nothing
 else can reach them. They run in CI on every change to the game or the core.
 
+One of those, `lan:smoke`, is worth calling out: every other browser run drives
+`server.mjs`, which is `node:http` plus the `ws` package, and neither of those
+ships. The Android host serves the page and carries the game through `LanHost`
+and the WebSocket code in `packages/core/src/net/websocket.ts`, written here
+from the RFC. So browsers were testing code that does not ship and the shipping
+code was only tested against Node's client; `lan:smoke` is where the two meet.
+
 CI also unpacks the APK it just built and checks the JavaScript bundle inside
-it still contains the native transport and core's netcode. Metro only bundles
+it still contains the native transport, core's netcode, and the page the host
+serves to everyone else. Metro only bundles
 what something imports, so a module nothing reaches from JavaScript is dropped
 silently and the app ships without it while every other step stays green —
 which is exactly the state the Bluetooth module is in. Note for anyone reading
@@ -210,9 +221,14 @@ returns nothing whether or not the module ships.
 
 ### Measuring rather than guessing
 
-Eight scripts in `tools/`, each answering one question and printing numbers
-rather than a verdict. None of them is a test and none of them fails a build;
-they exist so a decision can start from a measurement.
+Nine scripts in `tools/`, each answering one question and printing numbers
+rather than a verdict. They exist so a decision can start from a measurement.
+
+One exception to "none of them fails a build", added deliberately:
+`lobby-over-wifi.mjs` now exits non-zero if the *transport* stops carrying the
+lobby, while a finding about the unmerged branch it drives still exits 0. It
+had one bucket for both and therefore had to exit 0 whatever happened, which
+threw away the signal worth having.
 
 | | asks | currently says |
 |---|---|---|
@@ -220,10 +236,11 @@ they exist so a decision can start from a measurement.
 | `render-bench.mjs` | and can the browser draw it? | ~0.9ms a frame at 1x, ~2.2ms at 2x (p50) |
 | `net-budget.mjs` | can the radio carry a match? | yes at every roster size — connection count caps the roster, not bandwidth |
 | `tank-balance.mjs` | is the enemy roster honest? | ranks cleanly; Teal beats Yellow, which the descriptions have backwards |
-| `campaign-curve.mjs` | does the campaign get harder? | no — it climbs out of mission one and then wanders |
+| `campaign-curve.mjs` | does the campaign get harder? | yes, since the retune — a stand-in wins 82% of mission one and 7% of the finale, falling every step |
+| `round-length.mjs` | how long does a round actually take? | median 12.7s over 600 rounds, p99 61.8s, longest 106.2s, none hit the 120s draw limit |
 | `map-fairness.mjs` | is a versus map fair to every seat? | fair at 2 and 4, unequal at 3 and 5–8 |
 | `verify-apk.py` | does the published APK carry what the source says? | yes, page included, `--page` compares it byte for byte |
-| `lobby-over-wifi.mjs` | does the browser lobby work against the real one? | yes, and it reproduces the team collision in issue #9 |
+| `lobby-over-wifi.mjs` | does the browser lobby work against the real one? | yes, and it still reproduces the team collision in issue #9 — which now survives into the match |
 
 Two traps apply to all of the ones that import `@tanks/core`, both of which
 produced a confident wrong answer before being guarded:
@@ -287,14 +304,15 @@ use of a constant is "caught" for reasons having nothing to do with coverage.
 Prefer mutations that change a value over ones that remove a use.
 
 Neither is a second one, which is why `smoke:all` exists. A verdict is only
-ever about the command it was given, and there are four browser suites — so
+ever about the command it was given, and `smoke:all` runs seven — six driving
+a browser, plus `rounds:smoke` reading the wire through a raw socket — so
 "SURVIVED" against one of them means nothing more than that you picked the
 wrong one. That happened four times in a single afternoon: the spacebar mine
 looked uncovered under `smoke` and is caught by `mp:smoke`; the host-quiet
 hint looked uncovered under `mp:smoke` and is caught by `lobby:smoke`. Run
 mutations against `smoke:all` and a survivor is a real survivor. Where a test
 here was added for a survivor, the claim was confirmed by deleting that test
-and watching the mutation survive all four again.
+and watching the mutation survive the whole set again.
 
 A harness that cannot tell *the code survived* from *I changed nothing* — or
 from *I ran nothing* — manufactures confidence in tests that do not have it,
