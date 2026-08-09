@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createWorld, freeSpawnIndex } from '../src/sim.js';
-import { loadArena, VERSUS_MAPS } from '../src/maps/index.js';
+import { loadArena, MISSIONS, VERSUS_MAPS } from '../src/maps/index.js';
 import { parseArena } from '../src/map.js';
 import { TankKind } from '../src/types.js';
 import { DEFAULT_MATCH_SIZE, TANK_RADIUS, TANK_SPECS, VERSUS_BOT_KINDS } from '../src/tuning.js';
@@ -322,4 +322,40 @@ test('a map with ragged rows is refused', () => {
     /rows of 3, 5 characters/,
     'a short row was padded with floor instead of being refused',
   );
+});
+
+/*
+ * Every declared map parses, said once rather than relied on incidentally.
+ *
+ * The three guards above only protect anything if something loads every map,
+ * and today something does: campaign.test.ts walks MISSIONS and the physics and
+ * AI tests walk VERSUS_MAPS. That is a guarantee resting on a coincidence -- the
+ * same shape as the package entry point, which was exercised only because the
+ * browser smokes happened to import by name, and which got its own test for
+ * exactly this reason.
+ *
+ * A map that stops being loaded stops being checked, and the failure is a
+ * broken level shipping to a phone. So: assert it directly.
+ */
+test('every map the game offers parses', () => {
+  const all = [...MISSIONS, ...VERSUS_MAPS];
+  assert.ok(all.length >= 8, `only ${all.length} maps declared, so this is not walking the set`);
+
+  for (const m of all) {
+    const arena = loadArena(m);
+    assert.ok(arena.width > 0 && arena.height > 0, `${m.name} parsed to ${arena.width}x${arena.height}`);
+    // A versus map needs somewhere to put people; a campaign mission seats one
+    // player and its enemies come from the letters.
+    assert.ok(arena.spawns.length >= 1, `${m.name} has no start at all`);
+  }
+
+  // And the versus maps specifically carry a full lobby's worth, which is what
+  // MAX_LOBBY_SLOTS promises anyone reading the roster.
+  for (const m of VERSUS_MAPS) {
+    assert.equal(
+      loadArena(m).spawns.length,
+      8,
+      `${m.name} does not seat a full lobby, so the eighth player has nowhere to stand`,
+    );
+  }
 });
