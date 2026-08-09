@@ -232,6 +232,32 @@ export function parseArena(name: string, rows: string[]): ArenaDef {
     }
   }
 
+  /*
+   * Refuse the same start digit twice, for the same reason as the size check
+   * above: at the moment the map is authored, not on somebody's phone.
+   *
+   * Maps here are hand-drawn ASCII, deliberately, so a level reads as a picture
+   * in source -- and the cost of that is that '1' typed twice looks exactly
+   * like a level. Measured before adding this: it parsed, quietly, into two
+   * spawn points both carrying team 0.
+   *
+   * That is not a cosmetic duplicate. `createWorld` gives each seat the team of
+   * its spawn, and every hostility decision in the simulation keys off `team`,
+   * so two seats sharing one means two people standing in a free-for-all unable
+   * to damage each other for the whole round. The same symptom is open against
+   * the lobby as issue #9; it should not also be reachable by drawing a map.
+   */
+  const byDigit = new Map<number, number>();
+  for (const s of spawns) byDigit.set(s.team, (byDigit.get(s.team) ?? 0) + 1);
+  for (const [team, count] of byDigit) {
+    if (count > 1) {
+      throw new Error(
+        `arena '${name}' places start '${team + 1}' ${count} times -- each digit is one ` +
+          'seat, and two seats on one team cannot hurt each other in a free-for-all',
+      );
+    }
+  }
+
   // Ordered by the digit that authored them, not by where they fall in the
   // text. `createWorld` indexes this array by `spawnIndex`, so leaving it in
   // scan order means a map that happens to write '3' above '1' hands seat 0 the

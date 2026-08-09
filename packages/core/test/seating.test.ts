@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { createWorld, freeSpawnIndex } from '../src/sim.js';
 import { loadArena, VERSUS_MAPS } from '../src/maps/index.js';
+import { parseArena } from '../src/map.js';
 import { TankKind } from '../src/types.js';
 import { DEFAULT_MATCH_SIZE, TANK_RADIUS, TANK_SPECS, VERSUS_BOT_KINDS } from '../src/tuning.js';
 import type { Tank } from '../src/types.js';
@@ -233,4 +234,43 @@ test('every known tank kind can be seated', () => {
       `kind ${kind} is in TANK_SPECS but cannot be seated`,
     );
   }
+});
+
+/*
+ * A start digit written twice.
+ *
+ * Maps here are hand-drawn ASCII so a level reads as a picture in source, and
+ * the cost of that is that '1' typed twice looks exactly like a level. Measured
+ * before the guard existed: it parsed quietly into two spawn points both
+ * carrying team 0.
+ *
+ * Two seats on one team is not a cosmetic duplicate. Every hostility decision
+ * in the simulation keys off `team`, so it puts two people in a free-for-all
+ * who cannot damage each other for the whole round -- the same symptom open
+ * against the lobby as issue #9, which should not also be reachable by drawing
+ * a map.
+ */
+test('a map that writes the same start twice is refused', () => {
+  assert.throws(
+    () => parseArena('dup', ['#####', '#1 1#', '#####']),
+    /places start '1' 2 times/,
+    'two spawns on one team parsed without complaint',
+  );
+
+  // The neighbouring cases still work, so the guard is not just refusing maps.
+  const fine = parseArena('fine', ['#####', '#1 2#', '#####']);
+  assert.equal(fine.spawns.length, 2);
+  assert.deepEqual(
+    fine.spawns.map((s) => s.team),
+    [0, 1],
+  );
+
+  // Out-of-order digits are sorted, not rejected: '3' before '1' in the text
+  // still hands seat 0 to the '1'.
+  const ordered = parseArena('order', ['#####', '#3 1#', '#####']);
+  assert.deepEqual(
+    ordered.spawns.map((s) => s.team),
+    [0, 2],
+  );
+  assert.equal(ordered.spawns[0].x, 3.5, 'seat 0 must be the tile holding the 1');
 });
