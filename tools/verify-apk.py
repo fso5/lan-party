@@ -72,15 +72,41 @@ NATIVE = [
     ('Lexpo/modules/tanksble/TanksBleModule;', 'Bluetooth radio'),
 ]
 
-# (symbol, what it means, expected-present). bleAdapter is expected ABSENT until
-# something in JS imports it -- Metro drops what nothing references, so the
-# native module can ship while the radio stays unreachable from JS. That gap is
-# the current known state, not a regression, and this prints it either way
-# rather than failing on it.
+# (symbol, what it means, expected-present, note if it appears, note if it goes).
+#
+# bleAdapter is expected ABSENT until something in JS imports it -- Metro drops
+# what nothing references, so the native module can ship while the radio stays
+# unreachable from JS. That gap is the current known state, not a regression,
+# and this prints it either way rather than failing on it.
+#
+# Which is why each row prints the *fact* first and the comparison second. An
+# earlier version printed one word, computed as `found == expect`, so the row
+# for the radio read
+#
+#     ok       utf8=0   utf16=0   TanksBle     (radio JS binding)
+#
+# -- "ok" against a count of zero, on the one line somebody would quote as
+# proof the radio ships. And on the day the lobby imports the adapter, the same
+# column would have said CHANGED about the thing everyone was waiting for.
+# Neither is a lie exactly; both are the wrong word in the place it gets read.
+#
+# Two notes per row rather than one, chosen by the fact rather than by which
+# direction is currently surprising. One note per row read correctly right up
+# until the first draft of this change was tested by flipping an expectation --
+# at which point the tool printed "the radio is reachable from JS now" beside
+# `absent`. Whoever flips `expect` would have had to remember to rewrite the
+# sentence too, and a tool whose job is not lying about an APK should not have
+# that as a manual step.
 JS_SYMBOLS = [
-    ('TanksLan', 'native TCP transport binding', True),
-    ('TanksBle', 'radio JS binding', False),
-    ('bleAdapter', 'BLE adapter module', False),
+    ('TanksLan', 'native TCP transport binding', True,
+     'something new is pulling in the LAN binding',
+     'the WiFi path has lost its JS binding -- hosting over WiFi cannot work'),
+    ('TanksBle', 'radio JS binding', False,
+     'the radio is reachable from JS now, which is the goal -- update the expectation here',
+     'the radio was reachable from JS and is not any more'),
+    ('bleAdapter', 'BLE adapter module', False,
+     'Metro is bundling the adapter now, which is the goal -- update the expectation here',
+     'Metro has stopped bundling the adapter -- nothing imports it any more'),
 ]
 
 
@@ -223,13 +249,16 @@ def main(path, markers, expect_page=None):
         print(f"  {'ok     ' if n else 'MISSING'}  {sig:<44} x{n}  ({what})")
 
     print("\n-- JS symbols (both encodings; see the note on Hermes above) --")
-    for sym, what, expect in JS_SYMBOLS:
+    for sym, what, expect, on_appear, on_vanish in JS_SYMBOLS:
         u8 = bundle.count(sym.encode('utf-8'))
         u16 = bundle.count(sym.encode('utf-16-le'))
         found = bool(u8 or u16)
-        state = 'ok     ' if found == expect else 'CHANGED'
-        note = '' if found == expect else ('  <- now present' if found else '  <- now absent')
-        print(f"  {state}  utf8={u8:<3} utf16={u16:<3} {sym:<12} ({what}){note}")
+        # The fact, then the comparison. Never one word standing for both.
+        fact = 'present' if found else 'absent '
+        verdict = 'as expected' if found == expect else 'CHANGED    '
+        print(f"  {fact}  {verdict}  utf8={u8:<3} utf16={u16:<3} {sym:<12} ({what})")
+        if found != expect:
+            print(f"           -> {on_appear if found else on_vanish}")
 
     page, exact = embedded_page(bundle)
     print("\n-- the page the host serves to every other phone --")

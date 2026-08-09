@@ -18,6 +18,8 @@ on:
       - 'packages/core/**'
       - 'packages/proto/**'
       - '.github/workflows/android.yml'
+      # The APK checker's self-test runs in this job.
+      - 'tools/verify-apk.py'
       # A lockfile-only change still alters what gets built, and npm ci is
       # exact-by-design, so it has to retrigger the build.
       - 'package-lock.json'
@@ -200,6 +202,19 @@ jobs:
       # while a UI string with an em dash in it is the other way round.
       # Searching only UTF-16 for a module name returns zero whether or not the
       # module ships. Both encodings, always.
+      # tools/verify-apk.py is the other half of the step below: it asks the
+      # same questions of the *published* artifact, by hand, deliberately not
+      # sharing code with the check here so that a subtly wrong grep cannot
+      # agree with itself. Its extractor is the awkward part -- base64 padding,
+      # bundle spill that decodes to plausible text -- and its own docstring
+      # admits the self-test "is the only reason it gets exercised at all",
+      # which is to say when somebody remembers.
+      #
+      # It costs a tenth of a second in a job that takes ten minutes, and this
+      # is the job where the tool is topically at home. So it runs every time.
+      - name: Self-test the published-APK checker
+        run: python3 tools/verify-apk.py --selftest
+
       - name: Check the APK carries the transport, the netcode and the radio
         run: |
           unzip -p out/tanks.apk assets/index.android.bundle > bundle.hbc
