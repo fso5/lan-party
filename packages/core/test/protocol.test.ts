@@ -493,10 +493,12 @@ test('a full-roster snapshot stays within its fragment budget on the worst link'
  * bug. A shell's and a mine's owner is a `tank.id` off the same roster, so the
  * three share an id space and now share the guard on it.
  *
- * Not reachable today -- measured across every shipped map, the worst assembles
- * eight tanks counting authored enemies, against sixteen available. That is the
- * reason to write it down rather than the reason to skip it: eight spare seats
- * is exactly the kind of margin someone spends without checking.
+ * Not reachable today. Measured across every shipped map, the largest roster
+ * any host here can build is 8 against 16 available -- a full lobby on an
+ * eight-spawn versus map, with no bots in it. The maps that carry authored
+ * enemies seat one player and reach four. That is the reason to write it down
+ * rather than the reason to skip it: eight spare seats is exactly the kind of
+ * margin someone spends without checking.
  */
 test('a tank the wire cannot name is refused, not silently renumbered', () => {
   const tank = (id: number) => ({
@@ -564,9 +566,26 @@ test('a tank the wire cannot name is refused, not silently renumbered', () => {
  * the bad outcome; this is the guard that makes MatchStart the place it stops
  * instead.
  *
- * Not reachable through the lobby, which caps at MAX_LOBBY_SLOTS. Bots are the
- * way in: nothing bounds how many a host appends, and versus fill decides that
- * number from the map's spawn count.
+ * Not reachable, and the first version of this comment was wrong about why. It
+ * said bots were the way in -- "nothing bounds how many a host appends, and
+ * versus fill decides that number from the map's spawn count". Both halves are
+ * false. Every host in the repo (proto's server.mjs, and game.js's solo and
+ * Bluetooth paths) fills with
+ *
+ *     fillTo = Math.min(DEFAULT_MATCH_SIZE, arena.spawns.length)
+ *
+ * and starts the bot loop at the number of players, so bots top a roster up to
+ * four and add nothing at all once four people are seated. Measured across
+ * every shipped map, the largest roster any host here can assemble is 8 --
+ * Crossfire, Pillars or The Moat, a full lobby on eight spawns with no bots in
+ * it whatsoever.
+ *
+ * So this is a wire ceiling rather than a bound on anything the game does, and
+ * what keeps it that way is two assertions elsewhere: every arena's spawn count
+ * stays inside MAX_LOBBY_SLOTS (lobby.test.ts) and MAX_LOBBY_SLOTS stays inside
+ * MAX_WIRE_TANKS (below). The fill rule itself lives in another package and is
+ * deliberately not restated here -- a second copy of it is the thing that goes
+ * stale, as the sentence it replaced did.
  */
 test('a match cannot start with more tanks than the wire can name', () => {
   const start = (players: number, bots: number) => ({

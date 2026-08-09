@@ -397,8 +397,17 @@ export interface WireTank {
  * against a stranger. Nothing about that resembles running out of bits, so all
  * three refuse instead -- see `refuseUnnameableTank`.
  *
- * Sixteen against the eight `MAX_LOBBY_SLOTS` allows, so there is real headroom
- * -- the largest shipped map assembles eight tanks counting authored enemies.
+ * Sixteen against the eight `MAX_LOBBY_SLOTS` allows, so there is real headroom.
+ * Measured across every shipped map, the largest roster any host here can build
+ * is 8, and the two halves of that are further apart than they look:
+ *
+ *     versus   8   a full lobby on eight spawns, with no bots at all
+ *     mission  4   one spawn plus three authored enemies
+ *
+ * An earlier version of this said "eight tanks counting authored enemies",
+ * which reads as though the enemies were part of the eight. They are not -- the
+ * maps that carry them seat one player and top out at four.
+ *
  * It is named here because it is the ceiling any future seat-cap rise runs into,
  * and a number nobody has written down is one nobody checks.
  */
