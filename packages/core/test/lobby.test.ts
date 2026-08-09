@@ -576,11 +576,22 @@ test('every client-to-host lobby message is exactly the bytes the other side rea
   /*
    * These four have no reader in core. `readRoster` exists because the host
    * broadcasts a roster and everyone parses it here, but Join, SetTeam,
-   * SetReady and Welcome are parsed by `handleLobbyPacket` in the app's
-   * LobbySession -- the other side of the lane split -- and by game.js in the
-   * browser. So the bytes are the entire contract between the two, and a
-   * round-trip test cannot be written for them: there is nothing on this side
-   * to round-trip against.
+   * SetReady and Welcome are read across the lane split. So the bytes are the
+   * entire contract between the two, and a round-trip test cannot be written
+   * for them: there is nothing on this side to round-trip against.
+   *
+   * Where those readers actually are, since the first version of this said
+   * "handleLobbyPacket in the app's LobbySession" as though it were on main:
+   *
+   *   handleLobbyPacket   packages/app/src/net/lobby.ts, on the b/lobby branch
+   *                       -- not merged, so searching main for it finds nothing
+   *   game.js             LobbyOp.Roster and LobbyOp.Welcome only. It is only
+   *                       ever a lobby client, so the three host-inbound ops
+   *                       are ones it sends and never parses.
+   *
+   * Which means Join, SetTeam and SetReady have no reader on main at all right
+   * now. That is the strongest reason to pin their layout here rather than a
+   * reason not to.
    *
    * Which is how two of them ended up with no test at all. Sweeping core for
    * exported names that appear nowhere in this suite turned up

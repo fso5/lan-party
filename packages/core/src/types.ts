@@ -85,9 +85,13 @@ export enum TankKind {
    *
    * Dangerous to a player who holds position, and close to harmless in a duel
    * against anything that roams: 14% average, and it loses to Grey 97 times in
-   * 100. That is the cost of being unable to dodge, not a tuning fault -- but
-   * it does make Green conspicuously soft as versus bot fill, which is what
-   * server.mjs currently uses it for.
+   * 100. That is the cost of being unable to dodge, not a tuning fault.
+   *
+   * It did make Green conspicuously soft as versus bot fill, which is what the
+   * hosts used to reach for. They no longer do -- VERSUS_BOT_KINDS is
+   * [Grey, Teal, Yellow], and every fill site takes that list rather than
+   * naming kinds itself. So this is a note on what Green is for, not a standing
+   * complaint about where it is used.
    */
   Green = 5,
   /** Aggressive, fast rockets, actively closes distance. Late-game threat. */

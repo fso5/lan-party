@@ -725,17 +725,22 @@ export enum LobbyOp {
 /**
  * Roster ceiling. Eight tanks is also the snapshot budget's limit.
  *
- * This is what the *wire* can carry, and it is not the number of people who
- * can play. Every versus map ships four spawn points -- Crossfire, Pillars and
- * The Moat, all four -- so a roster of eight seats twice as many players as
- * any map can place. Which of the two numbers is wrong is a design decision
- * that has not been made: cap the lobby at four, or give the maps four more
- * spawns each.
+ * This used to record an open design question -- the maps shipped four spawn
+ * points against eight seats, so the comment said a full roster seated twice as
+ * many players as any map could place, and that the choice between capping the
+ * lobby at four and giving the maps four more spawns "has not been made".
  *
- * Until it is, read this as an upper bound on the encoding rather than a
- * promise about seats, and take the real limit from the arena. The Bluetooth
- * seating path in packages/proto/game.js does exactly that and refuses the
- * fifth player.
+ * It was made, the other way. Measured now: Crossfire, Pillars and The Moat all
+ * carry eight spawns, so seats and spawns match exactly and there is no gap
+ * left to reason about. game.js's seat palette records the same change from the
+ * other side -- "there were four, for the four spawns the maps used to have".
+ *
+ * Still take the real limit from the arena rather than from here: this is the
+ * encoding's ceiling, and a future map with fewer starts is a map, not a
+ * protocol change. The Bluetooth seating path in packages/proto/game.js does
+ * exactly that -- `freeSpawnIndex` against the arena, refusing a joiner when
+ * nothing is free rather than stacking two tanks on one square. With eight
+ * spawns that refusal is the ninth player, not the fifth as this said.
  */
 export const MAX_LOBBY_SLOTS = 8;
 
