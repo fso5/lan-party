@@ -15,8 +15,12 @@
  * Every pair duels on all three versus maps across twelve seeds with the sides
  * swapped, so a spawn advantage cannot read as a tank advantage. Sample run:
  *
- *   Brown    12.2%      Green    14.4%      Grey     53.9%
- *   Yellow   58.7%      Teal     77.8%      Black    82.6%
+ *   Brown    11.7%      Green    12.8%      Grey     55.0%
+ *   Yellow   56.8%      Teal     75.6%      Black    85.6%
+ *
+ * Those are today's, re-measured. The table first written here read 12.2 /
+ * 14.4 / 53.9 / 58.7 / 77.8 / 82.6, and the ranking has not moved, but the
+ * numbers have -- see the note on the stagger at the bottom.
  *
  * Two things worth reading carefully rather than at face value.
  *
@@ -34,8 +38,29 @@
  * here, not changed.
  *
  * The mobile kinds do rank cleanly, and there the descriptions are off by one
- * pair: Teal beats Yellow 83% of the time while being described as the milder
- * of the two.
+ * pair: Teal beats Yellow 75% of the time while being described as the milder
+ * of the two. (83% when this was first written; same conclusion, and the same
+ * reason for the change as below.)
+ *
+ * ## This is deterministic, so a moved number means the game moved
+ *
+ * Twelve fixed seeds, no clock, no randomness outside the world's own RNG --
+ * two runs on an unchanged tree are identical to the digit. That makes drift
+ * here worth chasing rather than shrugging at, and chasing it turned up
+ * something worth writing down.
+ *
+ * The numbers moved because of `thinkTick: id % reactionTicks` in sim.ts --
+ * staggering when bots first solve, added to flatten a cost spike. Its comment
+ * says it "changes when a bot first thinks, never what it decides", and that is
+ * true of the decision *rule* and misleading about the game. Measured by
+ * putting `thinkTick` back to 0 and re-running this: Black 82.6% against 85.6%
+ * with the stagger, Yellow 60.3% against 56.8%. A bot that re-solves on a
+ * different tick aims at a target that has moved, so matches genuinely resolve
+ * differently.
+ *
+ * The other optimisation from the same week -- abandoning a traced path already
+ * longer than the best found -- was checked the same way and is genuinely
+ * neutral: disabling it reproduces today's table to the digit.
  */
 import {
   createWorld,

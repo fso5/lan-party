@@ -121,10 +121,20 @@ function makeTank(id: number, kind: TankKind, team: number, x: number, y: number
       // than steady: with eight bots the median tick costs 9us and the 99th
       // costs 2095us, and it is the spike that drops a frame, not the median.
       //
-      // Offsetting by id spreads the same work across ticks. It changes when a
-      // bot first thinks, never what it decides, and it stays deterministic --
-      // ids come from creation order, which is already part of the wire
-      // contract, so a client rebuilding the roster gets the same offsets.
+      // Offsetting by id spreads the same work across ticks. The decision rule
+      // is untouched -- same solver, same inputs, same answer -- and it stays
+      // deterministic, since ids come from creation order, which is already
+      // part of the wire contract, so a client rebuilding the roster gets the
+      // same offsets.
+      //
+      // It does change how matches play out, though, and the first version of
+      // this comment said "never what it decides" in a way that read as though
+      // it did not. A bot re-solving on a different tick aims at a target that
+      // has moved by then, so it fires differently. Measured with
+      // tools/tank-balance.mjs, which is deterministic: Black wins 85.6% of its
+      // duels with the stagger and 82.6% with `thinkTick` back at 0, Yellow
+      // 56.8% against 60.3%. Rebalancing work has to be re-measured after a
+      // change like this, not assumed to carry over.
       thinkTick: id % TANK_SPECS[kind].reactionTicks,
       focusId: -1,
       aimAngle: angle,

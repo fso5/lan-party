@@ -34,7 +34,11 @@
  * The bot figure was 2095us when this row was added. Two changes since, both
  * driven by it: staggering when bots think so their solves stop landing on the
  * same tick, and abandoning traced paths already longer than the best one
- * found. Neither changes a decision the AI makes.
+ * found. Neither changes the decision *rule* -- same solver, same inputs, same
+ * answer -- but do not read that as "the game is unchanged". The stagger moves
+ * when a bot solves, so it aims at a target that has moved, and matches resolve
+ * differently: tank-balance puts Black at 85.6% with it and 82.6% without.
+ * The path abandon really is neutral, checked the same way.
  *
  * A phone is slower than this box. At twenty times slower the player-only
  * figure still leaves the frame mostly free, but the bot figure does not --
