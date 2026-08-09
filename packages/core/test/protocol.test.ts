@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   MAX_QUANT_POS,
+  MAX_STR_BYTES,
   MAX_WIRE_BOUNCES,
   PROTOCOL_VERSION,
   MsgType,
@@ -79,6 +80,45 @@ test('a length prefix off the wire cannot make str over-read', () => {
   // bytes" from a 4-byte packet.
   const r = new Reader(Uint8Array.from([200, 0x61, 0x62, 0x63]));
   assert.throws(() => r.str(), TruncatedPacketError);
+});
+
+/**
+ * And the writer cannot create one either.
+ *
+ * The test above covers a length prefix arriving corrupt. This is the same
+ * field going wrong at the other end, and it is the worse of the two because
+ * nothing throws. Over 255 bytes the prefix wraps, so the reader is handed a
+ * plausible short string and then reads the remaining payload as though it were
+ * the fields that came after it. Measured before the guard existed, with a
+ * 300-byte string followed by two bytes:
+ *
+ *     length byte on the wire = 44          (300 & 0xff)
+ *     read back a string of length 44
+ *     next two fields read as 0x78, 0x78    (sent 0xab, 0xcd -- 0x78 is 'x')
+ *
+ * Not reachable through either caller today: both pass `clampName`, which caps
+ * at MAX_NAME_BYTES. But that is a limit on how long a player's name may be,
+ * chosen for the roster, and it protects nothing about the next string field
+ * somebody adds. The lobby is where those get added -- a map name, an SSID, a
+ * chat line -- so the primitive holds the wire limit itself.
+ */
+test('a string the length prefix cannot describe is refused, not wrapped', () => {
+  assert.throws(
+    () => new Writer(512).str('x'.repeat(MAX_STR_BYTES + 1)),
+    /over the 255 the length prefix can describe/,
+  );
+
+  // Exactly full still travels, so the guard is the wire limit and not one
+  // short of it.
+  const w = new Writer(512);
+  w.str('x'.repeat(MAX_STR_BYTES));
+  const r = new Reader(w.finish());
+  assert.equal(r.str().length, MAX_STR_BYTES);
+
+  // Bytes, not characters -- an emoji is four of them, so 64 of these are at
+  // the limit and 65 are over it however short the string looks.
+  assert.doesNotThrow(() => new Writer(512).str('🚀'.repeat(63)));
+  assert.throws(() => new Writer(512).str('🚀'.repeat(64)), /over the 255/);
 });
 
 test('a truncated snapshot is rejected instead of yielding NaN tanks', () => {

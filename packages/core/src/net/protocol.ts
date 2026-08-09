@@ -100,6 +100,29 @@ export function dequantAngle(q: number): number {
   return q / ANGLE_SCALE;
 }
 
+/**
+ * Longest string the length prefix can describe.
+ *
+ * `str` writes one byte of length and then the bytes. Over 255 that byte wraps,
+ * and the result is the worst kind of wrong: nothing throws anywhere. Measured
+ * with a 300-byte string followed by two more fields --
+ *
+ *     length byte on the wire = 44          (300 & 0xff)
+ *     read back a string of length 44
+ *     next two fields read as 0x78, 0x78    (sent 0xab, 0xcd -- 0x78 is 'x')
+ *
+ * -- so the reader hands back a plausible short string and then reads the rest
+ * of the *payload* as though it were the fields that followed it. Every value
+ * after a long string is silently a different value, and the frame still parses.
+ *
+ * Both callers today pass `clampName`, which caps at MAX_NAME_BYTES. That is a
+ * product limit on a player's name and not a wire limit, and it does not
+ * protect the next field somebody adds -- a map name, a hotspot SSID, a chat
+ * line. This is the wire limit, so `str` is safe to reuse without every caller
+ * having to remember.
+ */
+export const MAX_STR_BYTES = 0xff;
+
 /** Growable little-endian byte writer. */
 export class Writer {
   private buf: Uint8Array;
@@ -157,6 +180,12 @@ export class Writer {
 
   str(s: string): this {
     const enc = new TextEncoder().encode(s);
+    if (enc.length > MAX_STR_BYTES) {
+      throw new Error(
+        `string is ${enc.length} bytes, over the ${MAX_STR_BYTES} the length prefix can describe -- ` +
+          `it would wrap and every field after it would read from the wrong offset, without throwing`,
+      );
+    }
     this.u8(enc.length);
     return this.bytes(enc);
   }
