@@ -40,7 +40,7 @@ import {
   type WireRoundOver,
   type WireTank,
 } from './protocol.js';
-import type { PeerId, Transport } from './transport.js';
+import type { PeerId, Transport } from '@lan-party/net';
 
 /**
  * How much of its own past the client keeps, so a correction can be folded in

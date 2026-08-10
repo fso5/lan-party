@@ -26,10 +26,10 @@ import {
   pickHostAddress,
   type TcpConnectionHandlers,
   type TcpServer,
-} from '../src/net/lanhost.js';
-import { WsOpcode } from '../src/net/websocket.js';
+} from '@lan-party/net';
+import { WsOpcode } from '@lan-party/net';
 import { MsgType, Reader, Writer, readInput, writeInput } from '../src/net/protocol.js';
-import { BridgeTransport } from '../src/net/bridge.js';
+import { BridgeTransport } from '@lan-party/net';
 import { MatchHost } from '../src/net/host.js';
 import { MatchClient } from '../src/net/client.js';
 import { createWorld, cloneWorld } from '../src/sim.js';

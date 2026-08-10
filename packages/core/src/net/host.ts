@@ -42,7 +42,7 @@ import {
   writeShellSpawn,
   writeSnapshot,
 } from './protocol.js';
-import type { PeerId, Transport } from './transport.js';
+import type { PeerId, Transport } from '@lan-party/net';
 
 /** Snapshot rate. 15Hz is the sweet spot: interpolation covers the gaps. */
 export const SNAPSHOT_HZ = 15;
