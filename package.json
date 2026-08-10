@@ -1,10 +1,11 @@
 {
-  "name": "tanks-mobile",
+  "name": "lan-party",
   "private": true,
   "version": "0.1.0",
-  "description": "Tanks! - a local-multiplayer tank game over Bluetooth",
+  "description": "A local-network multiplayer lobby. Everyone joins one hotspot, opens a URL, and plays. No internet, no installs.",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "games/*"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",

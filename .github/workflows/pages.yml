@@ -46,11 +46,11 @@ jobs:
         run: npm test --workspace @tanks/core
 
       - name: Build the installable web app
-        run: node packages/proto/build-pwa.mjs
+        run: node games/tanks/build-pwa.mjs
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: packages/proto/pwa
+          path: games/tanks/pwa
 
   deploy:
     needs: build

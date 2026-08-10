@@ -12,7 +12,7 @@
  * later is a transport change and nothing else, which is exactly what we want
  * to have proven before touching a radio.
  *
- *   npm run mp --workspace @tanks/proto
+ *   npm run mp --workspace @lan-party/tanks
  */
 
 import { createServer } from 'node:http';
@@ -70,7 +70,7 @@ let restartTimer = null;
 /**
  * Rounds a side must win, overridable because a full best-of-three is long.
  *
- *   ROUNDS=1 npm run mp --workspace @tanks/proto
+ *   ROUNDS=1 npm run mp --workspace @lan-party/tanks
  *
  * Measured before adding this: with one idle client and three bots on separate
  * teams, round one resolved in 6 seconds and round two took 70, and a
