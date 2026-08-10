@@ -7,8 +7,8 @@ import {
   BLE_SAFE_MTU,
   FRAME_HEADER_BYTES,
   type BleAdapter,
-} from '../src/net/ble.js';
-import type { Peer, PeerId } from '../src/net/transport.js';
+} from '@lan-party/net';
+import type { Peer, PeerId } from '@lan-party/net';
 import { MatchHost } from '../src/net/host.js';
 import { MatchClient } from '../src/net/client.js';
 import { cloneWorld, createWorld } from '../src/sim.js';

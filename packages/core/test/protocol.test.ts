@@ -29,7 +29,7 @@ import {
   writeSnapshot,
 } from '../src/net/protocol.js';
 import { TANK_SPECS } from '../src/tuning.js';
-import { BLE_SAFE_MTU, FRAME_HEADER_BYTES } from '../src/net/ble.js';
+import { BLE_SAFE_MTU, FRAME_HEADER_BYTES } from '@lan-party/net';
 
 /**
  * Bounds checking.

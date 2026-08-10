@@ -7,12 +7,12 @@ export * from './sim.js';
 export * from './ai.js';
 export * from './rules.js';
 export * from './maps/index.js';
-export * from './net/transport.js';
+export * from '@lan-party/net';
 export * from './net/protocol.js';
-export * from './net/ble.js';
-export * from './net/bridge.js';
-export * from './net/websocket.js';
-export * from './net/lanhost.js';
+
+
+
+
 export * from './net/loopback.js';
 export * from './net/host.js';
 export * from './net/client.js';

@@ -19,5 +19,8 @@
   },
   "files": [
     "dist"
-  ]
+  ],
+  "dependencies": {
+    "@lan-party/net": "*"
+  }
 }

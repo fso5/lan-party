@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { BleTransport, type BleAdapter } from '../src/net/ble.js';
-import { BridgeTransport } from '../src/net/bridge.js';
+import { BleTransport, type BleAdapter } from '@lan-party/net';
+import { BridgeTransport } from '@lan-party/net';
 import { LoopbackNetwork, LoopbackTransport } from '../src/net/loopback.js';
-import type { Peer, Transport } from '../src/net/transport.js';
+import type { Peer, Transport } from '@lan-party/net';
 
 /**
  * One property, checked against every transport that ships.

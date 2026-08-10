@@ -35,7 +35,7 @@ import {
   httpResponse,
   isWebSocketUpgrade,
   parseHttpRequest,
-} from '../src/net/websocket.js';
+} from '@lan-party/net';
 
 const PAGE = '<!doctype html><title>Tanks!</title><h1>🚀</h1>';
 

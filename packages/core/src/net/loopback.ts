@@ -19,7 +19,7 @@ import {
   type PeerId,
   type Transport,
   type TransportEvents,
-} from './transport.js';
+} from '@lan-party/net';
 
 export interface LinkProfile {
   /** One-way latency in ms. */

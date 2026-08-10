@@ -27,7 +27,7 @@ import {
   isWebSocketUpgrade,
   parseHttpRequest,
   sha1,
-} from '../src/net/websocket.js';
+} from '@lan-party/net';
 
 const hex = (b: Uint8Array) => [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
 const utf8 = (s: string) => new TextEncoder().encode(s);
