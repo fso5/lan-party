@@ -1,9 +1,0 @@
-{
-  "platforms": ["android", "ios"],
-  "android": {
-    "modules": ["expo.modules.tanksble.TanksBleModule"]
-  },
-  "ios": {
-    "modules": ["TanksBleModule"]
-  }
-}

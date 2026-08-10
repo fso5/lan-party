@@ -15,13 +15,13 @@ on:
   push:
     branches: [main]
     paths:
-      - 'packages/proto/**'
+      - 'games/tanks/**'
       - 'packages/core/**'
       - 'package-lock.json'
       - '.github/workflows/web.yml'
   pull_request:
     paths:
-      - 'packages/proto/**'
+      - 'games/tanks/**'
       - 'packages/core/**'
   workflow_dispatch:
 
@@ -62,20 +62,20 @@ jobs:
         run: npx playwright install --with-deps chromium chromium-headless-shell
 
       - name: Single player, every map
-        working-directory: packages/proto
+        working-directory: games/tanks
         run: npm run smoke
 
       # Two real browsers against the real host. Covers the netcode path and the
       # round HUD, neither of which the single-player run can reach.
       - name: Two clients against a real host
-        working-directory: packages/proto
+        working-directory: games/tanks
         run: npm run mp:smoke
 
       # The lobby panel only appears when a host sends a roster, and this is the
       # only host in the repo that does. Without it the whole lobby path --
       # join, welcome, roster, team selection -- ships unexercised.
       - name: Lobby, end to end
-        working-directory: packages/proto
+        working-directory: games/tanks
         run: npm run lobby:smoke
 
       # The Bluetooth host path, driven through the page's radio stub.
@@ -86,7 +86,7 @@ jobs:
       # else. It was written, mutation-verified, and then never run outside a
       # developer's shell, which is the same as not having it.
       - name: Bluetooth host, end to end
-        working-directory: packages/proto
+        working-directory: games/tanks
         run: npm run ble:smoke
 
       # What the host puts on the wire between rounds and between matches.
@@ -97,7 +97,7 @@ jobs:
       # mutation. Also the only check that a crowd larger than the map's spawn
       # list gets seated without two tanks on one square.
       - name: Rounds and matches, on the wire
-        working-directory: packages/proto
+        working-directory: games/tanks
         run: npm run rounds:smoke
 
       # The server the host phone actually runs, against a real browser.
@@ -109,7 +109,7 @@ jobs:
       # does ship was only ever tested against Node's client. This is the one
       # step where those meet.
       - name: A real browser against LanHost
-        working-directory: packages/proto
+        working-directory: games/tanks
         run: npm run lan:smoke
 
       # The installable version, with the network switched off mid-test.
@@ -121,5 +121,5 @@ jobs:
       # top of this file: it needs the browser, and the delivery path must not
       # be gated on that download.
       - name: Installed, with no network
-        working-directory: packages/proto
+        working-directory: games/tanks
         run: npm run pwa:check

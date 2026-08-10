@@ -91,7 +91,7 @@ function findChrome() {
  * mechanics, the rendering, the lobby-to-match handover. Those are a
  * regression in `packages/core` if they break, and they set the exit code.
  * (The WebSocket carriage here is the `ws` package, not `LanHost` — real
- * browsers against `LanHost` are `packages/proto/lanhost-smoke.mjs`.)
+ * browsers against `LanHost` are `games/tanks/lanhost-smoke.mjs`.)
  *
  * `check.finding` is theirs: a fact about `b/lobby` as it stands. Printed just
  * as loudly, reported separately, and never the exit code.

@@ -53,7 +53,7 @@ const HOST = lanAddress();
  * Resolved against this file, not the shell's working directory.
  *
  * `spawn('node', ['server.mjs'])` works under `npm run mp:smoke`, which runs
- * from `packages/proto`, and dies from anywhere else -- including the repo
+ * from `games/tanks`, and dies from anywhere else -- including the repo
  * root, which is where anyone reaching for one suite in isolation stands. The
  * failure is `Cannot find module '<root>/server.mjs'` one second in, which
  * reads as the multiplayer test failing rather than as the harness not

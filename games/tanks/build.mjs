@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const coreEntry = join(here, '..', 'core', 'src', 'index.ts');
+const coreEntry = join(here, '..', '..', 'packages', 'core', 'src', 'index.ts');
 const outDir = join(here, 'dist');
 const outFile = join(outDir, 'tanks-proto.html');
 

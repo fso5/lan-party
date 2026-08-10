@@ -1,7 +1,7 @@
 /**
  * What share of a frame does the *browser* cost?
  *
- *     npm run build -w @tanks/proto && node tools/render-bench.mjs
+ *     npm run build -w @lan-party/tanks && node tools/render-bench.mjs
  *
  * tools/sim-bench.mjs answers this for the simulation. It is the smaller half.
  * The page the host phone serves is what every other player in the room runs --
@@ -51,7 +51,7 @@ function findChrome() {
   return undefined;
 }
 
-const PAGE = new URL('../packages/proto/dist/tanks-proto.html', import.meta.url).href;
+const PAGE = new URL('../games/tanks/dist/tanks-proto.html', import.meta.url).href;
 const BUDGET_MS = 1000 / 60;
 
 // Timed from inside the page, before any of its own code runs, so the very
