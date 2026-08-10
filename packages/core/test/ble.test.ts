@@ -673,3 +673,76 @@ test('a disconnect actually reaches the framer, not just the peer list', () => {
 
   assert.deepEqual(packets, [], 'the tail completed a message from before the disconnect');
 });
+
+/**
+ * A packet the game cannot read must not take the radio down with it.
+ *
+ * Every reader downstream of the transport throws on malformed input, and that
+ * is deliberate -- issue #2's whole point was that `u8` past the end returned
+ * `undefined`, which flowed into position arithmetic and produced NaN tank
+ * coordinates with no error anywhere. The fix made them raise instead.
+ *
+ * The throw then had nowhere to land. Traced the whole path before touching it:
+ *
+ *   BridgeTransport.receive       calls `onPacket` bare; only `send` is guarded
+ *   MatchHost.handlePacket        `readInput(r)` with no try
+ *   MatchClient.handlePacket      dispatches into applySnapshot/applyEvent, no try
+ *   BleTransport.onFrame          called `onPacket` bare  <- the one gap
+ *   LanHost, WiFi side            already guarded, and says why in a comment
+ *
+ * So the two transports faced the same hazard and only one of them survived it.
+ * On BLE the message reached the native module's callback as an unhandled error
+ * and the match ended for everyone.
+ *
+ * Reachable without malice, by this transport's own account of itself: "over
+ * BLE a truncated packet is a routine input, not an exotic one -- a fragment
+ * can be dropped, or a write cut short at a renegotiated MTU".
+ *
+ * The peer is kept, which is where this deliberately differs from LanHost --
+ * see the comment at the call site. Asserted here so the difference is a
+ * decision rather than an oversight.
+ */
+test('a packet the game handler cannot read is reported, not thrown at the radio', () => {
+  const { adapter, connects, deliver } = controllableAdapter();
+  const sent: PeerId[] = [];
+  const transport = new BleTransport({ ...adapter, sendFrame: (to) => sent.push(to) });
+
+  const errors: string[] = [];
+  transport.setEvents({
+    onPacket: () => {
+      throw new Error('packet ends after 1 byte, 4 needed at offset 3');
+    },
+    onError: (err) => errors.push(err.message),
+  });
+  connects('phone');
+
+  // One frame, so the framer hands it straight up rather than holding it.
+  const framer = new BleFramer(18);
+  const frames = framer.fragment(Uint8Array.from([1, 2, 3]));
+  assert.equal(frames.length, 1, 'the fixture must be a single-fragment message');
+
+  assert.doesNotThrow(
+    () => deliver('phone', frames[0]),
+    'the throw reached the adapter callback, which on a phone is the native module',
+  );
+  assert.deepEqual(
+    errors,
+    ['packet ends after 1 byte, 4 needed at offset 3'],
+    'the failure has to be reported, not merely swallowed -- a silent catch is a radio that goes quiet',
+  );
+
+  // The peer stays. Bluetooth drops fragments as a matter of routine, so a
+  // corrupt message is usually the link and not the sender; disconnecting for
+  // one bad packet would drop players for ordinary noise. Observed by sending:
+  // broadcast walks the peer map, so a frame reaching the platform addressed to
+  // 'phone' is that peer still being in it.
+  transport.broadcast(Uint8Array.from([9, 9]), true);
+  assert.deepEqual(sent, ['phone'], 'one unreadable packet must not evict the player');
+
+  // And the next packet still arrives, so this is a dropped message rather
+  // than a dead pipe.
+  const seen: number[] = [];
+  transport.setEvents({ onPacket: (_from, data) => seen.push(data.length), onError: () => {} });
+  deliver('phone', frames[0]);
+  assert.deepEqual(seen, [3], 'the transport stopped delivering after catching once');
+});

@@ -22,11 +22,13 @@ import { lanAddress } from './lan-address.mjs';
 import {
   LanHost,
   LobbyOp,
+  MAX_LOBBY_SLOTS,
   MatchHost,
   MsgType,
   Reader,
   VERSUS_MAPS,
   Writer,
+  clampName,
   createWorld,
   loadArena,
   writeLobbyWelcome,
@@ -108,6 +110,20 @@ const port = await lan.start();
 // A minimal host-side lobby: seat whoever sends Join, honour team changes,
 // broadcast the roster. This mirrors LobbySession without depending on the
 // app package, which is a different workspace and a different session's lane.
+//
+// Being a stand-in is the whole risk here. It must not be more *permissive*
+// than the thing it stands in for, because then the browser is exercised
+// against a host that does not exist. Two places where it was, both compared
+// against LobbySession.handleHostSide on b/lobby:
+//
+//   the seat cap    LobbySession drops a Join once the roster is full. This
+//                   seated everyone. Since writeRoster started refusing an
+//                   over-long roster, a ninth join would throw inside this
+//                   packet handler rather than produce a packet clients drop --
+//                   a failure invented by the test harness.
+//   the name        LobbySession stores clampName(name). This stored it raw,
+//                   so its in-memory roster held a name no client could ever
+//                   be shown: writeRoster clamps on the way out regardless.
 const roster = { mapId: 0, mode: 0, roundsToWin: 3, slots: [] };
 const peerBySlot = new Map();
 let nextSlotId = 0;
@@ -145,8 +161,9 @@ lan.transport.setEvents({
     const op = r.u8();
 
     if (op === LobbyOp.Join) {
+      if (roster.slots.length >= MAX_LOBBY_SLOTS) return;
       const name = r.str();
-      const slot = { slotId: nextSlotId++, name: name || 'Player', team: freeTeam(), ready: false, isHost: false };
+      const slot = { slotId: nextSlotId++, name: clampName(name) || 'Player', team: freeTeam(), ready: false, isHost: false };
       roster.slots.push(slot);
       peerBySlot.set(slot.slotId, from);
       const w = new Writer();

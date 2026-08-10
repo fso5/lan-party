@@ -311,7 +311,47 @@ export class BleTransport implements Transport {
 
     adapter.onFrame((from, frame) => {
       const message = this.framer.reassemble(from, frame);
-      if (message) this.events.onPacket?.(from, message);
+      if (!message) return;
+      /*
+       * A packet the game cannot read must not take the radio down with it.
+       *
+       * Everything downstream of here throws on malformed input, by design and
+       * on purpose: `readInput`, `readSnapshot` and the event readers all raise
+       * TruncatedPacketError rather than returning undefined and letting NaN
+       * coordinates flow onward. Nothing between that throw and the native
+       * module's callback caught it -- `BridgeTransport.receive` calls
+       * `onPacket` bare, and `MatchHost.handlePacket` and
+       * `MatchClient.handlePacket` both parse without a guard -- so one bad
+       * message came out as an unhandled error on the JS thread and the match
+       * ended for everyone.
+       *
+       * It does not take malice. This transport's own bounds work exists
+       * because "over BLE a truncated packet is a routine input, not an exotic
+       * one: a fragment can be dropped, or a write cut short at a renegotiated
+       * MTU". The readers were made to throw on exactly that, and then the
+       * throw had nowhere to land.
+       *
+       * `send` and `broadcast` have reported their failures through onError
+       * since they were written. This is the same rule on the inbound side.
+       *
+       * ## Why this drops the packet and LanHost drops the connection
+       *
+       * The WiFi host closes the socket of a peer that sends something it
+       * cannot parse, reasoning that a peer which cannot speak the protocol
+       * will not start. That is right over TCP, where delivery is reliable and
+       * ordered, so a malformed message means the sender is genuinely wrong.
+       *
+       * It is wrong here. Bluetooth loses fragments as a matter of routine, so
+       * a corrupt message is usually the radio rather than the peer, and
+       * dropping a player mid-match for one bad packet would disconnect people
+       * for ordinary noise -- with a reconnect that costs far more than a TCP
+       * one. So: report it, discard the message, keep the peer.
+       */
+      try {
+        this.events.onPacket?.(from, message);
+      } catch (err) {
+        this.events.onError?.(err instanceof Error ? err : new Error(String(err)));
+      }
     });
 
     adapter.onPeerConnected((peer) => {
