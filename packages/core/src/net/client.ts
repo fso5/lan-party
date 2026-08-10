@@ -43,10 +43,17 @@ import {
 import type { PeerId, Transport } from './transport.js';
 
 /**
- * How many ticks of history to keep. At 60Hz this is one second, comfortably
- * more than the worst plausible BLE round trip plus a retransmit.
+ * How much of its own past the client keeps, so a correction can be folded in
+ * at the tick it applies to. At 60Hz this is one second, comfortably more than
+ * the worst plausible BLE round trip plus a retransmit.
+ *
+ * Exported because it is the bound on everything the client retains, not just
+ * on this ring: `logSpawn` and `logDeath` both drop entries older than
+ * `history[0].tick`, so all three grow together if this one stops trimming.
+ * Each entry holds a whole `cloneWorld`, so unbounded is a phone running out of
+ * memory rather than a slow client.
  */
-const HISTORY_TICKS = 64;
+export const HISTORY_TICKS = 64;
 
 /**
  * Position error we tolerate before rewinding. Snapshots quantise to 1/128 of
@@ -146,6 +153,23 @@ export class MatchClient {
 
   /** Deaths the host reported, kept for the same window and the same reason. */
   private deathLog: { tick: number; victim: number }[] = [];
+
+  /**
+   * What is being held for rewinds: history entries, and the spawn and death
+   * logs that trim against them.
+   *
+   * Three numbers rather than one, because they fail differently -- history is
+   * a clone of the whole world per entry, while a log entry is a handful of
+   * fields -- and because a HUD showing one blended figure cannot say which
+   * grew.
+   */
+  get retained(): { history: number; spawns: number; deaths: number } {
+    return {
+      history: this.history.length,
+      spawns: this.spawnLog.length,
+      deaths: this.deathLog.length,
+    };
+  }
 
   /**
    * Shots and mines our own simulation has actually produced, counted so the

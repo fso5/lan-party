@@ -13,7 +13,7 @@ import {
   PERFECT_PROFILE,
 } from '../src/net/loopback.js';
 import { MatchHost } from '../src/net/host.js';
-import { MatchClient } from '../src/net/client.js';
+import { HISTORY_TICKS, MatchClient } from '../src/net/client.js';
 import {
   MsgType,
   NetEvent,
@@ -2078,4 +2078,127 @@ test('rewind depth follows the link, and stays inside the history ring', () => {
   // second, and the client still agrees with the host the whole time.
   const worst = Math.max(ble.depths.at(-1)!, lan.depths.at(-1)!);
   assert.ok(worst <= 32, `deepest rewind replayed ${worst} ticks; measured worst is 15 and the ring holds 64`);
+});
+
+/**
+ * Nothing the client keeps for rewinds may grow with the length of the match.
+ *
+ * Three structures are retained: the history ring, and the spawn and death logs
+ * that let `replaySpawns` put back an entity the host reported after we had
+ * already simulated past its tick. All three are bounded by one line --
+ *
+ *     while (this.history.length > HISTORY_TICKS) this.history.shift();
+ *
+ * -- because both logs drop entries older than `history[0].tick`. A history
+ * entry is a whole `cloneWorld`, so if that trim stops trimming the client
+ * accumulates a copy of the world per tick: 36,000 of them in a ten-minute
+ * match, on a phone. The app is killed rather than slowed.
+ *
+ * ## What it catches, verified by mutation
+ *
+ *   trim line deleted entirely                    caught
+ *   spawnLog's filter made a no-op                caught
+ *   `retained` reporting a plausible constant     caught, but only because of
+ *                                                 the `early` sample below
+ *
+ * And what it does not, which the first draft of this comment claimed it did:
+ * raising HISTORY_TICKS from 64 to 512 passes every test in this file including
+ * this one. That follows from the assertion being `peak.history === HISTORY_TICKS`
+ * -- the test reads the same constant the trim does, so a bigger ring agrees
+ * with itself. Deliberate: the constant is a tuning decision and a test that
+ * fights it is a test that has to be edited every time somebody tunes it. What
+ * cannot be a tuning decision is *unbounded*, and that is what is nailed down.
+ *
+ * (Recorded because the first mutation run of that case reported `caught` and
+ * four later runs all reported `SURVIVED`. The reproducible answer is the one
+ * written here. `npm test -w @tanks/core` is not concurrency-safe -- it runs a
+ * build and an `rm -rf dist-test` -- and a run that contends with another loses
+ * files rather than failing honestly, which is the standing explanation for
+ * exactly this shape of one-off.)
+ *
+ * The rewind-depth test above does not cover any of this, and the reason is
+ * worth keeping in view: depth is set by how far back the snapshot's tick is,
+ * not by how much history sits behind it, so a longer ring changes no depth.
+ *
+ * Measured over 30s, 1, 2 and 5 minutes of a Bluetooth match with both players
+ * firing and laying mines -- identical at every length, which is the point:
+ *
+ *     history 64 (pinned)   spawns peak 7   deaths peak 10
+ *
+ * Two minutes here rather than five: the peaks are the same and it costs about
+ * 0.4s.
+ */
+test('what the client retains for rewinds does not grow with the match', () => {
+  const net = new LoopbackNetwork(BLE_PROFILE, 5);
+  const hostT = new LoopbackTransport('host', 'Host', net);
+  const clientT = new LoopbackTransport('client', 'Client', net);
+  const hostWorld = versusWorld();
+  const host = new MatchHost(hostWorld, hostT);
+  host.localTankId = 0;
+  const client = new MatchClient(cloneWorld(hostWorld), clientT, 'host', 1);
+  net.connect('host', 'client');
+  host.addClient('client', 1);
+
+  const stepMs = 1000 / 60;
+  const ticks = 60 * 120;
+  let peak = { history: 0, spawns: 0, deaths: 0 };
+  let early = -1;
+  for (let i = 0; i < ticks; i++) {
+    // Kept alive so the match cannot end early. A finished match stops
+    // spawning, and every peak below would be a peak over nothing.
+    for (const t of hostWorld.tanks) t.alive = true;
+    for (const t of client.world.tanks) t.alive = true;
+    host.setLocalInput({
+      ...emptyInput(), moveX: Math.sin(i / 17), aimX: 1, fire: true, layMine: i % 40 === 0,
+    });
+    client.setInput({
+      ...emptyInput(), moveY: Math.cos(i / 13), aimY: 1, fire: true, layMine: i % 37 === 0,
+    });
+
+    client.update(stepMs);
+    net.advance(stepMs);
+    host.update(stepMs);
+    net.advance(0);
+
+    const r = client.retained;
+    // Ten ticks in, the ring cannot be full yet. Sampled so that `retained`
+    // reporting a plausible constant is not indistinguishable from it working:
+    // a getter hardcoded to HISTORY_TICKS satisfies every bound below, and did,
+    // until this line existed.
+    if (i === 10) early = r.history;
+    peak = {
+      history: Math.max(peak.history, r.history),
+      spawns: Math.max(peak.spawns, r.spawns),
+      deaths: Math.max(peak.deaths, r.deaths),
+    };
+  }
+
+  // Vacuity: a client that never heard from the host retains nothing and passes
+  // every bound below.
+  assert.ok(client.reconciles > 100, `only ${client.reconciles} reconciles -- the link was not carrying corrections`);
+  assert.ok(peak.spawns > 0, 'no spawn was ever logged, so the log being small says nothing');
+  assert.ok(peak.deaths > 0, 'no death was ever logged, so the log being small says nothing');
+  assert.equal(client.resyncs, 0, 'a resync clears all three, which would hide growth rather than prove its absence');
+
+  assert.ok(
+    early > 0 && early < HISTORY_TICKS,
+    `history was ${early} entries ten ticks in, against a ring of ${HISTORY_TICKS}. It has to be filling ` +
+      `at that point -- a value already at the cap means \`retained\` is reporting a constant rather than reading the ring.`,
+  );
+
+  assert.equal(
+    peak.history,
+    HISTORY_TICKS,
+    `history peaked at ${peak.history} against a ring of ${HISTORY_TICKS}. Each entry is a cloneWorld, ` +
+      `so over ${ticks} ticks an untrimmed ring is ${ticks} copies of the world and the phone is killed.`,
+  );
+
+  // An order of magnitude over the measured 7 and 10. Both logs trim against
+  // history[0].tick, so if they are in the hundreds after two minutes the
+  // binding they trim against is what broke.
+  assert.ok(
+    peak.spawns <= 64 && peak.deaths <= 64,
+    `spawn/death logs peaked at ${peak.spawns}/${peak.deaths} over ${ticks} ticks (measured 7/10). ` +
+      `Both trim against history[0].tick, so this is that binding, not the logs themselves.`,
+  );
 });
