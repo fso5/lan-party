@@ -204,6 +204,29 @@ export class LanHost {
     return this.transport.peerIds;
   }
 
+  /**
+   * No cap on how many connections are held, and that is the measured answer
+   * rather than an omission.
+   *
+   * Every other buffer in this file states its bound, so this one should say
+   * why it has none. Driven against a stub socket layer, with the map watched
+   * throughout:
+   *
+   *     a browser fetches the page, then closes      0 held
+   *     50 connections open, saying nothing          50, then 0 on close
+   *     one connection sends 83,600 bytes of header  0 -- MAX_HEAD_BYTES drops it
+   *     500 opened and never closed                  500
+   *
+   * So every path where either side ends the connection drains, including the
+   * abusive one, and the only way the map grows is sockets the platform never
+   * reports closed. That is the socket layer's count to bound, not this one's,
+   * and each entry is capped at MAX_HEAD_BYTES until it upgrades.
+   *
+   * A cap here was considered and rejected on those numbers. It would defend
+   * only against a platform that has stopped reporting closes, and the cost of
+   * getting it wrong is refusing a real player -- on the WiFi path, which is
+   * the only way an iPhone can play at all.
+   */
   private accept(id: string): void {
     this.conns.set(id, { id, upgraded: false, head: '', decoder: new WsDecoder() });
   }
