@@ -60,12 +60,12 @@ import {
   VERSUS_MAPS,
   TankKind,
   TICK_HZ,
-} from '@tanks/core';
+} from '@lan-party/tanks-core';
 
 import { fileURLToPath } from 'node:url';
 import { requireFreshCore } from './lib/fresh-core.mjs';
 
-// These numbers describe packages/core/dist, not packages/core/src.
+// These numbers describe games/tanks/core/dist, not games/tanks/core/src.
 requireFreshCore(fileURLToPath(new URL('..', import.meta.url)));
 
 const SEEDS = Number(process.argv[2] ?? 200);

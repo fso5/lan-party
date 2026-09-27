@@ -4,12 +4,17 @@
   "version": "0.1.0",
   "description": "A local-network multiplayer lobby. Everyone joins one hotspot, opens a URL, and plays. No internet, no installs.",
   "workspaces": [
-    "packages/*",
-    "games/*"
+    "packages/net",
+    "packages/lobby",
+    "packages/sdk",
+    "games/tanks/core",
+    "games/nuggets",
+    "games/tanks"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "check:boundaries": "node tools/check-boundaries.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

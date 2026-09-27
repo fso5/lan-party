@@ -18,7 +18,9 @@
     "smoke:all": "node build.mjs && node smoke.mjs && node mp-smoke.mjs && node lobby-smoke.mjs && node ble-smoke.mjs && node rounds-smoke.mjs && node lanhost-smoke.mjs && node build-pwa.mjs && node pwa-check.mjs"
   },
   "dependencies": {
-    "@tanks/core": "*",
+    "@lan-party/lobby": "*",
+    "@lan-party/net": "*",
+    "@lan-party/tanks-core": "*",
     "ws": "^8.18.0"
   }
 }

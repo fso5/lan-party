@@ -1,5 +1,5 @@
 {
-  "name": "@tanks/core",
+  "name": "@lan-party/tanks-core",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -9,6 +9,7 @@
     "test": "npm run build && rm -rf dist-test && tsc -p tsconfig.json && node --test --test-timeout=30000 \"dist-test/test/*.test.js\""
   },
   "devDependencies": {
+    "@lan-party/lobby": "*",
     "typescript": "^5.6.0"
   },
   "exports": {

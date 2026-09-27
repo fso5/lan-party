@@ -76,12 +76,12 @@ import {
   MISSIONS,
   TankKind,
   TICK_HZ,
-} from '@tanks/core';
+} from '@lan-party/tanks-core';
 
 import { fileURLToPath } from 'node:url';
 import { requireFreshCore } from './lib/fresh-core.mjs';
 
-// These numbers describe packages/core/dist, not packages/core/src. See the
+// These numbers describe games/tanks/core/dist, not games/tanks/core/src. See the
 // note in lib/fresh-core.mjs -- an A/B run that skipped the rebuild once
 // compared a change against itself and reported no difference.
 requireFreshCore(fileURLToPath(new URL('..', import.meta.url)));

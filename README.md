@@ -1,6 +1,13 @@
-# Tanks!
+# LAN Party
 
-A mobile clone of *Tanks!* from Wii Play, with local multiplayer over Bluetooth.
+A local-network multiplayer lobby. Everyone joins one phone's hotspot, opens a
+URL, and plays -- no internet, no installs. Games plug into the lobby; the
+first two are *Tanks!* (a clone of the Wii Play game) and Chicken Nugget
+Simulator.
+
+> Much of this README below still describes the retired native app and its
+> Bluetooth transport (retired 2026-08-10). **Build it** and **Layout** are
+> current; the rest is due a rewrite.
 
 ## The goal
 
@@ -181,20 +188,22 @@ what `net/websocket.ts` is for, and it is why Bluetooth is not the only route.
 ## Build it
 
 ```
-npm install
-npm test  --workspace @tanks/core      # headless, ~2s
-npm test  --workspace @tanks/app       # vitest
-npm run build --workspace @tanks/proto # -> packages/proto/dist/tanks-proto.html
-npm run smoke --workspace @tanks/proto # drives the built page in a real browser
-npm run mp:smoke     --workspace @tanks/proto  # two browsers against a real host
-npm run lobby:smoke  --workspace @tanks/proto  # the lobby, teams, and a round change
-npm run ble:smoke    --workspace @tanks/proto  # the Bluetooth host path, via the page's radio stub
-npm run rounds:smoke --workspace @tanks/proto  # what the host puts on the wire between rounds
-npm run lan:smoke    --workspace @tanks/proto  # a real browser against LanHost, the server a phone runs
-npm run pwa:check    --workspace @tanks/proto  # the installed app, with the network cut
-npm run smoke:all    --workspace @tanks/proto  # all six of the above plus the PWA check, ~130s
-npm run serve --workspace @tanks/proto  # single-player, serve on your LAN
-npm run mp    --workspace @tanks/proto  # multiplayer: host + serve on your LAN
+npm ci
+npm run check:boundaries   # the platform imports no game, and no game another
+npm run build              # every package, platform first
+npm test                   # net, lobby and tanks-core suites, in order
+
+# Tanks, from the root with -w @lan-party/tanks or from games/tanks:
+npm run smoke        # drives the built page in a real browser
+npm run mp:smoke     # two browsers against a real host
+npm run lobby:smoke  # the lobby, teams, and a round change
+npm run ble:smoke    # the Bluetooth host path, via the page's radio stub
+npm run rounds:smoke # what the host puts on the wire between rounds
+npm run lan:smoke    # a real browser against LanHost, the server a phone runs
+npm run pwa:check    # the installed app, with the network cut
+npm run smoke:all    # all of the above
+npm run serve        # single-player, serve on your LAN
+npm run mp           # multiplayer: host + serve on your LAN
 ```
 
 The browser runs are the only things that exercise the multiplayer client at
@@ -204,7 +213,7 @@ else can reach them. They run in CI on every change to the game or the core.
 One of those, `lan:smoke`, is worth calling out: every other browser run drives
 `server.mjs`, which is `node:http` plus the `ws` package, and neither of those
 ships. The Android host serves the page and carries the game through `LanHost`
-and the WebSocket code in `packages/core/src/net/websocket.ts`, written here
+and the WebSocket code in `packages/net/src/websocket.ts`, written here
 from the RFC. So browsers were testing code that does not ship and the shipping
 code was only tested against Node's client; `lan:smoke` is where the two meet.
 
@@ -242,7 +251,7 @@ threw away the signal worth having.
 | `verify-apk.py` | does the published APK carry what the source says? | yes, page included, `--page` compares it byte for byte |
 | `lobby-over-wifi.mjs` | does the browser lobby work against the real one? | yes, and it still reproduces the team collision in issue #9 — which now survives into the match |
 
-Two traps apply to all of the ones that import `@tanks/core`, both of which
+Two traps apply to all of the ones that import `@lan-party/tanks-core`, both of which
 produced a confident wrong answer before being guarded:
 
 **They measure `dist`, not `src`.** The package main is `dist/index.js`, so an
@@ -431,22 +440,34 @@ time to dodge, and what makes the late-game tanks frightening.
 
 ## Layout
 
+The platform and the games are separate modules. `packages/` is the platform
+and imports nothing from any game; each directory under `games/` is one game,
+which may use the platform but never another game. `npm run check:boundaries`
+enforces both, in CI.
+
 ```
-packages/core/src/
-  math.ts        deterministic trig + seeded PRNG
-  types.ts       world state (plain data, trivially serializable)
-  tuning.ts      all gameplay constants, incl. the enemy roster
-  map.ts         tile grid, ASCII map parser, line-of-sight
-  physics.ts     tank sliding, shell ricochet (DDA), swept collision
-  sim.ts         the tick function: (state, inputs) -> state
-  rules.ts       rounds, scoring, free-for-all and teams
-  ai.ts          enemy behaviour and the shot solver
-  maps/          5 campaign missions, 3 versus arenas
-  net/
-    transport.ts  BLE / LAN / loopback interface
-    protocol.ts   binary wire format
-    websocket.ts  a WebSocket server, so a phone can host over WiFi
-    lanhost.ts    serves the page and carries the match, on one port
+packages/                    the platform
+  net/     @lan-party/net    transports, the WebSocket server, LanHost, and
+                             the byte codec (Writer/Reader) every wire format uses
+  lobby/   @lan-party/lobby  the lobby's wire protocol: roster, join, team, ready
+  sdk/     @lan-party/sdk    the contract between a game and the lobby
+
+games/
+  nuggets/ @lan-party/nuggets     Chicken Nugget Simulator, on the SDK
+  tanks/   @lan-party/tanks       the Tanks page, its server, and browser smokes
+    core/  @lan-party/tanks-core  the Tanks engine (not yet on the SDK):
+      math.ts        deterministic trig + seeded PRNG
+      types.ts       world state (plain data, trivially serializable)
+      tuning.ts      all gameplay constants, incl. the enemy roster
+      map.ts         tile grid, ASCII map parser, line-of-sight
+      physics.ts     tank sliding, shell ricochet (DDA), swept collision
+      sim.ts         the tick function: (state, inputs) -> state
+      rules.ts       rounds, scoring, free-for-all and teams
+      ai.ts          enemy behaviour and the shot solver
+      maps/          5 campaign missions, 3 versus arenas
+      net/           the Tanks match protocol, MatchHost/MatchClient, loopback
+
+tools/                       measurement scripts, mostly Tanks tuning
 ```
 
 Maps are authored as ASCII so a level reads as a picture in source:

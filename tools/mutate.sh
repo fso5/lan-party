@@ -23,7 +23,7 @@
 # 2. THE FILE COMES BACK. Restored from a copy via a trap, never an `&&` chain
 #    -- a failed `cd` in one of those once left a source file half-mutated on
 #    disk, which is a far worse outcome than a bad test result. The trap alone
-#    was not enough: a command of the form `cd packages/core && npm test` moved
+#    was not enough: a command of the form `cd games/tanks/core && npm test` moved
 #    the shell out from under a relative FILE and the restoring `cp` failed, so
 #    the path is resolved up front and the command runs in a subshell.
 #
@@ -116,7 +116,7 @@ echo "=== $LABEL ==="
 #
 # "Caught" is inferred from the command failing, so a command that fails on
 # its own -- before any mutation -- reports every mutation as caught. Three
-# times in one session I passed a test path relative to packages/core while
+# times in one session I passed a test path relative to games/tanks/core while
 # standing in the repo root; each run printed "caught" and each was a verdict
 # about my typing. One of them hid a mutation that had genuinely survived, so
 # this does not merely waste a run, it inverts the answer.

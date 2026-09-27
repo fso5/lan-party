@@ -37,23 +37,21 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  Reader,
-  Writer,
   readInput,
   readMatchStart,
   readMineSpawn,
-  readRoster,
   readRoundOver,
   readShellSpawn,
   readSnapshot,
   writeInput,
   writeMatchStart,
   writeMineSpawn,
-  writeRoster,
   writeRoundOver,
   writeShellSpawn,
   writeSnapshot,
 } from '../src/net/protocol.js';
+import { Reader, Writer } from '@lan-party/net';
+import { readRoster, writeRoster } from '@lan-party/lobby';
 
 /** mulberry32, so the same seed walks the same corruptions on every machine. */
 function rng(seed: number): () => number {

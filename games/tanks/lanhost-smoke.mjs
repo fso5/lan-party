@@ -5,7 +5,7 @@
  * `server.mjs` is built out of `node:http` and the `ws` package. Neither of
  * those ships. The Android host serves the page and carries the game through
  * `LanHost`, on top of the HTTP parsing and WebSocket framing in
- * `packages/core/src/net/websocket.ts` -- code written here, from the RFC,
+ * `packages/net/src/websocket.ts` -- code written here, from the RFC,
  * because a phone cannot install a dependency at a picnic table.
  *
  * So the split until now was: the code that ships was tested against Node's
@@ -67,7 +67,7 @@ const {
   createWorld,
   loadArena,
   writeMatchStart,
-} = await import('@tanks/core');
+} = await import('@lan-party/tanks-core');
 const failures = [];
 const check = (cond, msg) => {
   if (!cond) failures.push(msg);

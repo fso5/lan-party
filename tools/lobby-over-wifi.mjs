@@ -37,7 +37,7 @@ import { requireFreshCore } from './lib/fresh-core.mjs';
 const repo = dirname(dirname(fileURLToPath(import.meta.url)));
 
 // This runs their lobby against *our* core, and the core it reaches is
-// packages/core/dist. See tools/lib/fresh-core.mjs: a stale one turns "their
+// games/tanks/core/dist. See tools/lib/fresh-core.mjs: a stale one turns "their
 // code works against ours" into a claim about a build nobody is running.
 requireFreshCore(repo);
 const proto = join(repo, 'packages', 'proto');
@@ -45,7 +45,7 @@ const proto = join(repo, 'packages', 'proto');
 // Their file, straight off the branch, transpiled but otherwise untouched --
 // so a passing run says something about their code and not my paraphrase of it.
 // Inside the workspace, not a temp dir: the transpiled module imports
-// `@tanks/core`, which only resolves from somewhere npm linked it.
+// `@lan-party/tanks-core`, which only resolves from somewhere npm linked it.
 const ts = join(proto, '.lobby-over-wifi.ts');
 writeFileSync(ts, execFileSync('git', ['show', 'origin/b/lobby:packages/app/src/net/lobby.ts'], {
   cwd: repo, encoding: 'utf8',
@@ -61,7 +61,7 @@ const html = readFileSync(join(proto, 'dist', 'tanks-proto.html'));
 const {
   BridgeTransport, MatchHost, Writer, createWorld, loadArena, VERSUS_MAPS,
   writeMatchStart, TICK_HZ,
-} = await import('@tanks/core');
+} = await import('@lan-party/tanks-core');
 const { LobbySession } = await import(mjs);
 const cleanup = () => { for (const f of [ts, mjs]) rmSync(f, { force: true }); };
 process.on('exit', cleanup);
@@ -89,7 +89,7 @@ function findChrome() {
  *
  * `check` is mine: `BridgeTransport`, the lobby protocol, the seating
  * mechanics, the rendering, the lobby-to-match handover. Those are a
- * regression in `packages/core` if they break, and they set the exit code.
+ * regression in `games/tanks/core` if they break, and they set the exit code.
  * (The WebSocket carriage here is the `ws` package, not `LanHost` — real
  * browsers against `LanHost` are `games/tanks/lanhost-smoke.mjs`.)
  *
@@ -323,7 +323,7 @@ if (findings.length) {
 }
 if (failures.length) {
   console.log(`\nFAILED (mine): ${failures.join('; ')}`);
-  console.log('The lobby protocol or BridgeTransport stopped carrying their lobby -- a regression in packages/core.');
+  console.log('The lobby protocol or BridgeTransport stopped carrying their lobby -- a regression in games/tanks/core.');
   process.exit(1);
 }
 console.log(`\nthe lobby protocol carried their session end to end${findings.length ? ', findings above notwithstanding' : ''}`);

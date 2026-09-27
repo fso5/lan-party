@@ -65,7 +65,8 @@ import { TICK_HZ } from '../src/tuning.js';
 import { emptyInput } from '../src/types.js';
 import { createWorld, step } from '../src/sim.js';
 import { loadArena, VERSUS_MAPS } from '../src/maps/index.js';
-import { MAX_LOBBY_SLOTS, MAX_WIRE_ENTITY_IDS } from '../src/net/protocol.js';
+import { MAX_WIRE_ENTITY_IDS } from '../src/net/protocol.js';
+import { MAX_LOBBY_SLOTS } from '@lan-party/lobby';
 
 /** Where the bound sits, below the 256 at which entities actually collide. */
 const CHURN_BUDGET = 224;

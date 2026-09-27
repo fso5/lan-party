@@ -24,7 +24,8 @@ import { createWorld } from '../src/sim.js';
 import { loadArena, VERSUS_MAPS } from '../src/maps/index.js';
 import { LoopbackNetwork, LoopbackTransport, PERFECT_PROFILE } from '../src/net/loopback.js';
 import { MatchHost } from '../src/net/host.js';
-import { Writer, writeInput } from '../src/net/protocol.js';
+import { writeInput } from '../src/net/protocol.js';
+import { Writer } from '@lan-party/net';
 
 function twoPlayerWorld() {
   return createWorld({

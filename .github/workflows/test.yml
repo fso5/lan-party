@@ -1,0 +1,37 @@
+# Unit tests and the platform/game boundary, on every push and pull request.
+#
+# The browser smokes in web.yml only run when tanks or the platform change, and
+# the unit suites otherwise ran only on the Pages deploy after a merge -- so a
+# broken test could land on main without anything going red on its PR.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # First, and before anything is built: it reads source, and a platform
+      # package importing a game is the one failure here that still builds.
+      - name: The platform imports no game, and no game imports another
+        run: npm run check:boundaries
+
+      - run: npm run build
+
+      # Sequential by design: each suite builds and then clears its own
+      # dist-test, so two of the same package must not run at once.
+      - run: npm test

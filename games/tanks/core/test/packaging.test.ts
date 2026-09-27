@@ -9,13 +9,13 @@ import { join } from 'node:path';
  * Session B hit this while wiring the app (issue #4): `main` said
  * `dist/index.js`, and because the build's `rootDir` was `.` with tests in the
  * include, tsc emitted `dist/src/index.js` instead. Every
- * `import ... from '@tanks/core'` failed to resolve, and `npm run build` exited
+ * `import ... from '@lan-party/tanks-core'` failed to resolve, and `npm run build` exited
  * 0 the whole time -- the build genuinely succeeded, it just wrote somewhere
  * other than what the package advertised.
  *
  * It is fixed: a separate `tsconfig.build.json` emits a flat `dist/`, which is
  * option B of the two they offered. What was missing is this test. They asked
- * for it in as many words -- "a test that does `await import('@tanks/core')`
+ * for it in as many words -- "a test that does `await import('@lan-party/tanks-core')`
  * and asserts a couple of exports exist. That fails today and would have caught
  * it."
  *
@@ -54,9 +54,9 @@ test('every path the package declares exists on disk', () => {
  * that resolves to something hollow fails too.
  */
 test('the package loads through its own name and carries its exports', async () => {
-  const mod = await import('@tanks/core');
+  const mod = await import('@lan-party/tanks-core');
   for (const name of ['createWorld', 'step', 'MatchHost', 'writeMatchStart', 'TICK_HZ', 'VERSUS_MAPS']) {
-    assert.ok(name in mod, `@tanks/core resolved but does not export ${name}`);
+    assert.ok(name in mod, `@lan-party/tanks-core resolved but does not export ${name}`);
   }
   assert.equal(typeof mod.createWorld, 'function', 'createWorld came back as something other than a function');
   assert.ok(Array.isArray(mod.VERSUS_MAPS) && mod.VERSUS_MAPS.length > 0, 'VERSUS_MAPS is empty');

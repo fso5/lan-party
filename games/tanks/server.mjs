@@ -35,7 +35,7 @@ import {
   VERSUS_MAPS,
   writeMatchStart,
   TICK_HZ,
-} from '@tanks/core';
+} from '@lan-party/tanks-core';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 8080);

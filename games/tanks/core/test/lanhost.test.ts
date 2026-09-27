@@ -28,7 +28,8 @@ import {
   type TcpServer,
 } from '@lan-party/net';
 import { WsOpcode } from '@lan-party/net';
-import { MsgType, Reader, Writer, readInput, writeInput } from '../src/net/protocol.js';
+import { MsgType, readInput, writeInput } from '../src/net/protocol.js';
+import { Reader, Writer } from '@lan-party/net';
 import { BridgeTransport } from '@lan-party/net';
 import { MatchHost } from '../src/net/host.js';
 import { MatchClient } from '../src/net/client.js';

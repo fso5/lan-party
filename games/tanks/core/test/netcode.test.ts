@@ -17,13 +17,13 @@ import { HISTORY_TICKS, MatchClient } from '../src/net/client.js';
 import {
   MsgType,
   NetEvent,
-  Writer,
   writeInput,
   writeMineSpawn,
   writeRoundOver,
   writeShellSpawn,
   writeSnapshot,
 } from '../src/net/protocol.js';
+import { Writer } from '@lan-party/net';
 
 function versusWorld(seed = 42) {
   return createWorld({
@@ -2111,7 +2111,7 @@ test('rewind depth follows the link, and stays inside the history ring', () => {
  *
  * (Recorded because the first mutation run of that case reported `caught` and
  * four later runs all reported `SURVIVED`. The reproducible answer is the one
- * written here. `npm test -w @tanks/core` is not concurrency-safe -- it runs a
+ * written here. `npm test -w @lan-party/tanks-core` is not concurrency-safe -- it runs a
  * build and an `rm -rf dist-test` -- and a run that contends with another loses
  * files rather than failing honestly, which is the standing explanation for
  * exactly this shape of one-off.)
