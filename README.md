@@ -249,7 +249,7 @@ threw away the signal worth having.
 | `round-length.mjs` | how long does a round actually take? | median 12.7s over 600 rounds, p99 61.8s, longest 106.2s, none hit the 120s draw limit |
 | `map-fairness.mjs` | is a versus map fair to every seat? | fair at 2 and 4, unequal at 3 and 5–8 |
 | `verify-apk.py` | does the published APK carry what the source says? | yes, page included, `--page` compares it byte for byte |
-| `lobby-over-wifi.mjs` | does the browser lobby work against the real one? | yes, and it still reproduces the team collision in issue #9 — which now survives into the match |
+| `lobby-over-wifi.mjs` | does the platform's `LobbySession` seat real browsers and hand them to a match? | yes, and a leave then a join no longer puts two players on one team (issue #9) |
 
 Two traps apply to all of the ones that import `@lan-party/tanks-core`, both of which
 produced a confident wrong answer before being guarded:
@@ -449,7 +449,8 @@ enforces both, in CI.
 packages/                    the platform
   net/     @lan-party/net    transports, the WebSocket server, LanHost, and
                              the byte codec (Writer/Reader) every wire format uses
-  lobby/   @lan-party/lobby  the lobby's wire protocol: roster, join, team, ready
+  lobby/   @lan-party/lobby  the lobby's wire protocol (roster, join, team, ready)
+                             and LobbySession, which seats players over any transport
   sdk/     @lan-party/sdk    the contract between a game and the lobby
 
 games/

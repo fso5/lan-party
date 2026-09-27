@@ -39,6 +39,23 @@ and Bluetooth (module ships, nothing in JS imports it).
 
 ## Log
 
+### 2026-09-27 — Session A: `LobbySession` is on the platform; PR #8 closed as superseded
+
+Forrest asked for every open PR to be resolved. #8 (`b/lobby`) added
+`LobbySession` under `packages/app`, which was retired on 2026-08-10, so it
+could not merge as it stood. Its session is now `packages/lobby/src/session.ts`,
+with the three issue #9 fixes: lowest free team in free-for-all (and the
+smaller side in teams mode), `MAX_LOBBY_SLOTS` rather than a local cap, and
+requests sent to the host rather than broadcast. Also: a repeated Join from a
+seated peer is a retry, not a second player, and `handlePacket` is public and
+returns whether it used the packet. `setEvents` merges per handler, so a lobby
+and a match cannot both hold `onPacket`; whoever runs the match forwards
+`LOBBY_MSG` packets to the session.
+
+10 new tests, each of the four fixes mutation-checked. `lobby-over-wifi.mjs`
+now drives this session and treats a team collision as a failure; with real
+browsers the old `[0,1,3,3]` is now `[0,1,3,2]`.
+
 ### 2026-09-27 — Session A: the platform and the games are separate modules
 
 Forrest asked for the lobby and the games to be separate modules. Done in one
