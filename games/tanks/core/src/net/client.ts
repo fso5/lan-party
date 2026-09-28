@@ -30,8 +30,6 @@ import { emptyInput, type Mine, type Shell, type TankInput } from '../types.js';
 import {
   MsgType,
   NetEvent,
-  Reader,
-  Writer,
   readMineSpawn,
   readRoundOver,
   readShellSpawn,
@@ -40,6 +38,7 @@ import {
   type WireRoundOver,
   type WireTank,
 } from './protocol.js';
+import { Reader, Writer } from '@lan-party/net';
 import type { PeerId, Transport } from '@lan-party/net';
 
 /**

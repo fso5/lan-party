@@ -8,8 +8,6 @@ import { Arena, parseArena } from '../src/map.js';
 import { Tile, TankKind, emptyInput, type TankInput } from '../src/types.js';
 import { TANK_RADIUS } from '../src/tuning.js';
 import {
-  Writer,
-  Reader,
   writeInput,
   readInput,
   writeSnapshot,
@@ -20,9 +18,10 @@ import {
   quantPos,
   dequantPos,
   MAX_QUANT_POS,
-  MAX_LOBBY_SLOTS,
   MsgType,
 } from '../src/net/protocol.js';
+import { Writer, Reader } from '@lan-party/net';
+import { MAX_LOBBY_SLOTS } from '@lan-party/lobby';
 
 test('every shipped map has an id of its own, and answers to it', () => {
   /*

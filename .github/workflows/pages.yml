@@ -38,12 +38,13 @@ jobs:
 
       - run: npm ci
 
-      # The app imports @tanks/core from dist/, so the core has to be compiled
-      # before the page bundle can be built.
-      - run: npm run build --workspace @tanks/core
+      # The app imports its packages from dist/, so they have to be compiled
+      # before the page bundle can be built -- the platform's first, in the
+      # root workspace order, because tanks-core depends on them.
+      - run: npm run build
 
-      - name: Run the simulation tests
-        run: npm test --workspace @tanks/core
+      - name: Run the tests
+        run: npm test
 
       - name: Build the installable web app
         run: node games/tanks/build-pwa.mjs

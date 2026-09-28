@@ -1,31 +1,20 @@
 /**
- * Does b/lobby's LobbySession seat real browsers over the transport that ships?
+ * Does the platform's LobbySession seat real browsers over the transport that
+ * ships?
  *
- * Issue #9 finding 3 asked Session B to keep `LobbySession` transport-agnostic
- * so it works over `LanHost` as well as `BleTransport` -- "what makes teams
- * real for iPhones rather than only for Android-to-Android". I had checked that
- * over a `LoopbackTransport`, which proves the interfaces line up and nothing
- * about whether a browser can actually play along.
- *
- * This is the real thing: their session, unmodified, driving the same
+ * The session is `@lan-party/lobby`'s, ported from `b/lobby` (PR #8) with the
+ * fixes issue #9 asked for. This drives it over the same
  * BridgeTransport-over-WebSocket that `server.mjs` hosts a match on, with real
- * Chromium pages running the shipped game page.
- *
- * Not part of `smoke:all`, and it cannot be: `LobbySession` lives on `b/lobby`
- * and is not on main. The script fetches it from the branch itself, so it needs
- * no setup beyond the branch existing:
+ * Chromium pages running the shipped Tanks page, then starts a match from the
+ * roster it built.
  *
  *     node tools/lobby-over-wifi.mjs                 # four seats, with churn
  *     PLAYERS=Alpha node tools/lobby-over-wifi.mjs   # the goal: two phones
  *
- * The two-seat run is the one that matters most -- one phone hosting, one
- * joining -- and it passes clean. The four-seat run adds a departure, which is
- * the only thing that provokes the seating bug.
- *
- * It reads their file and never writes to it.
+ * The four-seat run adds a departure, which is what used to provoke the team
+ * collision in issue #9.
  */
 import { execFileSync } from 'node:child_process';
-import { writeFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -36,35 +25,19 @@ import { requireFreshCore } from './lib/fresh-core.mjs';
 
 const repo = dirname(dirname(fileURLToPath(import.meta.url)));
 
-// This runs their lobby against *our* core, and the core it reaches is
-// packages/core/dist. See tools/lib/fresh-core.mjs: a stale one turns "their
-// code works against ours" into a claim about a build nobody is running.
+// The core it reaches is games/tanks/core/dist. See tools/lib/fresh-core.mjs:
+// a stale one turns a pass into a claim about a build nobody is running.
 requireFreshCore(repo);
-const proto = join(repo, 'packages', 'proto');
+const page = join(repo, 'games', 'tanks');
 
-// Their file, straight off the branch, transpiled but otherwise untouched --
-// so a passing run says something about their code and not my paraphrase of it.
-// Inside the workspace, not a temp dir: the transpiled module imports
-// `@tanks/core`, which only resolves from somewhere npm linked it.
-const ts = join(proto, '.lobby-over-wifi.ts');
-writeFileSync(ts, execFileSync('git', ['show', 'origin/b/lobby:packages/app/src/net/lobby.ts'], {
-  cwd: repo, encoding: 'utf8',
-}));
-const mjs = join(proto, '.lobby-over-wifi.mjs');
-execFileSync('npx', ['esbuild', ts, '--format=esm', '--target=es2022', `--outfile=${mjs}`], {
-  cwd: proto, stdio: 'pipe',
-});
-
-execFileSync('node', [join(proto, 'build.mjs')], { stdio: 'pipe' });
-const html = readFileSync(join(proto, 'dist', 'tanks-proto.html'));
+execFileSync('node', [join(page, 'build.mjs')], { stdio: 'pipe' });
+const html = readFileSync(join(page, 'dist', 'tanks-proto.html'));
 
 const {
   BridgeTransport, MatchHost, Writer, createWorld, loadArena, VERSUS_MAPS,
   writeMatchStart, TICK_HZ,
-} = await import('@tanks/core');
-const { LobbySession } = await import(mjs);
-const cleanup = () => { for (const f of [ts, mjs]) rmSync(f, { force: true }); };
-process.on('exit', cleanup);
+} = await import('@lan-party/tanks-core');
+const { LobbySession } = await import('@lan-party/lobby');
 
 function findChrome() {
   const root = '/opt/pw-browsers';
@@ -78,34 +51,20 @@ function findChrome() {
 }
 
 /*
- * Two kinds of failure, kept apart on purpose.
+ * Every check sets the exit code. This used to keep "findings" about the
+ * unmerged b/lobby branch apart from failures, so a known bug in someone
+ * else's code would not turn anything red. The session is platform code now,
+ * so a lobby that seats two players on one team is simply a failure.
  *
- * This script runs their unmerged lobby over my transport, so a red line can
- * mean either "their seating is wrong" or "my transport stopped carrying it",
- * and those want opposite reactions. Lumping them together is why this used to
- * exit 0 whatever happened: a known finding about an unmerged branch must not
- * turn anything red, and the only way to honour that with one bucket was to
- * make nothing red at all -- which also throws away the signal I do want.
- *
- * `check` is mine: `BridgeTransport`, the lobby protocol, the seating
- * mechanics, the rendering, the lobby-to-match handover. Those are a
- * regression in `packages/core` if they break, and they set the exit code.
- * (The WebSocket carriage here is the `ws` package, not `LanHost` — real
+ * (The WebSocket carriage here is the `ws` package, not `LanHost` -- real
  * browsers against `LanHost` are `games/tanks/lanhost-smoke.mjs`.)
- *
- * `check.finding` is theirs: a fact about `b/lobby` as it stands. Printed just
- * as loudly, reported separately, and never the exit code.
  */
 const failures = [];
-const findings = [];
 const check = (ok, what, detail) => {
   console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}${ok || !detail ? '' : ` -- ${detail}`}`);
-  if (!ok) failures.push(what);
+  if (!ok) failures.push(detail ? `${what} (${detail})` : what);
 };
-check.finding = (ok, what, detail) => {
-  console.log(`  ${ok ? 'ok  ' : 'FIND'} ${what}${ok || !detail ? '' : ` -- ${detail}`}`);
-  if (!ok) findings.push(detail ? `${what} (${detail})` : what);
-};
+check.finding = check;
 
 const httpServer = createServer((_req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -125,7 +84,7 @@ const transport = new BridgeTransport((to, data) => {
 
 const session = new LobbySession(transport, 'Host');
 // `onChange` is a settable field and state is read through `get()`, not a
-// public `state` property. Reading their API rather than guessing at it.
+// public `state` property.
 let changes = 0;
 session.onChange = () => { changes++; };
 
@@ -299,9 +258,8 @@ if (session.canStart()) {
 check(entered === live.length, 'every browser made it from lobby to match',
   `${entered}/${live.length}`);
 
-// The punchline. The match was built from the roster above, collision and all,
-// so the lobby bug is not a cosmetic wrong label -- it reaches the world every
-// player is now driving in.
+// The match is built from the roster above, so a seating bug is not a wrong
+// label -- it reaches the world every player is driving in. Checked there too.
 if (entered) {
   const world = await live[0].p.evaluate(() => ({
     tanks: window.__state.world.tanks.length,
@@ -317,14 +275,9 @@ await browser.close();
 httpServer.close();
 wss.close();
 
-if (findings.length) {
-  console.log(`\nFINDINGS about b/lobby (${findings.length}): ` + findings.join('; '));
-  console.log('These are theirs. See issue #9. They do not set the exit code.');
-}
 if (failures.length) {
-  console.log(`\nFAILED (mine): ${failures.join('; ')}`);
-  console.log('The lobby protocol or BridgeTransport stopped carrying their lobby -- a regression in packages/core.');
+  console.log(`\nFAILED: ${failures.join('; ')}`);
   process.exit(1);
 }
-console.log(`\nthe lobby protocol carried their session end to end${findings.length ? ', findings above notwithstanding' : ''}`);
+console.log('\nthe lobby session seated real browsers and carried them into a match');
 process.exit(0);

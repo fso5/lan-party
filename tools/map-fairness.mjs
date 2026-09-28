@@ -35,12 +35,13 @@
  * orbit, which on a rectangle means all eight on edges or a shape that is not
  * a rectangle.
  */
-import { loadArena, VERSUS_MAPS, MAX_LOBBY_SLOTS } from '@tanks/core';
+import { loadArena, VERSUS_MAPS } from '@lan-party/tanks-core';
+import { MAX_LOBBY_SLOTS } from '@lan-party/lobby';
 
 import { fileURLToPath } from 'node:url';
 import { requireFreshCore } from './lib/fresh-core.mjs';
 
-// These numbers describe packages/core/dist, not packages/core/src. See the
+// These numbers describe games/tanks/core/dist, not games/tanks/core/src. See the
 // note in lib/fresh-core.mjs -- an A/B run that skipped the rebuild once
 // compared a change against itself and reported no difference.
 requireFreshCore(fileURLToPath(new URL('..', import.meta.url)));

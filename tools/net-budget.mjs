@@ -41,18 +41,18 @@ import {
   EventKind,
   TICK_HZ,
   MINE_ARM_TICKS,
-  MAX_LOBBY_SLOTS,
   SNAPSHOT_HZ,
   BLE_SAFE_MTU,
   FRAME_HEADER_BYTES,
   Writer,
   writeSnapshot,
-} from '@tanks/core';
+} from '@lan-party/tanks-core';
+import { MAX_LOBBY_SLOTS } from '@lan-party/lobby';
 
 import { fileURLToPath } from 'node:url';
 import { requireFreshCore } from './lib/fresh-core.mjs';
 
-// These numbers describe packages/core/dist, not packages/core/src. See the
+// These numbers describe games/tanks/core/dist, not games/tanks/core/src. See the
 // note in lib/fresh-core.mjs -- an A/B run that skipped the rebuild once
 // compared a change against itself and reported no difference.
 requireFreshCore(fileURLToPath(new URL('..', import.meta.url)));

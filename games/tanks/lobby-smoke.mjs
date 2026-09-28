@@ -21,20 +21,22 @@ import { lanAddress } from './lan-address.mjs';
 
 import {
   LanHost,
-  LobbyOp,
-  MAX_LOBBY_SLOTS,
   MatchHost,
   MsgType,
   Reader,
   VERSUS_MAPS,
   Writer,
-  clampName,
   createWorld,
   loadArena,
-  writeLobbyWelcome,
   writeMatchStart,
+} from '@lan-party/tanks-core';
+import {
+  LobbyOp,
+  MAX_LOBBY_SLOTS,
+  clampName,
+  writeLobbyWelcome,
   writeRoster,
-} from '@tanks/core';
+} from '@lan-party/lobby';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const page = readFileSync(join(here, 'dist', 'tanks-proto.html'));

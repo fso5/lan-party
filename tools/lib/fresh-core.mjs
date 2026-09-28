@@ -1,7 +1,7 @@
 /**
  * Refuse to measure a stale build.
  *
- * Every tool in here imports `@tanks/core`, whose package main is
+ * Every tool in here imports `@lan-party/tanks-core`, whose package main is
  * `dist/index.js`. So they measure the last *compiled* core, not the source
  * sitting on disk -- and nothing says so at the point of use.
  *
@@ -43,21 +43,21 @@ function newestMtime(dir) {
  * run from wherever the author happens to be standing.
  */
 export function requireFreshCore(root) {
-  const src = newestMtime(join(root, 'packages/core/src'));
-  const dist = newestMtime(join(root, 'packages/core/dist'));
+  const src = newestMtime(join(root, 'games/tanks/core/src'));
+  const dist = newestMtime(join(root, 'games/tanks/core/dist'));
 
   if (src === null) return; // not a checkout we understand; do not get in the way
 
   // A dist that is missing outright never reaches here -- ESM resolves the
-  // caller's `@tanks/core` import before any of this runs, and fails with
+  // caller's `@lan-party/tanks-core` import before any of this runs, and fails with
   // ERR_MODULE_NOT_FOUND. That is loud and accurate, so it needs no help. What
   // this catches is the quiet case: a dist that exists and is out of date.
   if (dist === null || dist < src) {
     process.stderr.write(
-      '\n  packages/core/dist is older than packages/core/src, ' +
+      '\n  games/tanks/core/dist is older than games/tanks/core/src, ' +
         'and these tools measure dist.\n' +
         '  Refusing to print numbers that describe code you are no longer running.\n\n' +
-        '      npm run build -w @tanks/core\n\n' +
+        '      npm run build -w @lan-party/tanks-core\n\n' +
         '  Do this between variants too, not just once: an A/B run that skips the\n' +
         '  rebuild compares a change against itself and reports no difference.\n\n',
     );

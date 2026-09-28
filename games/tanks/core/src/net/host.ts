@@ -34,14 +34,13 @@ import {
   MsgType,
   MAX_WIRE_ENTITY_IDS,
   NetEvent,
-  Reader,
-  Writer,
   readInput,
   writeMineSpawn,
   writeRoundOver,
   writeShellSpawn,
   writeSnapshot,
 } from './protocol.js';
+import { Reader, Writer } from '@lan-party/net';
 import type { PeerId, Transport } from '@lan-party/net';
 
 /** Snapshot rate. 15Hz is the sweet spot: interpolation covers the gaps. */

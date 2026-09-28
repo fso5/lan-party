@@ -16,13 +16,13 @@ on:
     branches: [main]
     paths:
       - 'games/tanks/**'
-      - 'packages/core/**'
+      - 'packages/**'
       - 'package-lock.json'
       - '.github/workflows/web.yml'
   pull_request:
     paths:
       - 'games/tanks/**'
-      - 'packages/core/**'
+      - 'packages/**'
   workflow_dispatch:
 
 jobs:
@@ -50,9 +50,10 @@ jobs:
 
       - run: npm ci
 
-      # The smokes import @tanks/core through the workspace entry point, which
-      # only exists once it is built.
-      - run: npm run build --workspace @tanks/core
+      # The smokes import the workspace packages through their entry points,
+      # which only exist once built. All of them, in the root workspace order:
+      # tanks-core depends on the platform's net and lobby.
+      - run: npm run build
 
       # Both targets on purpose. A headless launch resolves to the separate
       # headless-shell build, not to `chromium`, so installing only the latter

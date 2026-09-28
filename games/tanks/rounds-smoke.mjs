@@ -23,7 +23,7 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
-import { Reader, MsgType, readMatchStart, loadArena, missionById } from '@tanks/core';
+import { Reader, MsgType, readMatchStart, loadArena, missionById } from '@lan-party/tanks-core';
 
 const failures = [];
 const check = (cond, msg) => {

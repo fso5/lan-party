@@ -3,7 +3,7 @@
  *
  * This is a throwaway harness, not the shipping app. It exists to answer the
  * one question the test suite cannot: do the ricochets feel right? Everything
- * here talks to @tanks/core through the same interface the React Native app
+ * here talks to @lan-party/tanks-core through the same interface the React Native app
  * will, so anything we learn about tuning transfers directly.
  *
  * Bundled into a single self-contained HTML file by build.mjs -- the core

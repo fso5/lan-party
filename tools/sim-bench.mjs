@@ -54,12 +54,21 @@
  * The first version of this measured nothing and looked fine, which is the
  * reason it is worth keeping rather than re-deriving. See `revive` below.
  */
-import { createWorld, step, loadArena, VERSUS_MAPS, emptyInput, TICK_HZ, MAX_LOBBY_SLOTS, TankKind } from '@tanks/core';
+import {
+  createWorld,
+  step,
+  loadArena,
+  VERSUS_MAPS,
+  emptyInput,
+  TICK_HZ,
+  TankKind,
+} from '@lan-party/tanks-core';
+import { MAX_LOBBY_SLOTS } from '@lan-party/lobby';
 
 import { fileURLToPath } from 'node:url';
 import { requireFreshCore } from './lib/fresh-core.mjs';
 
-// These numbers describe packages/core/dist, not packages/core/src. See the
+// These numbers describe games/tanks/core/dist, not games/tanks/core/src. See the
 // note in lib/fresh-core.mjs -- an A/B run that skipped the rebuild once
 // compared a change against itself and reported no difference.
 requireFreshCore(fileURLToPath(new URL('..', import.meta.url)));

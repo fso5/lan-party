@@ -11,6 +11,7 @@
  * What lives here imports nothing from any game, which is the property that
  * makes a second game possible.
  */
+export * from './wire.js';
 export * from './transport.js';
 export * from './websocket.js';
 export * from './lanhost.js';
