@@ -54,7 +54,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { TICK_HZ } from '../src/tuning.js';
+import { TANK_SPECS, TICK_HZ } from '../src/tuning.js';
 import { TankKind, emptyInput } from '../src/types.js';
 import { createWorld, step } from '../src/sim.js';
 import { loadArena, VERSUS_MAPS } from '../src/maps/index.js';
@@ -138,10 +138,16 @@ test('eight bots cost a small fraction of a frame', () => {
     TICKS,
     `only ${fullyAliveTicks} of ${TICKS} ticks had all eight alive -- a thinning world is a cheap one`,
   );
+  // Against what this roster can have in flight, not a fixed number: each
+  // type has its own shell limit (as in the original game), so eight bots
+  // carry 10 at most -- this was "> 5" when every tank could have five out.
+  // Measured at 4.7 per tick once the limits came in, so over a third of
+  // capacity is a roster that is really firing; a broken `fire` input is ~0.
+  const capacity = world.tanks.reduce((n, tank) => n + TANK_SPECS[tank.kind].maxShells, 0);
   const shellsPerTick = shells / TICKS;
   assert.ok(
-    shellsPerTick > 5,
-    `only ${shellsPerTick.toFixed(1)} shells live per tick, so the collision work being timed is not the real load`,
+    shellsPerTick > capacity * 0.35,
+    `only ${shellsPerTick.toFixed(1)} of ${capacity} possible shells live per tick, so the collision work being timed is not the real load`,
   );
 
   samples.sort((a, b) => a - b);

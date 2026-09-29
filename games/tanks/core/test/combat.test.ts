@@ -8,10 +8,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createWorld, step, type WorldState } from '../src/sim.js';
+import { createWorld, fireShell, layMine, step, type WorldState } from '../src/sim.js';
 import { Arena, parseArena } from '../src/map.js';
-import { EventKind, type Shell } from '../src/types.js';
-import { MINE_BLAST_RADIUS, MINE_FUSE_TICKS, MINE_RADIUS, TANK_RADIUS, TICK_HZ } from '../src/tuning.js';
+import { EventKind, TankKind, type Shell } from '../src/types.js';
+import { MINE_BLAST_RADIUS, MINE_FUSE_TICKS, MINE_RADIUS, TANK_RADIUS, TANK_SPECS, TICK_HZ } from '../src/tuning.js';
 
 /** An open room, tanks parked in opposite corners, well away from row 4. */
 function room(): WorldState {
@@ -158,4 +158,94 @@ test('a shell that misses a mine leaves it be', () => {
   shell(w, a.id, 4, 4 + MINE_RADIUS + 0.12 + 0.05, 5.5, 0);
   run(w, TICK_HZ);
   assert.equal(w.mines.length, 1, 'a near miss set the mine off');
+});
+
+// --- Matching the original game's tank roster ------------------------------
+
+test("grey shells bounce once, like the player's; only green's bounce twice", () => {
+  assert.equal(TANK_SPECS[TankKind.Grey].shell.maxBounces, 1);
+  assert.equal(TANK_SPECS[TankKind.Player].shell.maxBounces, 1);
+  assert.equal(TANK_SPECS[TankKind.Green].shell.maxBounces, 2);
+  // And the green sniper's are fast -- as fast as a rocket.
+  assert.equal(TANK_SPECS[TankKind.Green].shell.speed, TANK_SPECS[TankKind.Teal].shell.speed);
+});
+
+test('each tank type has its own limit on shells in flight', () => {
+  const w = room();
+  const [a] = w.tanks;
+  const fireUntilRefused = (kind: TankKind) => {
+    a.kind = kind;
+    a.shellsOut = 0;
+    w.shells.length = 0;
+    let fired = 0;
+    for (let i = 0; i < 20; i++) {
+      a.nextFireTick = 0; // cooldowns are a separate rule; only the cap is under test
+      if (fireShell(w, a)) fired++;
+    }
+    return fired;
+  };
+  assert.equal(fireUntilRefused(TankKind.Player), 5);
+  assert.equal(fireUntilRefused(TankKind.Brown), 1);
+  assert.equal(fireUntilRefused(TankKind.Grey), 1);
+  assert.equal(fireUntilRefused(TankKind.Teal), 1);
+  assert.equal(fireUntilRefused(TankKind.Yellow), 1);
+  assert.equal(fireUntilRefused(TankKind.Green), 2);
+  assert.equal(fireUntilRefused(TankKind.Black), 2);
+});
+
+test('the yellow tank lays four mines; the player two', () => {
+  const w = room();
+  const [a] = w.tanks;
+  const layUntilRefused = (kind: TankKind) => {
+    a.kind = kind;
+    a.minesOut = 0;
+    w.mines.length = 0;
+    let laid = 0;
+    for (let i = 0; i < 10; i++) {
+      a.nextMineTick = 0;
+      a.x = 2 + i; // spread out, so no blast question arises
+      if (layMine(w, a)) laid++;
+    }
+    return laid;
+  };
+  assert.equal(layUntilRefused(TankKind.Player), 2);
+  assert.equal(layUntilRefused(TankKind.Yellow), 4);
+  assert.equal(layUntilRefused(TankKind.Black), 2);
+  assert.equal(layUntilRefused(TankKind.Grey), 0);
+});
+
+test('a blast destroys shells caught in it', () => {
+  const w = room();
+  const [a, b] = w.tanks;
+  w.mines.push({ id: 600, ownerId: b.id, team: b.team, x: 7, y: 4, fuseTick: w.tick + 1, armTick: w.tick + 1_000 });
+  b.minesOut = 1;
+  const inside = shell(w, a.id, 7.8, 4, 0, 0.01);
+  const outside = shell(w, a.id, 7 + MINE_BLAST_RADIUS + 1, 4, 0, 0.01);
+  run(w, 3);
+  assert.ok(!w.shells.includes(inside), 'a shell inside the blast survived it');
+  assert.ok(w.shells.includes(outside), 'a shell outside the blast was destroyed');
+  assert.equal(a.shellsOut, 1, 'the destroyed shell was not given back to its owner');
+});
+
+test('a blast sets off the mines around it, and only those', () => {
+  const w = room();
+  const [a, b] = w.tanks;
+  const mine = (id: number, x: number) =>
+    w.mines.push({ id, ownerId: b.id, team: b.team, x, y: 4, fuseTick: w.tick + MINE_FUSE_TICKS, armTick: w.tick + 1_000 });
+  // A row of mines each within reach of the last, then a gap, then one more.
+  mine(700, 6);
+  mine(701, 7.2);
+  mine(702, 8.4);
+  mine(703, 8.4 + MINE_BLAST_RADIUS + 1);
+  b.minesOut = 4;
+
+  shell(w, a.id, 3, 4, 5.5, 0);
+  let blasts = 0;
+  for (let i = 0; i < TICK_HZ; i++) {
+    step(w, idle);
+    blasts += w.events.filter((e) => e.kind === EventKind.MineExploded).length;
+  }
+  assert.equal(blasts, 3, 'the chain did not run exactly the length of the row');
+  assert.deepEqual(w.mines.map((m) => m.id), [703], 'the mine out of reach went off, or a mine in reach did not');
+  assert.equal(b.minesOut, 1);
 });
