@@ -1229,6 +1229,11 @@ function consumeEvents() {
       case EventKind.ShellFired:
         spawnParticles(ev.x, ev.y, 3, '#F0DCA8', 1.4, 0.12);
         break;
+      case EventKind.ShellExpired:
+        // A shell destroyed: by another shell, by a blast, or on the wall it
+        // had no bounce left for. A small pop, well short of a mine's.
+        spawnParticles(ev.x, ev.y, 9, '#F2B24A', 2.8, 0.3);
+        break;
       case EventKind.BlockDestroyed:
         spawnParticles(ev.x, ev.y, 10, '#C08A4E', 3.0, 0.5);
         break;
