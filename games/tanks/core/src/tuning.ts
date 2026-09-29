@@ -15,8 +15,20 @@ import { TankKind, type ShellProfile } from './types.js';
 export const TICK_HZ = 60;
 export const DT = 1 / TICK_HZ;
 
-/** Tank body radius. Slightly under half a tile so gaps of 1 tile are passable. */
-export const TANK_RADIUS = 0.38;
+/*
+ * Sizes follow the original game, by way of the TanksRebirth remake, which
+ * draws the original's models at 1:1 and sizes its collision to them (21.7
+ * units to a block). Like it, a tank and a shell each have two sizes: the body
+ * that meets walls, and a larger circle that decides hits. The larger hit
+ * circles are the original's generosity -- a shot that grazes a tank kills it.
+ */
+
+/** Tank body against walls: 0.92 tiles across, so 1-tile gaps stay passable. */
+export const TANK_RADIUS = 0.46;
+/** A tank's circle for shells and blasts. */
+export const TANK_HIT_RADIUS = 0.58;
+/** A shell's circle against tanks and other shells. Against walls it is `shell.radius`. */
+export const SHELL_HIT_RADIUS = 0.32;
 
 /**
  * How many shells and mines the player may have live at once.
@@ -31,8 +43,15 @@ export const MAX_MINES_PER_TANK = 2;
 /** Mine timing. */
 export const MINE_FUSE_TICKS = 600; // 10s until it blows on its own, as in the original
 export const MINE_ARM_TICKS = 45; // 0.75s before it can be triggered by proximity
-export const MINE_TRIGGER_RADIUS = 0.9;
-export const MINE_BLAST_RADIUS = 1.6;
+/**
+ * An enemy this close (centre to centre) cuts a mine's fuse to
+ * MINE_REACT_TICKS -- unless its owner or a teammate is this close too, which
+ * is what lets you lay a mine and drive off it. The original's rule.
+ */
+export const MINE_TRIGGER_RADIUS = 2.1;
+export const MINE_REACT_TICKS = 30; // half a second's warning
+/** Everything whose centre is this close is caught: tanks, shells, mines, blocks. */
+export const MINE_BLAST_RADIUS = 2.7;
 /**
  * A mine's body, for shells: a shell touching this sets it off. The size the
  * page draws it at (game.js reads this rather than its own copy).
@@ -40,15 +59,10 @@ export const MINE_BLAST_RADIUS = 1.6;
 export const MINE_RADIUS = 0.22;
 
 /**
- * How close two shells' centres must pass to destroy each other, in tiles.
- *
- * Wider than their bodies (0.24 together), on purpose. A shell is drawn a
- * little larger than it is and trails a streak, so at the bare body size two
- * shells could be seen to overlap and fly on. Shooting a shell down is a
- * skill the game rewards; the reach is set so that anything that looks like a
- * touch is one. Shells against tanks, walls and mines keep their real size.
+ * How close two shells' centres must pass to destroy each other: their hit
+ * circles touching. Tanks, walls and mines see a shell's own sizes.
  */
-export const SHELL_INTERCEPT_REACH = 0.4;
+export const SHELL_INTERCEPT_REACH = SHELL_HIT_RADIUS * 2;
 
 /** A shell that has bounced its last still needs to die somewhere. */
 export const SHELL_MAX_LIFETIME_TICKS = 60 * 12;

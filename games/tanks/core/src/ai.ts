@@ -23,7 +23,10 @@
 import { Arena } from './map.js';
 import { datan2, dcos, dsin, wrapAngle } from './math.js';
 import { stepShell } from './physics.js';
-import { MINE_BLAST_RADIUS, TANK_RADIUS, TANK_SPECS, TICK_HZ } from './tuning.js';
+import { MINE_BLAST_RADIUS, SHELL_HIT_RADIUS, TANK_HIT_RADIUS, TANK_RADIUS, TANK_SPECS, TICK_HZ } from './tuning.js';
+
+/** How close a shell's centre must pass a tank's to hit it. */
+const HIT_REACH = TANK_HIT_RADIUS + SHELL_HIT_RADIUS;
 import { emptyInput, type Tank, type TankInput } from './types.js';
 import type { WorldState } from './sim.js';
 
@@ -34,7 +37,7 @@ const TRACE_DISTANCE = 26;
 /** Trace granularity. Fine enough to not skip a tank, coarse enough to be cheap. */
 const TRACE_STEP = 0.25;
 /** A traced path counts as a hit if it passes this close to the target centre. */
-const HIT_TOLERANCE = TANK_RADIUS * 0.85;
+const HIT_TOLERANCE = HIT_REACH * 0.85;
 
 interface ShotSolution {
   angle: number;
@@ -94,15 +97,16 @@ function traceShot(
       }
 
       // Would it hit us first? Refuse to solve shots that kill the shooter.
-      // Skip the first half-tile so we do not reject every shot on the muzzle.
-      if (travelled > 0.5) {
+      // Skip the stretch where the shell is still within hit reach of the
+      // muzzle, or every shot is rejected for grazing the tank firing it.
+      if (travelled > HIT_REACH) {
         const sx = selfX - x;
         const sy = selfY - y;
         let st = (sx * dx + sy * dy) / (segLen * segLen);
         st = st < 0 ? 0 : st > 1 ? 1 : st;
         const qx = x + dx * st - selfX;
         const qy = y + dy * st - selfY;
-        if (qx * qx + qy * qy <= TANK_RADIUS * TANK_RADIUS) return null;
+        if (qx * qx + qy * qy <= HIT_REACH * HIT_REACH) return null;
       }
     }
 
@@ -208,7 +212,7 @@ function incomingThreat(w: WorldState, tank: Tank): { x: number; y: number } | n
     const along = dx * nx + dy * ny;
     if (along <= 0) continue;
     const perp = Math.abs(dx * -ny + dy * nx);
-    if (perp > TANK_RADIUS * 2.5) continue;
+    if (perp > HIT_REACH * 1.5) continue;
 
     // Flee perpendicular to the shell's travel, on whichever side we already
     // lean toward, so tanks do not dither across the line of fire.
@@ -223,7 +227,9 @@ function incomingThreat(w: WorldState, tank: Tank): { x: number; y: number } | n
  * tests the blast circle against the tank circle, so clearing the blast radius
  * alone is not enough.
  */
-const MINE_DANGER_RADIUS = MINE_BLAST_RADIUS + TANK_RADIUS;
+// A blast catches a tank whose centre is inside it; a margin of a quarter
+// tile keeps an escaping tank from stopping on the very edge.
+const MINE_DANGER_RADIUS = MINE_BLAST_RADIUS + 0.25;
 
 /**
  * Are we loitering on top of a mine we laid, with the fuse about to run out?
@@ -299,7 +305,7 @@ const FRIENDLY_CHECK_TILES = 8;
 function mateInLineOfFire(w: WorldState, tank: Tank): boolean {
   const nx = dcos(tank.turretAngle);
   const ny = dsin(tank.turretAngle);
-  const reach = TANK_RADIUS + TANK_SPECS[tank.kind].shell.radius;
+  const reach = HIT_REACH;
 
   for (const t of w.tanks) {
     if (!t.alive || t.id === tank.id || t.team !== tank.team) continue;

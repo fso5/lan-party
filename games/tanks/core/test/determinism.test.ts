@@ -622,7 +622,22 @@ test('a match cannot leave rubble behind for the next one', () => {
     // The mission's own scripted enemies are the opposition.
     bots: [{ kind: TankKind.Black, team: 0, spawnIndex: 0 }],
   });
-  for (let t = 0; t < 60 * 120; t++) step(w, new Map());
+  // Something has to break a block. Left to the bots this depended on how a
+  // fight happened to go -- it stopped happening when hits got more generous
+  // -- so a mine is set off on the first block the map has.
+  let bx = -1;
+  let by = -1;
+  for (let y = 0; y < w.arena.height && bx < 0; y++) {
+    for (let x = 0; x < w.arena.width; x++) {
+      if (w.arena.at(x, y) === Tile.Block) {
+        bx = x;
+        by = y;
+        break;
+      }
+    }
+  }
+  w.mines.push({ id: 999, ownerId: w.tanks[0].id, team: w.tanks[0].team, x: bx + 0.5, y: by + 0.5, fuseTick: w.tick + 2, armTick: w.tick + 1 });
+  for (let t = 0; t < 60 * 2; t++) step(w, new Map());
 
   // The anti-vacuity half, and the one that matters: if the match destroyed
   // nothing, the assertion below would hold for a build with the clone removed.

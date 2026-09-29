@@ -372,8 +372,8 @@ test('a mine layer walks off its own mine before the fuse runs out', async () =>
    * what keeps a mine layer from spending its life running away from its own
    * ordnance instead of fighting.
    */
-  const { MINE_BLAST_RADIUS, MINE_FUSE_TICKS, TANK_RADIUS: R } = await import('../src/tuning.js');
-  const danger = MINE_BLAST_RADIUS + R;
+  const { MINE_BLAST_RADIUS, MINE_FUSE_TICKS } = await import('../src/tuning.js');
+  const danger = MINE_BLAST_RADIUS; // centre to centre
 
   // Yellow is the slow mine layer, so it is the one with the least room for the
   // escape estimate to be wrong. Alone, so nothing else can move it.
