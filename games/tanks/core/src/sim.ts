@@ -24,6 +24,7 @@ import {
   MINE_ARM_TICKS,
   MINE_BLAST_RADIUS,
   MINE_RADIUS,
+  SHELL_INTERCEPT_REACH,
   MINE_FUSE_TICKS,
   MINE_TRIGGER_RADIUS,
   SHELL_MAX_LIFETIME_TICKS,
@@ -363,7 +364,7 @@ function explodeMine(w: WorldState, mine: Mine): void {
 }
 
 /**
- * Did two moving circles touch at any point this tick?
+ * Did two moving circles, closing on each other, touch at any point this tick?
  *
  * Each moved in a straight line from its start to its end, so their offset
  * moves in a straight line too, and the closest it gets is on that segment. A
@@ -380,8 +381,14 @@ function shellsMet(
   const py = ay0 - by0;
   const dx = ax1 - ax0 - (bx1 - bx0);
   const dy = ay1 - ay0 - (by1 - by0);
+  // Only shells closing on each other meet. Two fired one after another in
+  // the same direction travel together at a fixed gap and never close, and at
+  // the player's reload that gap (0.43 tiles) is near the intercept reach, so
+  // without this a turret swing between shots lets a stream of your own
+  // shells destroy itself.
+  if (px * dx + py * dy >= 0) return false;
   const dd = dx * dx + dy * dy;
-  let t = dd > 0 ? -(px * dx + py * dy) / dd : 0;
+  let t = -(px * dx + py * dy) / dd;
   if (t < 0) t = 0;
   else if (t > 1) t = 1;
   const cx = px + t * dx;
@@ -546,7 +553,7 @@ export function step(w: WorldState, inputs: Map<number, TankInput>, spawnsFor?: 
     for (let j = i + 1; j < w.shells.length; j++) {
       const b = w.shells[j];
       const b0 = shellStart.get(b) ?? b;
-      if (shellsMet(a0.x, a0.y, a.x, a.y, b0.x, b0.y, b.x, b.y, a.radius + b.radius)) {
+      if (shellsMet(a0.x, a0.y, a.x, a.y, b0.x, b0.y, b.x, b.y, SHELL_INTERCEPT_REACH)) {
         doomed.add(a);
         doomed.add(b);
       }

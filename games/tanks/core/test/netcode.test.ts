@@ -24,6 +24,7 @@ import {
   writeSnapshot,
 } from '../src/net/protocol.js';
 import { Writer } from '@lan-party/net';
+import { TANK_SPECS } from '../src/tuning.js';
 
 function versusWorld(seed = 42) {
   return createWorld({
@@ -775,6 +776,45 @@ test('a shell the other player fired stays on our screen', () => {
     worstGap < 0.25,
     `the shell drifted ${worstGap === Infinity ? 'out of existence' : worstGap.toFixed(3) + ' tiles'} from the host's copy`,
   );
+});
+
+test("every kind's shell is rebuilt on a phone exactly as the host fires it", () => {
+  /*
+   * A phone never sees a shell move: it is told where one was fired and at what
+   * angle, and simulates the rest. So it has to fire it at the same speed, the
+   * same size and the same self-arm delay as the host, or it draws the shell
+   * somewhere it is not.
+   *
+   * The client once kept its own copy of those numbers, and the copy went
+   * stale when the roster changed to match the original game: grey and green
+   * shells were rebuilt at 5.0 tiles/s against the host's 5.5 and 9.0. Every
+   * test that fired a shell used the player's, the one kind the copy still
+   * had right.
+   */
+  const kinds = Object.values(TankKind).filter((k) => typeof k === 'number') as TankKind[];
+  for (const kind of kinds) {
+    const net = new LoopbackNetwork(PERFECT_PROFILE, 3);
+    const clientT = new LoopbackTransport('client', 'Client', net);
+    new LoopbackTransport('host', 'Host', net);
+    const world = versusWorld(22);
+    world.tanks[0].kind = kind;
+    const client = new MatchClient(cloneWorld(world), clientT, 'host', 1);
+    clientT.setEvents({});
+
+    const w = new Writer(16);
+    writeShellSpawn(w, { shellId: 9, ownerId: 0, x: 6, y: 6, angle: 0.7, bounces: 1, tick: client.world.tick });
+    client.handlePacket('host', w.finish());
+
+    const got = client.world.shells.find((s) => s.ownerId === 0);
+    const want = TANK_SPECS[kind].shell;
+    assert.ok(got, `${TankKind[kind]}: the shell never appeared`);
+    assert.ok(
+      Math.abs(Math.hypot(got.vx, got.vy) - want.speed) < 1e-9,
+      `${TankKind[kind]}: rebuilt at ${Math.hypot(got.vx, got.vy).toFixed(2)} tiles/s, fired at ${want.speed}`,
+    );
+    assert.equal(got.radius, want.radius, `${TankKind[kind]}: wrong shell size`);
+    assert.equal(got.selfArmDelay, want.selfArmDelay, `${TankKind[kind]}: wrong self-arm delay`);
+  }
 });
 
 test('a mine the other player laid is on our screen too', () => {

@@ -109,9 +109,33 @@ test('shells that pass side by side leave each other alone', () => {
   const w = room();
   const [a, b] = w.tanks;
   shell(w, a.id, 4, 3.7, 5.5, 0);
-  shell(w, b.id, 9, 4.3, -5.5, 0); // 0.6 apart, against a combined radius of 0.24
+  shell(w, b.id, 9, 4.3, -5.5, 0); // 0.6 apart, beyond the 0.4 intercept reach
   run(w, TICK_HZ / 2);
   assert.equal(w.shells.length, 2, 'two shells that never touched destroyed each other');
+});
+
+test('shells that look like they touch do collide', () => {
+  // 0.35 apart: the drawn shells overlap, though the bodies (0.24 together)
+  // do not. This used to fly on, and it read as a miss that was a hit.
+  const w = room();
+  const [a, b] = w.tanks;
+  shell(w, a.id, 4, 3.825, 5.5, 0);
+  shell(w, b.id, 9, 4.175, -5.5, 0);
+  run(w, TICK_HZ / 2);
+  assert.equal(w.shells.length, 0, 'shells whose drawn bodies overlapped passed each other');
+});
+
+test('shells fired one after another do not destroy each other', () => {
+  // 0.3 apart -- inside the intercept reach -- and drifting slowly apart, as
+  // two shots do when the turret swings a little between them. At the
+  // player's reload a stream of shots flies this close, and it must not eat
+  // itself.
+  const w = room();
+  const [a] = w.tanks;
+  shell(w, a.id, 3, 4, 5.1, 0);
+  shell(w, a.id, 3.3, 4.05, 5.1, 0.3);
+  run(w, TICK_HZ / 4);
+  assert.equal(w.shells.length, 2, 'a stream of shells in the same direction destroyed itself');
 });
 
 test('a shell that also hits a tank that tick is not counted twice', () => {
