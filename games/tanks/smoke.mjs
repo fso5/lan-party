@@ -343,7 +343,8 @@ const board8 = await phone.evaluate(() => {
     share: (() => {
       const cv = document.getElementById('arena').getBoundingClientRect();
       const a = window.__state.world.arena;
-      return Math.min(cv.width, cv.height * (a.width / a.height)) / window.innerWidth;
+      // Drawn foreshortened: a tile is `tilt` as tall as it is wide on screen.
+      return Math.min(cv.width, cv.height * (a.width / (a.height * window.__view().tilt))) / window.innerWidth;
     })(),
   };
   board.innerHTML = before;
@@ -1059,8 +1060,8 @@ const board = await phoneLandscape.evaluate(() => {
   const cv = document.getElementById('arena').getBoundingClientRect();
   const arena = window.__state.world.arena;
   // The board is letterboxed into the canvas, so its drawn width is whichever
-  // of the two fits -- read the aspect off the map rather than assuming 24x14.
-  const drawn = Math.min(cv.width, cv.height * (arena.width / arena.height));
+  // of the two fits. Drawn foreshortened: a tile is `tilt` as tall as wide.
+  const drawn = Math.min(cv.width, cv.height * (arena.width / (arena.height * window.__view().tilt)));
   return {
     share: drawn / innerWidth,
     drawn: Math.round(drawn),
@@ -1077,7 +1078,8 @@ const board = await phoneLandscape.evaluate(() => {
  * can part company silently: drift to 61% and the check still passes, so the
  * figure in the comment quietly becomes a claim about the past that reads like
  * one about the present. Logging it every run makes the gap visible in CI
- * without anybody re-deriving it. 65.6% today.
+ * without anybody re-deriving it. 64.4% today, on the 22x17 field drawn at a
+ * 0.75 tilt; 65.6% on the old 24x14 one.
  */
 console.log(
   `  board: ${board.drawn}px of ${board.vw} = ${(board.share * 100).toFixed(1)}% ` +

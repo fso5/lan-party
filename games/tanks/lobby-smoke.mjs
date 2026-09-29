@@ -660,7 +660,8 @@ for (const [i, p] of pages.entries()) {
     const rounds = document.getElementById('rounds');
     const cv = document.getElementById('arena').getBoundingClientRect();
     const arena = window.__state.world.arena;
-    const drawn = Math.min(cv.width, cv.height * (arena.width / arena.height));
+    // Drawn foreshortened: a tile is `tilt` as tall as it is wide on screen.
+    const drawn = Math.min(cv.width, cv.height * (arena.width / (arena.height * window.__view().tilt)));
     return {
       roundsShown: !rounds.hidden,
       header: Math.round(hdr.getBoundingClientRect().height),
