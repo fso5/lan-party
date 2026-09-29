@@ -488,6 +488,10 @@ document.getElementById('btn-ready').addEventListener('click', () => {
 });
 
 function beginNetworkedMatch(start) {
+  // Each round's start carries its own seed, so a change here is a new round
+  // having been built -- which tests read, because round labels also advance
+  // when a match simply ends.
+  state.roundSeed = start.seed;
   const map = missionById(start.mapId);
   if (!map) {
     setNetStatus('unknown map');
@@ -596,6 +600,23 @@ function setLocalPlayers(n) {
   loadMap(state.mapIndex);
 }
 
+/*
+ * The board is drawn foreshortened, like the original's camera looking down
+ * at the table from an angle: a tile is 3/4 as tall on screen as it is wide.
+ *
+ * The field is the original's 22x17, and square tiles would leave a phone
+ * held sideways using under half its width for the board (measured: 48%).
+ * The original never had that problem because its camera is tilted, and
+ * this is the same fix. Only the drawing is squashed -- the game is played on
+ * the real grid -- so every screen-space direction a player gives (a touch,
+ * a thumb stick) goes through `screenDirToWorld` on the way in.
+ */
+const VIEW_TILT = 0.75;
+
+function screenDirToWorld(dx, dy) {
+  return { x: dx, y: dy / VIEW_TILT };
+}
+
 function resize() {
   const wrap = document.getElementById('stage');
   const rect = wrap.getBoundingClientRect();
@@ -608,11 +629,11 @@ function resize() {
   const a = state.world.arena;
   // Letterbox: the whole arena must always be visible. Being able to see every
   // bank shot coming is load-bearing for this game -- never crop or scroll.
-  const scale = Math.min(canvas.width / a.width, canvas.height / a.height);
+  const scale = Math.min(canvas.width / a.width, canvas.height / (a.height * VIEW_TILT));
   view = {
     scale,
     ox: (canvas.width - a.width * scale) / 2,
-    oy: (canvas.height - a.height * scale) / 2,
+    oy: (canvas.height - a.height * scale * VIEW_TILT) / 2,
   };
 }
 
@@ -621,7 +642,7 @@ function toWorld(clientX, clientY) {
   const dpr = canvas.width / r.width;
   return {
     x: ((clientX - r.left) * dpr - view.ox) / view.scale,
-    y: ((clientY - r.top) * dpr - view.oy) / view.scale,
+    y: ((clientY - r.top) * dpr - view.oy) / (view.scale * VIEW_TILT),
   };
 }
 
@@ -810,9 +831,13 @@ function gatherInput() {
     const dy = input.driveStick.y - input.driveStick.oy;
     const len = Math.hypot(dx, dy);
     if (len > 6) {
-      const f = Math.min(len, STICK_RANGE) / STICK_RANGE / len;
-      mx = dx * f;
-      my = dy * f;
+      // Strength from how far the thumb went on screen; direction as the
+      // player sees it on the tilted board.
+      const strength = Math.min(len, STICK_RANGE) / STICK_RANGE;
+      const d = screenDirToWorld(dx, dy);
+      const dl = Math.hypot(d.x, d.y);
+      mx = (d.x / dl) * strength;
+      my = (d.y / dl) * strength;
     }
   }
   inp.moveX = mx;
@@ -825,7 +850,7 @@ function gatherInput() {
     const dx = input.aimStick.x - input.aimStick.ox;
     const dy = input.aimStick.y - input.aimStick.oy;
     if (Math.hypot(dx, dy) > 8) {
-      input.aimHold = { x: dx, y: dy };
+      input.aimHold = screenDirToWorld(dx, dy);
     }
     inp.aimX = input.aimHold.x;
     inp.aimY = input.aimHold.y;
@@ -868,11 +893,13 @@ function gatherSeatInput(seat) {
     const dy = stick.y - stick.oy;
     const len = Math.hypot(dx, dy);
     if (len > 8) {
-      hold.x = dx;
-      hold.y = dy;
-      const f = Math.min(len, STICK_RANGE) / STICK_RANGE / len;
-      inp.moveX = dx * f;
-      inp.moveY = dy * f;
+      const d = screenDirToWorld(dx, dy);
+      const dl = Math.hypot(d.x, d.y);
+      const strength = Math.min(len, STICK_RANGE) / STICK_RANGE;
+      hold.x = d.x;
+      hold.y = d.y;
+      inp.moveX = (d.x / dl) * strength;
+      inp.moveY = (d.y / dl) * strength;
     }
   }
 
@@ -1162,6 +1189,7 @@ function joinBluetoothMatch() {
       const r = new Reader(data);
       if (r.u8() === MsgType.MatchStart) {
         const start = readMatchStart(r);
+        state.roundSeed = start.seed; // see beginNetworkedMatch
         const map = missionById(start.mapId);
         if (!map) {
           // Say so, the way the WiFi path already does. This is the one place
@@ -1482,6 +1510,7 @@ function render() {
   const shakeX = state.shake > 0 ? (Math.random() - 0.5) * state.shake * s * 0.25 : 0;
   const shakeY = state.shake > 0 ? (Math.random() - 0.5) * state.shake * s * 0.25 : 0;
   ctx.translate(view.ox + shakeX, view.oy + shakeY);
+  ctx.scale(1, VIEW_TILT);
 
   drawArena();
 
@@ -1571,6 +1600,7 @@ function drawSticks() {
   }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.translate(view.ox, view.oy);
+  ctx.scale(1, VIEW_TILT);
 }
 
 // --- HUD -----------------------------------------------------------------
@@ -1924,6 +1954,8 @@ function base64ToBytes(b64) {
 // Exposed for the automated multiplayer smoke test, which needs to compare
 // two clients' worlds against each other.
 window.__state = state;
+// What the board is actually drawn at, for tests that measure the layout.
+window.__view = () => ({ ...view, tilt: VIEW_TILT });
 window.__net = net;
 // And the aim preview, so a test can check it against a shell really fired.
 window.__trajectoryPath = trajectoryPath;

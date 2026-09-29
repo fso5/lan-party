@@ -275,9 +275,21 @@ const alive = 'window.__state?.world?.tanks.filter((t) => t.alive).length ?? 0';
  * Generous costs nothing: waitForFunction returns the moment the round ends.
  */
 const ROUND_BUDGET_MS = 150_000;
+/*
+ * A round can also end on the clock with several tanks still standing, and
+ * with the original game's reloads that is common: bots carry one shell and
+ * wait three seconds between shots (tools/round-length.mjs: 31.9s median, up
+ * to the 120s limit). The wipeout wait above never saw those end. So round
+ * one ending is read from the host starting round two -- a new seed in a new
+ * MatchStart, which the host sends only when it has built a new world -- and
+ * the rebuild from the tanks all being alive in it.
+ */
 const roundTwo = async (p, label) => {
+  const firstSeed = await p.evaluate(() => window.__state.roundSeed);
   const ended = await p
-    .waitForFunction(`(${alive}) <= 1`, null, { timeout: ROUND_BUDGET_MS })
+    .waitForFunction((s) => window.__state.roundSeed !== undefined && window.__state.roundSeed !== s, firstSeed, {
+      timeout: ROUND_BUDGET_MS,
+    })
     .then(() => true)
     .catch(() => false);
   check(ended, `${label}: round one never resolved, so there was nothing to rebuild`);
