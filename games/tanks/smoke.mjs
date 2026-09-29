@@ -88,6 +88,39 @@ await p.screenshot({ path: SCRATCH+'/shot-dark.png' });
 for (let i=0;i<7;i++){ await p.keyboard.press(']'); await p.waitForTimeout(180); }
 console.log('after cycling:', JSON.stringify(await probe()));
 
+// The campaign, driven through the real page. One more ']' wraps back to
+// mission 1, which starts a run. Clearing is done by removing the enemies and
+// dying by removing the player: what the page does next is under test, not the
+// fighting. Each result shows for 2.2s before the page moves on.
+await p.keyboard.press(']');
+await p.waitForTimeout(300);
+const run = () =>
+  p.evaluate(() => ({ ...window.__state.run, hud: document.getElementById('map-index').textContent }));
+const settle = () => p.waitForTimeout(2700);
+check(
+  (await run()).mission === 1 && (await run()).lives === 3,
+  'a campaign run starts at mission 1 with three lives',
+  JSON.stringify(await run()),
+);
+for (let i = 0; i < 5; i++) {
+  await p.evaluate(() => { for (const t of window.__state.world.tanks) if (t.kind !== 0) t.alive = false; });
+  await settle();
+}
+const afterFive = await run();
+check(
+  afterFive.mission === 6 && afterFive.lives === 4 && afterFive.hud === '6/20 · lives 4',
+  'five clears reach mission 6 with a bonus life, and the header says so',
+  JSON.stringify(afterFive),
+);
+await p.evaluate(() => { for (const t of window.__state.world.tanks) if (t.kind === 0) t.alive = false; });
+await settle();
+const afterDeath = await run();
+check(
+  afterDeath.mission === 6 && afterDeath.lives === 3,
+  'losing a tank costs a life and replays the mission',
+  JSON.stringify(afterDeath),
+);
+
 // Phone-sized, portrait-ish landscape as the game would be held.
 await p.setViewportSize({ width: 844, height: 390 });
 await p.waitForTimeout(400);

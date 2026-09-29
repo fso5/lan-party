@@ -96,6 +96,16 @@ export enum TankKind {
   Green = 5,
   /** Aggressive, fast rockets, actively closes distance. Late-game threat. */
   Black = 6,
+  /** The original's red: moves at a walk and keeps three shells in the air. */
+  Red = 7,
+  /** The original's purple: quick, five shells, banks shots, lays mines. */
+  Purple = 8,
+  /**
+   * The original's white: purple's kit on a slower tank, and invisible once a
+   * mission is under way -- the page draws it as a faint ghost after a short
+   * look at the start.
+   */
+  White = 9,
 }
 
 /** How a shell behaves once fired. */

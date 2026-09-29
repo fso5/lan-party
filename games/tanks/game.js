@@ -16,7 +16,8 @@
    TICK_HZ, EventKind, Tile, TankKind, livingTeams, DRAW, MsgType, LobbyOp,
    MAX_SHELLS_PER_TANK, MAX_MINES_PER_TANK, MINE_RADIUS,
    DEFAULT_MATCH_SIZE,
-   readRoster, writeLobbyJoin, writeLobbySetTeam, writeLobbySetReady, Writer */
+   readRoster, writeLobbyJoin, writeLobbySetTeam, writeLobbySetReady, Writer,
+   campaignMission, mapById, startRun, missionCleared, tankLost */
 
 const ALL_MAPS = [...MISSIONS, ...VERSUS_MAPS];
 
@@ -69,7 +70,19 @@ const KIND_COLORS = {
   4: '#C9A227', // yellow
   5: '#4F8A3D', // green
   6: '#33302C', // black
+  7: '#B8403A', // red
+  8: '#7A4FA0', // purple
+  9: '#E8E4DA', // white
 };
+
+/**
+ * White tanks are the original's invisible ones: seen for a moment as a
+ * mission starts, then gone. Here they fade to a faint ghost rather than
+ * vanishing outright -- the original leaves tread marks to track them by,
+ * and this page draws none.
+ */
+const WHITE_VISIBLE_TICKS = 2 * TICK_HZ;
+const WHITE_GHOST_ALPHA = 0.12;
 
 const state = {
   world: null,
@@ -85,6 +98,10 @@ const state = {
   showDebug: false,
   outcome: null,
   outcomeTimer: 0,
+  /** The campaign run being played, or null outside the campaign. See campaign.ts. */
+  run: null,
+  /** A short message over the board: { text, tone, until }. */
+  flash: null,
   particles: [],
   shake: 0,
   tickTimes: [],
@@ -492,7 +509,7 @@ function beginNetworkedMatch(start) {
   // having been built -- which tests read, because round labels also advance
   // when a match simply ends.
   state.roundSeed = start.seed;
-  const map = missionById(start.mapId);
+  const map = mapById(start.mapId);
   if (!map) {
     setNetStatus('unknown map');
     return;
@@ -538,6 +555,63 @@ function beginNetworkedMatch(start) {
 /** Maps world units to canvas pixels; recomputed on resize. */
 let view = { scale: 1, ox: 0, oy: 0 };
 
+/** Whether this phone has cleared mission 20 once, which opens all hundred. */
+function hundredUnlocked() {
+  try {
+    return localStorage.getItem('tanks.hundred') === '1';
+  } catch {
+    return false;
+  }
+}
+
+function unlockHundred() {
+  try {
+    localStorage.setItem('tanks.hundred', '1');
+  } catch {
+    // Private browsing can refuse storage; the unlock just will not stick.
+  }
+}
+
+function flash(text, tone) {
+  state.flash = { text, tone, until: performance.now() + 2600 };
+}
+
+/**
+ * After a mission's result has been on screen a moment: the next mission, a
+ * retry, or a new run -- by the campaign's rules when a run is on, and the old
+ * way (next map / same map) when it is not.
+ */
+function advanceAfterOutcome() {
+  const cleared = state.outcome === 'Cleared';
+  if (!state.run) {
+    loadMap(cleared ? state.mapIndex + 1 : state.mapIndex);
+    return;
+  }
+  if (cleared) {
+    const r = missionCleared(state.run);
+    if (r.unlocksHundred) unlockHundred();
+    if (r.finished) {
+      flash(r.unlocksHundred ? 'Mission Completed! 100 missions unlocked' : 'All 100 cleared!', 'win');
+      state.run = startRun(hundredUnlocked());
+      loadMission(1);
+      return;
+    }
+    if (r.bonusLife) flash('Bonus tank!', 'win');
+    state.run = r.run;
+    loadMission(state.run.mission);
+  } else {
+    const l = tankLost(state.run);
+    if (l.gameOver) {
+      flash(`Game over at mission ${state.run.mission}`, 'lose');
+      state.run = startRun(hundredUnlocked());
+      loadMission(1);
+    } else {
+      state.run = l.run;
+      loadMission(state.run.mission);
+    }
+  }
+}
+
 function loadMap(i) {
   state.mapIndex = ((i % ALL_MAPS.length) + ALL_MAPS.length) % ALL_MAPS.length;
   let map = ALL_MAPS[state.mapIndex];
@@ -549,6 +623,25 @@ function loadMap(i) {
     state.mapIndex = ALL_MAPS.indexOf(VERSUS_MAPS[0]);
     map = ALL_MAPS[state.mapIndex];
   }
+  // Browsing onto a campaign mission alone plays it as part of a run: keep the
+  // run going if there is one, start one if not. Anywhere else, no run.
+  if (state.localPlayers === 1 && MISSIONS.includes(map)) {
+    state.run = { ...(state.run ?? startRun(hundredUnlocked())), mission: map.id };
+  } else {
+    state.run = null;
+  }
+  playMap(map, 1000 + state.mapIndex);
+}
+
+/** Campaign mission `n` of the current run. */
+function loadMission(n) {
+  const map = campaignMission(n);
+  const authored = ALL_MAPS.indexOf(map);
+  if (authored >= 0) state.mapIndex = authored;
+  playMap(map, 5000 + n);
+}
+
+function playMap(map, seed) {
   const arena = loadArena(map);
 
   // Versus maps ship with no scripted enemies so the same map can serve
@@ -574,13 +667,15 @@ function loadMap(i) {
       bots.push({ kind: kinds[(s - seats) % kinds.length], team: 90 + s, spawnIndex: s });
     }
   }
-  state.world = createWorld({ arena, seed: 1000 + state.mapIndex, players, bots });
+  state.world = createWorld({ arena, seed, players, bots });
 
   state.outcome = null;
   state.outcomeTimer = 0;
   state.particles.length = 0;
   document.getElementById('map-name').textContent = map.name;
-  document.getElementById('map-index').textContent = `${state.mapIndex + 1}/${ALL_MAPS.length}`;
+  document.getElementById('map-index').textContent = state.run
+    ? `${state.run.mission}/${state.run.length} · lives ${state.run.lives}`
+    : `${state.mapIndex + 1}/${ALL_MAPS.length}`;
   resize();
 }
 
@@ -1190,7 +1285,7 @@ function joinBluetoothMatch() {
       if (r.u8() === MsgType.MatchStart) {
         const start = readMatchStart(r);
         state.roundSeed = start.seed; // see beginNetworkedMatch
-        const map = missionById(start.mapId);
+        const map = mapById(start.mapId);
         if (!map) {
           // Say so, the way the WiFi path already does. This is the one place
           // host and client can be running different builds -- over WiFi the
@@ -1378,6 +1473,7 @@ function drawTank(t, s) {
   const r = TANK_RADIUS * s;
 
   ctx.save();
+  if (t.kind === TankKind.White && state.world.tick > WHITE_VISIBLE_TICKS) ctx.globalAlpha = WHITE_GHOST_ALPHA;
   ctx.translate(t.x * s, t.y * s);
 
   // Shadow, offset toward the table.
@@ -1720,6 +1816,10 @@ function updateHud() {
     banner.textContent = netBanner.text;
     banner.dataset.show = 'true';
     banner.dataset.tone = netBanner.tone;
+  } else if (state.flash && performance.now() < state.flash.until) {
+    banner.textContent = state.flash.text;
+    banner.dataset.show = 'true';
+    banner.dataset.tone = state.flash.tone;
   } else if (state.outcome) {
     banner.textContent = state.outcome;
     banner.dataset.show = 'true';
@@ -1828,9 +1928,7 @@ function frame(now) {
   if (state.outcome && !net.client) {
     state.outcomeTimer += elapsed;
     // Give the explosion a moment to land before resetting.
-    if (state.outcomeTimer > 2200) {
-      loadMap(state.outcome === 'Cleared' ? state.mapIndex + 1 : state.mapIndex);
-    }
+    if (state.outcomeTimer > 2200) advanceAfterOutcome();
   }
 
   render();
