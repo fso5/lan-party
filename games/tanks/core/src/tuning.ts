@@ -39,6 +39,17 @@ export const MINE_BLAST_RADIUS = 1.6;
  */
 export const MINE_RADIUS = 0.22;
 
+/**
+ * How close two shells' centres must pass to destroy each other, in tiles.
+ *
+ * Wider than their bodies (0.24 together), on purpose. A shell is drawn a
+ * little larger than it is and trails a streak, so at the bare body size two
+ * shells could be seen to overlap and fly on. Shooting a shell down is a
+ * skill the game rewards; the reach is set so that anything that looks like a
+ * touch is one. Shells against tanks, walls and mines keep their real size.
+ */
+export const SHELL_INTERCEPT_REACH = 0.4;
+
 /** A shell that has bounced its last still needs to die somewhere. */
 export const SHELL_MAX_LIFETIME_TICKS = 60 * 12;
 

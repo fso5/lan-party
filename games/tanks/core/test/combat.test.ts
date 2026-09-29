@@ -109,9 +109,20 @@ test('shells that pass side by side leave each other alone', () => {
   const w = room();
   const [a, b] = w.tanks;
   shell(w, a.id, 4, 3.7, 5.5, 0);
-  shell(w, b.id, 9, 4.3, -5.5, 0); // 0.6 apart, against a combined radius of 0.24
+  shell(w, b.id, 9, 4.3, -5.5, 0); // 0.6 apart, beyond the 0.4 intercept reach
   run(w, TICK_HZ / 2);
   assert.equal(w.shells.length, 2, 'two shells that never touched destroyed each other');
+});
+
+test('shells that look like they touch do collide', () => {
+  // 0.35 apart: the drawn shells overlap, though the bodies (0.24 together)
+  // do not. This used to fly on, and it read as a miss that was a hit.
+  const w = room();
+  const [a, b] = w.tanks;
+  shell(w, a.id, 4, 3.825, 5.5, 0);
+  shell(w, b.id, 9, 4.175, -5.5, 0);
+  run(w, TICK_HZ / 2);
+  assert.equal(w.shells.length, 0, 'shells whose drawn bodies overlapped passed each other');
 });
 
 test('a shell that also hits a tank that tick is not counted twice', () => {

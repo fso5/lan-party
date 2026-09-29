@@ -24,6 +24,7 @@ import {
   MINE_ARM_TICKS,
   MINE_BLAST_RADIUS,
   MINE_RADIUS,
+  SHELL_INTERCEPT_REACH,
   MINE_FUSE_TICKS,
   MINE_TRIGGER_RADIUS,
   SHELL_MAX_LIFETIME_TICKS,
@@ -546,7 +547,7 @@ export function step(w: WorldState, inputs: Map<number, TankInput>, spawnsFor?: 
     for (let j = i + 1; j < w.shells.length; j++) {
       const b = w.shells[j];
       const b0 = shellStart.get(b) ?? b;
-      if (shellsMet(a0.x, a0.y, a.x, a.y, b0.x, b0.y, b.x, b.y, a.radius + b.radius)) {
+      if (shellsMet(a0.x, a0.y, a.x, a.y, b0.x, b0.y, b.x, b.y, SHELL_INTERCEPT_REACH)) {
         doomed.add(a);
         doomed.add(b);
       }
