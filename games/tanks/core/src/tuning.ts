@@ -18,7 +18,13 @@ export const DT = 1 / TICK_HZ;
 /** Tank body radius. Slightly under half a tile so gaps of 1 tile are passable. */
 export const TANK_RADIUS = 0.38;
 
-/** How many shells and mines one tank may have live at once. */
+/**
+ * How many shells and mines the player may have live at once.
+ *
+ * Each tank type has its own limits (`maxShells`, `maxMines` in its spec),
+ * following the original game; these are the player's, and the most any type
+ * has except the yellow tank's four mines.
+ */
 export const MAX_SHELLS_PER_TANK = 5;
 export const MAX_MINES_PER_TANK = 2;
 
@@ -83,13 +89,18 @@ export interface TankSpec {
   mobile: boolean;
   /** Whether this type lays mines. */
   laysMines: boolean;
+  /** Most shells this type may have in flight at once. */
+  maxShells: number;
+  /** Most mines this type may have down at once. */
+  maxMines: number;
   /** Max wall bounces the AI will consider when looking for a bank shot. */
   bankShotDepth: number;
 }
 
 const ROCKET: ShellProfile = { speed: 9.0, maxBounces: 0, radius: 0.11, selfArmDelay: 6 };
 const NORMAL: ShellProfile = { speed: 5.5, maxBounces: 1, radius: 0.12, selfArmDelay: 8 };
-const RICOCHET: ShellProfile = { speed: 5.0, maxBounces: 2, radius: 0.12, selfArmDelay: 10 };
+/** The green sniper's: rocket-fast, and bounces twice. */
+const SNIPER: ShellProfile = { speed: 9.0, maxBounces: 2, radius: 0.12, selfArmDelay: 10 };
 
 export const TANK_SPECS: Record<TankKind, TankSpec> = {
   [TankKind.Player]: {
@@ -102,6 +113,8 @@ export const TANK_SPECS: Record<TankKind, TankSpec> = {
     reactionTicks: 0,
     mobile: true,
     laysMines: true,
+    maxShells: MAX_SHELLS_PER_TANK,
+    maxMines: MAX_MINES_PER_TANK,
     bankShotDepth: 0,
   },
   [TankKind.Brown]: {
@@ -114,19 +127,23 @@ export const TANK_SPECS: Record<TankKind, TankSpec> = {
     reactionTicks: 55,
     mobile: false,
     laysMines: false,
+    maxShells: 1,
+    maxMines: 0,
     bankShotDepth: 0,
   },
   [TankKind.Grey]: {
     moveSpeed: 1.5,
     bodyTurnRate: 3.0,
     turretTurnRate: 2.2,
-    shell: RICOCHET,
+    shell: NORMAL, // one bounce, as in the original
     fireCooldown: 80,
     aimError: 0.05,
     reactionTicks: 40,
     mobile: true,
     laysMines: false,
-    bankShotDepth: 2,
+    maxShells: 1,
+    maxMines: 0,
+    bankShotDepth: 1,
   },
   [TankKind.Teal]: {
     moveSpeed: 2.6,
@@ -138,6 +155,8 @@ export const TANK_SPECS: Record<TankKind, TankSpec> = {
     reactionTicks: 26,
     mobile: true,
     laysMines: false,
+    maxShells: 1,
+    maxMines: 0,
     bankShotDepth: 0,
   },
   [TankKind.Yellow]: {
@@ -150,18 +169,22 @@ export const TANK_SPECS: Record<TankKind, TankSpec> = {
     reactionTicks: 34,
     mobile: true,
     laysMines: true,
+    maxShells: 1,
+    maxMines: 4,
     bankShotDepth: 1,
   },
   [TankKind.Green]: {
     moveSpeed: 0,
     bodyTurnRate: 0,
     turretTurnRate: 1.8,
-    shell: RICOCHET,
+    shell: SNIPER,
     fireCooldown: 90,
     aimError: 0.012, // near-perfect: this is the sniper
     reactionTicks: 30,
     mobile: false,
     laysMines: false,
+    maxShells: 2,
+    maxMines: 0,
     bankShotDepth: 2,
   },
   [TankKind.Black]: {
@@ -174,6 +197,8 @@ export const TANK_SPECS: Record<TankKind, TankSpec> = {
     reactionTicks: 18,
     mobile: true,
     laysMines: true,
+    maxShells: 2,
+    maxMines: 2,
     bankShotDepth: 1,
   },
 };

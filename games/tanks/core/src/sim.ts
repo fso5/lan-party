@@ -21,8 +21,6 @@ import { Rng, datan2, dcos, dsin, rotateToward, wrapAngle } from './math.js';
 import { circlesOverlap, moveTank, stepShell, sweepCircleHit } from './physics.js';
 import {
   DT,
-  MAX_MINES_PER_TANK,
-  MAX_SHELLS_PER_TANK,
   MINE_ARM_TICKS,
   MINE_BLAST_RADIUS,
   MINE_RADIUS,
@@ -232,7 +230,7 @@ export function tankById(w: WorldState, id: number): Tank | undefined {
 export function fireShell(w: WorldState, tank: Tank): boolean {
   const spec = TANK_SPECS[tank.kind];
   if (!tank.alive) return false;
-  if (tank.shellsOut >= MAX_SHELLS_PER_TANK) return false;
+  if (tank.shellsOut >= spec.maxShells) return false;
   if (w.tick < tank.nextFireTick) return false;
 
   const dirX = dcos(tank.turretAngle);
@@ -270,7 +268,7 @@ export function fireShell(w: WorldState, tank: Tank): boolean {
 export function layMine(w: WorldState, tank: Tank): boolean {
   const spec = TANK_SPECS[tank.kind];
   if (!tank.alive || !spec.laysMines) return false;
-  if (tank.minesOut >= MAX_MINES_PER_TANK) return false;
+  if (tank.minesOut >= spec.maxMines) return false;
   if (w.tick < tank.nextMineTick) return false;
 
   w.mines.push({
@@ -302,7 +300,19 @@ export function killTank(w: WorldState, tank: Tank, killerId: number): void {
   emit(w, EventKind.TankDestroyed, tank.x, tank.y, tank.id, killerId);
 }
 
+/**
+ * Set a mine off: it leaves the world, and its blast reaches everything in
+ * range -- tanks, breakable blocks, shells, and other mines, which go off in
+ * turn. That chain is the original game's, and the reason a mine field is
+ * cleared by one well-placed shot.
+ *
+ * Removes the mine itself, so no caller holds an index into `w.mines` across
+ * this call. Nor into `w.shells`, which the blast also changes.
+ */
 function explodeMine(w: WorldState, mine: Mine): void {
+  const at = w.mines.indexOf(mine);
+  if (at < 0) return; // already gone: a chain reached it first
+  w.mines.splice(at, 1);
   emit(w, EventKind.MineExploded, mine.x, mine.y, mine.ownerId);
 
   // Mines hurt everyone, including the tank that laid them. That is the whole
@@ -333,6 +343,23 @@ function explodeMine(w: WorldState, mine: Mine): void {
 
   const owner = tankById(w, mine.ownerId);
   if (owner && owner.minesOut > 0) owner.minesOut--;
+
+  // Shells caught in the blast are destroyed.
+  for (let i = w.shells.length - 1; i >= 0; i--) {
+    const s = w.shells[i];
+    if (!circlesOverlap(mine.x, mine.y, MINE_BLAST_RADIUS, s.x, s.y, s.radius)) continue;
+    emit(w, EventKind.ShellExpired, s.x, s.y, s.id);
+    const shooter = tankById(w, s.ownerId);
+    if (shooter && shooter.shellsOut > 0) shooter.shellsOut--;
+    w.shells.splice(i, 1);
+  }
+
+  // And mines caught in it go off too.
+  for (const other of [...w.mines]) {
+    if (circlesOverlap(mine.x, mine.y, MINE_BLAST_RADIUS, other.x, other.y, MINE_RADIUS)) {
+      explodeMine(w, other);
+    }
+  }
 }
 
 /**
@@ -434,6 +461,9 @@ export function step(w: WorldState, inputs: Map<number, TankInput>, spawnsFor?: 
   // --- Shells ------------------------------------------------------------
   // Where each shell began the tick, for the shell-on-shell pass below.
   const shellStart = new Map<Shell, { x: number; y: number }>();
+  // Mines shot this tick. They go off once every shell has moved, because a
+  // blast destroys shells and this loop is walking them by index.
+  const shotMines: Mine[] = [];
   for (let i = w.shells.length - 1; i >= 0; i--) {
     const s = w.shells[i];
     const startX = s.x;
@@ -483,11 +513,9 @@ export function step(w: WorldState, inputs: Map<number, TankInput>, spawnsFor?: 
     // Mine hits. Shooting a mine sets it off, armed or not -- a way to clear
     // one from a distance, or to blow it under whoever is standing next to it.
     if (!hitSomething) {
-      for (let k = 0; k < w.mines.length; k++) {
-        const m = w.mines[k];
+      for (const m of w.mines) {
         if (sweepCircleHit(startX, startY, s.x - startX, s.y - startY, s.radius, m.x, m.y, MINE_RADIUS)) {
-          w.mines.splice(k, 1);
-          explodeMine(w, m);
+          if (!shotMines.includes(m)) shotMines.push(m);
           hitSomething = true;
           break;
         }
@@ -502,6 +530,8 @@ export function step(w: WorldState, inputs: Map<number, TankInput>, spawnsFor?: 
       w.shells.splice(i, 1);
     }
   }
+
+  for (const m of shotMines) explodeMine(w, m);
 
   // --- Shell on shell ----------------------------------------------------
   // Two shells that touch destroy each other, so a shot can be answered with a
@@ -535,8 +565,11 @@ export function step(w: WorldState, inputs: Map<number, TankInput>, spawnsFor?: 
   }
 
   // --- Mines -------------------------------------------------------------
-  for (let i = w.mines.length - 1; i >= 0; i--) {
-    const m = w.mines[i];
+  // Over a copy, newest first as before: one mine's blast can set off others.
+  const minesNow = [...w.mines];
+  for (let i = minesNow.length - 1; i >= 0; i--) {
+    const m = minesNow[i];
+    if (!w.mines.includes(m)) continue; // a chain already set it off
     let detonate = w.tick >= m.fuseTick;
 
     if (!detonate && w.tick >= m.armTick) {
@@ -551,10 +584,7 @@ export function step(w: WorldState, inputs: Map<number, TankInput>, spawnsFor?: 
       }
     }
 
-    if (detonate) {
-      explodeMine(w, m);
-      w.mines.splice(i, 1);
-    }
+    if (detonate) explodeMine(w, m);
   }
 
   w.tick++;
