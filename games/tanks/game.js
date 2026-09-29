@@ -14,7 +14,7 @@
 /* global createWorld, step, loadArena, MISSIONS, VERSUS_MAPS, emptyInput,
    isMatchOver, stepShell, dcos, dsin, datan2, TANK_RADIUS, TANK_SPECS,
    TICK_HZ, EventKind, Tile, TankKind, livingTeams, DRAW, MsgType, LobbyOp,
-   MAX_SHELLS_PER_TANK, MAX_MINES_PER_TANK,
+   MAX_SHELLS_PER_TANK, MAX_MINES_PER_TANK, MINE_RADIUS,
    DEFAULT_MATCH_SIZE,
    readRoster, writeLobbyJoin, writeLobbySetTeam, writeLobbySetReady, Writer */
 
@@ -1488,7 +1488,7 @@ function render() {
     const pulse = 0.5 + 0.5 * Math.sin(w.tick * 0.18);
     ctx.fillStyle = armed ? `rgba(224,122,40,${0.45 + pulse * 0.45})` : 'rgba(140,140,140,0.5)';
     ctx.beginPath();
-    ctx.arc(m.x * s, m.y * s, s * 0.22, 0, Math.PI * 2);
+    ctx.arc(m.x * s, m.y * s, s * MINE_RADIUS, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = css('--mine-ring');
     ctx.lineWidth = Math.max(1, s * 0.03);

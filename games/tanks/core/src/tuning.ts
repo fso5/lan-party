@@ -27,6 +27,11 @@ export const MINE_FUSE_TICKS = 300; // 5s until it blows on its own
 export const MINE_ARM_TICKS = 45; // 0.75s before it can be triggered by proximity
 export const MINE_TRIGGER_RADIUS = 0.9;
 export const MINE_BLAST_RADIUS = 1.6;
+/**
+ * A mine's body, for shells: a shell touching this sets it off. The size the
+ * page draws it at (game.js reads this rather than its own copy).
+ */
+export const MINE_RADIUS = 0.22;
 
 /** A shell that has bounced its last still needs to die somewhere. */
 export const SHELL_MAX_LIFETIME_TICKS = 60 * 12;

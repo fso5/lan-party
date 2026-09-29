@@ -1,11 +1,17 @@
 /**
- * An entity id is one byte on the wire, and that byte is a margin being spent.
+ * An entity id is two bytes on the wire, and those bytes are a margin being
+ * spent.
  *
  * `world.nextEntityId` is a counter that never resets. `host.ts` sends
- * `shell.id % MAX_WIRE_ENTITY_IDS`, so every 256th spawn hands out a number
- * some earlier entity already had. That is not a bug on its own -- the byte
- * only has to tell apart the entities that are alive at the same moment -- but
- * it is a budget, and nothing had ever measured how much of it the game uses.
+ * `shell.id % MAX_WIRE_ENTITY_IDS`, so every 65536th spawn hands out a number
+ * some earlier entity already had. That is not a bug on its own -- the id only
+ * has to tell apart the entities that are alive at the same moment -- but it is
+ * a budget, and this measures how much of it the game uses.
+ *
+ * It was one byte until shells started destroying each other. That doubled the
+ * rate ids are handed out (shells that meet mid-air come back sooner, so tanks
+ * refire sooner) and took the worst churn below from 172 to 294 of 256 -- with
+ * real collisions, which this test caught. Protocol v2 widened the field.
  *
  * ## What spending it costs
  *
@@ -68,8 +74,8 @@ import { loadArena, VERSUS_MAPS } from '../src/maps/index.js';
 import { MAX_WIRE_ENTITY_IDS } from '../src/net/protocol.js';
 import { MAX_LOBBY_SLOTS } from '@lan-party/lobby';
 
-/** Where the bound sits, below the 256 at which entities actually collide. */
-const CHURN_BUDGET = 224;
+/** Where the bound sits: the last eighth below the point entities collide. */
+const CHURN_BUDGET = (MAX_WIRE_ENTITY_IDS * 7) / 8;
 
 const MINUTES = 10;
 const TICKS = TICK_HZ * 60 * MINUTES;
@@ -165,7 +171,7 @@ function measure(): Churn {
   return out;
 }
 
-test('a live entity never outlives its slot in the one-byte id space', () => {
+test('a live entity never outlives its slot in the wire id space', () => {
   const c = measure();
 
   /*
@@ -191,8 +197,9 @@ test('a live entity never outlives its slot in the one-byte id space', () => {
     `only ${c.peakMines} mines were ever live at once -- nobody was laying them`,
   );
   assert.ok(
-    c.idsAllocated > MAX_WIRE_ENTITY_IDS * 4,
-    `only ${c.idsAllocated} ids were handed out in ${MINUTES} minutes, which never even wraps the byte once`,
+    // Four laps of the old one-byte space: the load that found the collisions.
+    c.idsAllocated > 256 * 4,
+    `only ${c.idsAllocated} ids were handed out in ${MINUTES} minutes -- nothing like the load this is meant to measure`,
   );
 
   console.log(

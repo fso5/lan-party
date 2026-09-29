@@ -356,10 +356,11 @@ test('snapshot round-trips within visual tolerance and fits one BLE write', () =
   }
 });
 
-test('shell spawn packs the whole trajectory into 10 bytes', () => {
+test('shell spawn packs the whole trajectory into 11 bytes', () => {
   const w = new Writer();
   writeShellSpawn(w, {
-    shellId: 200,
+    // Over 255, so the round trip proves the id field is two bytes wide.
+    shellId: 40000,
     ownerId: 3,
     x: 12.3456,
     y: 5.4321,
@@ -368,13 +369,13 @@ test('shell spawn packs the whole trajectory into 10 bytes', () => {
     tick: 900,
   });
   const buf = w.finish();
-  assert.equal(buf.length, 10);
+  assert.equal(buf.length, 11);
 
   const r = new Reader(buf);
   assert.equal(r.u8(), MsgType.Event);
   r.u8(); // NetEvent.ShellSpawn
   const got = readShellSpawn(r);
-  assert.equal(got.shellId, 200);
+  assert.equal(got.shellId, 40000);
   assert.equal(got.ownerId, 3);
   assert.equal(got.bounces, 2);
   assert.equal(got.tick, 900);

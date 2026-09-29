@@ -564,7 +564,7 @@ export class MatchClient {
       if (s.ownerId === this.localTankId) return;
 
       // The whole trajectory follows from here. This is the payoff for the
-      // deterministic physics: ten bytes buys every bounce this shell will
+      // deterministic physics: eleven bytes buys every bounce this shell will
       // ever make.
       const owner = this.world.tanks.find((t) => t.id === s.ownerId);
       const speed = this.shellSpeedFor(owner?.kind ?? 0);

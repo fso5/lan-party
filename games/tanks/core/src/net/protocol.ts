@@ -9,10 +9,10 @@
  *
  *  1. Clients send input, never state. A full input frame is 4 bytes.
  *  2. Shells are never streamed. A shell's whole future is determined by its
- *     spawn position, angle and bounce count, so the host sends one 10-byte
+ *     spawn position, angle and bounce count, so the host sends one 11-byte
  *     spawn event and every client simulates the trajectory locally with the
  *     identical deterministic physics. A shell that bounces around for eight
- *     seconds costs ten bytes, once -- 8 bytes of payload behind a 2-byte
+ *     seconds costs eleven bytes, once -- 9 bytes of payload behind a 2-byte
  *     message header. This is the single biggest saving in
  *     the protocol and it is the reason the deterministic-trig work in math.ts
  *     is not optional.
@@ -26,7 +26,7 @@
 
 import { Reader, Writer } from '@lan-party/net';
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 export enum MsgType {
   /** Host -> client, reliable. Full match setup: arena, teams, seed. */
@@ -324,26 +324,26 @@ export const MAX_WIRE_BOUNCES = 0x03;
 /**
  * How many entities the wire can tell apart before ids start repeating.
  *
- * A shell's and a mine's id is one byte, and `world.nextEntityId` is a counter
- * that never resets -- so `host.ts` truncates, and every 256th spawn reuses a
- * number. That is fine as long as the entity holding it is already dead, which
- * is what makes this a margin rather than a bug.
+ * A shell's and a mine's id is two bytes, and `world.nextEntityId` is a
+ * counter that never resets -- so `host.ts` truncates, and every 65536th spawn
+ * reuses a number. That is fine as long as the entity holding it is already
+ * dead, which is what makes this a margin rather than a bug.
  *
  * Spend the margin and the failure is not a duplicate on screen. `replaySpawns`
  * in client.ts skips a spawn whose id is already live, so of two live shells
- * sharing a low byte the second is simply not put back after a rewind: it is
- * lethal on the host and invisible on the phone. Rollback happens constantly,
- * so this would be a shell that vanishes at 45ms of latency and not at 5.
+ * sharing an id the second is simply not put back after a rewind: it is lethal
+ * on the host and invisible on the phone. Rollback happens constantly, so this
+ * would be a shell that vanishes at 45ms of latency and not at 5.
  *
- * Measured rather than assumed -- `entity-ids.test.ts` runs ten minutes of the
- * busiest match the game allows and reports the worst churn a live entity sees.
- * At the seat cap that is 172 of the 256 available, which is two thirds spent
- * and the reason this is written down. A faster reload, a higher seat cap or a
- * longer-lived shell all eat directly into what is left.
- *
- * Widening it is one byte per spawn event and a PROTOCOL_VERSION bump.
+ * It was one byte until shells started destroying each other (protocol v2).
+ * `entity-ids.test.ts` runs ten minutes of the busiest match the game allows
+ * and reports the worst churn a live entity sees: 172 of 256 before, and 294
+ * after -- shells that meet in mid-air come back sooner, so tanks refire
+ * sooner and ids go twice as fast. That run found live entities sharing a
+ * byte. Two bytes cost one more per spawn event and leave the margin at well
+ * over a hundredfold.
  */
-export const MAX_WIRE_ENTITY_IDS = 256;
+export const MAX_WIRE_ENTITY_IDS = 65536;
 
 export interface WireShellSpawn {
   shellId: number;
@@ -360,7 +360,7 @@ export function writeShellSpawn(w: Writer, s: WireShellSpawn): void {
   w.u8(MsgType.Event);
   w.u8(NetEvent.ShellSpawn);
   w.u16(s.tick & 0xffff);
-  w.u8(s.shellId & 0xff);
+  w.u16(s.shellId & 0xffff);
   w.u8((s.ownerId & 0x0f) | ((s.bounces & MAX_WIRE_BOUNCES) << 4));
   const qx = quantPos(s.x);
   const qy = quantPos(s.y);
@@ -372,7 +372,7 @@ export function writeShellSpawn(w: Writer, s: WireShellSpawn): void {
 
 export function readShellSpawn(r: Reader): WireShellSpawn {
   const tick = r.u16();
-  const shellId = r.u8();
+  const shellId = r.u16();
   const packed = r.u8();
   const b0 = r.u8();
   const b1 = r.u8();
@@ -419,7 +419,7 @@ export function writeMineSpawn(w: Writer, m: WireMineSpawn): void {
   w.u8(MsgType.Event);
   w.u8(NetEvent.MineSpawn);
   w.u16(m.tick & 0xffff);
-  w.u8(m.mineId & 0xff);
+  w.u16(m.mineId & 0xffff);
   w.u8(m.ownerId & 0x0f);
   const qx = quantPos(m.x);
   const qy = quantPos(m.y);
@@ -430,7 +430,7 @@ export function writeMineSpawn(w: Writer, m: WireMineSpawn): void {
 
 export function readMineSpawn(r: Reader): WireMineSpawn {
   const tick = r.u16();
-  const mineId = r.u8();
+  const mineId = r.u16();
   const ownerId = r.u8() & 0x0f;
   const b0 = r.u8();
   const b1 = r.u8();
