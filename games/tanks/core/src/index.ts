@@ -7,6 +7,7 @@ export * from './sim.js';
 export * from './ai.js';
 export * from './rules.js';
 export * from './maps/index.js';
+export * from './campaign.js';
 export * from '@lan-party/net';
 export * from './net/protocol.js';
 

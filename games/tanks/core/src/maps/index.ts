@@ -6,7 +6,8 @@
  *   #  indestructible wall      .  floor
  *   %  destructible block       O  hole
  *   1-4  spawn point for team N (digit - 1)
- *   b g t y n k  enemy tanks: brown grey teal yellow greeN blacK
+ *   b g t y n k r p w  enemy tanks: brown grey teal yellow greeN blacK
+ *                      red purple white
  *
  * Arenas are 24x19 with their border: a 22x17 field, the original game's.
  * They were 24x14, cut to suit a phone held sideways, and each was stretched

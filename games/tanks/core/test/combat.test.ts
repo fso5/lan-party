@@ -215,6 +215,9 @@ test('each tank type has its own limit on shells in flight', () => {
   assert.equal(fireUntilRefused(TankKind.Yellow), 1);
   assert.equal(fireUntilRefused(TankKind.Green), 2);
   assert.equal(fireUntilRefused(TankKind.Black), 2);
+  assert.equal(fireUntilRefused(TankKind.Red), 3);
+  assert.equal(fireUntilRefused(TankKind.Purple), 5);
+  assert.equal(fireUntilRefused(TankKind.White), 5);
 });
 
 test('the yellow tank lays four mines; the player two', () => {
@@ -236,6 +239,9 @@ test('the yellow tank lays four mines; the player two', () => {
   assert.equal(layUntilRefused(TankKind.Yellow), 4);
   assert.equal(layUntilRefused(TankKind.Black), 2);
   assert.equal(layUntilRefused(TankKind.Grey), 0);
+  assert.equal(layUntilRefused(TankKind.Red), 0);
+  assert.equal(layUntilRefused(TankKind.Purple), 2);
+  assert.equal(layUntilRefused(TankKind.White), 2);
 });
 
 test('a blast destroys shells caught in it', () => {
@@ -272,4 +278,17 @@ test('a blast sets off the mines around it, and only those', () => {
   assert.equal(blasts, 3, 'the chain did not run exactly the length of the row');
   assert.deepEqual(w.mines.map((m) => m.id), [703], 'the mine out of reach went off, or a mine in reach did not');
   assert.equal(b.minesOut, 1);
+});
+
+test("the original's red, purple and white tanks are on the map legend", () => {
+  const arena = parseArena('new kinds', [
+    '########',
+    '#1.r.p.#',
+    '#....w.#',
+    '########',
+  ]);
+  assert.deepEqual(
+    arena.enemies.map((e) => TankKind[e.kind]),
+    ['Red', 'Purple', 'White'],
+  );
 });

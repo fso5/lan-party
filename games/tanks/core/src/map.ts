@@ -184,7 +184,8 @@ export class Arena {
  *   '#' indestructible wall     '.' or ' ' floor
  *   '%' destructible block      'O' hole
  *   '1'-'4' team spawn points (digit is the team index + 1)
- *   'b','g','t','y','n','k' enemy tanks (brown/grey/teal/yellow/greeN/blacK)
+ *   'b','g','t','y','n','k','r','p','w' enemy tanks
+ *                       (brown/grey/teal/yellow/greeN/blacK/red/purple/white)
  *
  * Enemies parsed from ASCII default to team 1 (the AI side).
  */
@@ -210,7 +211,7 @@ export function parseArena(name: string, rows: string[]): ArenaDef {
   const spawns: SpawnPoint[] = [];
   const enemies: EnemyPlacement[] = [];
 
-  const enemyChars: Record<string, number> = { b: 1, g: 2, t: 3, y: 4, n: 5, k: 6 };
+  const enemyChars: Record<string, number> = { b: 1, g: 2, t: 3, y: 4, n: 5, k: 6, r: 7, p: 8, w: 9 };
 
   /*
    * Rows must all be the same length.
