@@ -24,6 +24,9 @@ import {
   MINE_ARM_TICKS,
   MINE_BLAST_RADIUS,
   MINE_RADIUS,
+  MINE_REACT_TICKS,
+  SHELL_HIT_RADIUS,
+  TANK_HIT_RADIUS,
   SHELL_INTERCEPT_REACH,
   MINE_FUSE_TICKS,
   MINE_TRIGGER_RADIUS,
@@ -320,7 +323,7 @@ function explodeMine(w: WorldState, mine: Mine): void {
   // risk/reward of the weapon and it must apply to the player too.
   for (const t of w.tanks) {
     if (!t.alive) continue;
-    if (circlesOverlap(mine.x, mine.y, MINE_BLAST_RADIUS, t.x, t.y, TANK_RADIUS)) {
+    if (circlesOverlap(mine.x, mine.y, MINE_BLAST_RADIUS, t.x, t.y, 0)) {
       killTank(w, t, mine.ownerId);
     }
   }
@@ -348,7 +351,7 @@ function explodeMine(w: WorldState, mine: Mine): void {
   // Shells caught in the blast are destroyed.
   for (let i = w.shells.length - 1; i >= 0; i--) {
     const s = w.shells[i];
-    if (!circlesOverlap(mine.x, mine.y, MINE_BLAST_RADIUS, s.x, s.y, s.radius)) continue;
+    if (!circlesOverlap(mine.x, mine.y, MINE_BLAST_RADIUS, s.x, s.y, 0)) continue;
     emit(w, EventKind.ShellExpired, s.x, s.y, s.id);
     const shooter = tankById(w, s.ownerId);
     if (shooter && shooter.shellsOut > 0) shooter.shellsOut--;
@@ -357,7 +360,7 @@ function explodeMine(w: WorldState, mine: Mine): void {
 
   // And mines caught in it go off too.
   for (const other of [...w.mines]) {
-    if (circlesOverlap(mine.x, mine.y, MINE_BLAST_RADIUS, other.x, other.y, MINE_RADIUS)) {
+    if (circlesOverlap(mine.x, mine.y, MINE_BLAST_RADIUS, other.x, other.y, 0)) {
       explodeMine(w, other);
     }
   }
@@ -510,7 +513,7 @@ export function step(w: WorldState, inputs: Map<number, TankInput>, spawnsFor?: 
       // that it absolutely can, and that is the point of the game.
       if (t.id === s.ownerId && age < s.selfArmDelay) continue;
 
-      if (sweepCircleHit(startX, startY, s.x - startX, s.y - startY, s.radius, t.x, t.y, TANK_RADIUS)) {
+      if (sweepCircleHit(startX, startY, s.x - startX, s.y - startY, SHELL_HIT_RADIUS, t.x, t.y, TANK_HIT_RADIUS)) {
         killTank(w, t, s.ownerId);
         hitSomething = true;
         break;
@@ -577,21 +580,23 @@ export function step(w: WorldState, inputs: Map<number, TankInput>, spawnsFor?: 
   for (let i = minesNow.length - 1; i >= 0; i--) {
     const m = minesNow[i];
     if (!w.mines.includes(m)) continue; // a chain already set it off
-    let detonate = w.tick >= m.fuseTick;
-
-    if (!detonate && w.tick >= m.armTick) {
-      // Proximity trigger, but only for tanks that did not lay it -- otherwise
-      // you could never drive away from your own mine.
+    // Proximity, the original's way: an enemy near an armed mine cuts its fuse
+    // to half a second -- unless the layer or a teammate is near it too, which
+    // is what lets you lay one and drive off it. Checked every tick until the
+    // fuse is that short already, so a friend stepping away re-arms the rule.
+    if (w.tick >= m.armTick && m.fuseTick > w.tick + MINE_REACT_TICKS) {
+      let enemyNear = false;
+      let friendNear = false;
       for (const t of w.tanks) {
-        if (!t.alive || t.id === m.ownerId) continue;
-        if (circlesOverlap(m.x, m.y, MINE_TRIGGER_RADIUS, t.x, t.y, TANK_RADIUS)) {
-          detonate = true;
-          break;
-        }
+        if (!t.alive) continue;
+        if (!circlesOverlap(m.x, m.y, MINE_TRIGGER_RADIUS, t.x, t.y, 0)) continue;
+        if (t.id === m.ownerId || t.team === m.team) friendNear = true;
+        else enemyNear = true;
       }
+      if (enemyNear && !friendNear) m.fuseTick = w.tick + MINE_REACT_TICKS;
     }
 
-    if (detonate) explodeMine(w, m);
+    if (w.tick >= m.fuseTick) explodeMine(w, m);
   }
 
   w.tick++;

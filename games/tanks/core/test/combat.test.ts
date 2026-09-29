@@ -108,8 +108,8 @@ test('shells too fast to overlap on any tick still collide', () => {
 test('shells that pass side by side leave each other alone', () => {
   const w = room();
   const [a, b] = w.tanks;
-  shell(w, a.id, 4, 3.7, 5.5, 0);
-  shell(w, b.id, 9, 4.3, -5.5, 0); // 0.6 apart, beyond the 0.4 intercept reach
+  shell(w, a.id, 4, 3.6, 5.5, 0);
+  shell(w, b.id, 9, 4.4, -5.5, 0); // 0.8 apart, beyond the 0.64 intercept reach
   run(w, TICK_HZ / 2);
   assert.equal(w.shells.length, 2, 'two shells that never touched destroyed each other');
 });

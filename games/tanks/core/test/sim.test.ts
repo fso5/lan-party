@@ -21,6 +21,7 @@ import {
   MINE_ARM_TICKS,
   MINE_BLAST_RADIUS,
   MINE_FUSE_TICKS,
+  MINE_REACT_TICKS,
   MINE_TRIGGER_RADIUS,
   TANK_RADIUS,
 } from '../src/tuning.js';
@@ -61,6 +62,9 @@ test('a mine cannot be triggered before it arms', () => {
   const { w, layer, victim } = noseToNose();
   lay(w, layer.id);
   assert.equal(w.mines.length, 1, 'no mine was laid');
+  // Off the mine, or its owner standing there would hold it anyway and this
+  // would pass without the arming delay.
+  layer.x -= MINE_BLAST_RADIUS * 2;
 
   const empty = new Map();
   for (let i = 0; i < MINE_ARM_TICKS - 2; i++) step(w, empty);
@@ -74,9 +78,10 @@ test('and it does go off once it has', () => {
   // test above, and would be a mine that does nothing at all.
   const { w, layer, victim } = noseToNose();
   lay(w, layer.id);
+  layer.x -= MINE_BLAST_RADIUS * 2; // the layer walks off; see the next test
 
   const empty = new Map();
-  for (let i = 0; i < MINE_ARM_TICKS + 5; i++) step(w, empty);
+  for (let i = 0; i < MINE_ARM_TICKS + MINE_REACT_TICKS + 5; i++) step(w, empty);
 
   assert.equal(w.mines.length, 0, 'the mine never triggered on an enemy standing on it');
   assert.ok(!victim.alive, 'the mine detonated without killing the enemy standing on it');
@@ -151,6 +156,33 @@ test('the allowance comes back when a mine goes off', () => {
   assert.equal(layer.minesOut, 0, 'and the allowance came back with it');
 });
 
+test('a mine holds while its layer is beside it, and goes once they leave', () => {
+  /*
+   * The original's rule, and the reason a mine can be laid at all: an enemy
+   * close to a mine cuts its fuse to half a second, unless the tank that laid
+   * it (or a teammate) is close too. Otherwise laying one in a fight would be
+   * suicide, since the enemy you are fighting is by definition nearby.
+   */
+  const { w, layer, victim } = noseToNose();
+  lay(w, layer.id);
+  const idle = new Map([
+    [layer.id, emptyInput()],
+    [victim.id, emptyInput()],
+  ]);
+  for (let i = 0; i < MINE_ARM_TICKS + MINE_REACT_TICKS + 30; i++) step(w, idle);
+  assert.equal(w.mines.length, 1, 'the mine went off with its layer standing beside it');
+  assert.ok(victim.alive && layer.alive);
+
+  // The layer drives off. Now only the enemy is near, and the fuse shortens.
+  layer.x -= MINE_BLAST_RADIUS * 2;
+  for (let i = 0; i < MINE_REACT_TICKS - 2; i++) step(w, idle);
+  assert.equal(w.mines.length, 1, 'no warning: the mine went off the tick its layer left');
+  for (let i = 0; i < 5; i++) step(w, idle);
+  assert.equal(w.mines.length, 0, 'the mine never went off once its layer had gone');
+  assert.ok(!victim.alive, 'and the enemy beside it survived');
+  assert.ok(layer.alive, 'the layer, clear of the blast, was killed');
+});
+
 test('a mine reaches exactly as far as it says it does', () => {
   /*
    * The half nobody writes. Every other mine test here puts the victim inside
@@ -166,7 +198,7 @@ test('a mine reaches exactly as far as it says it does', () => {
    * game plays. Just inside must go off and just outside must not, five per
    * cent either side of the real edge.
    */
-  const edge = MINE_TRIGGER_RADIUS + TANK_RADIUS;
+  const edge = MINE_TRIGGER_RADIUS; // centre to centre
 
   for (const [where, factor, shouldFire] of [
     ['just inside', 0.95, true],
@@ -178,14 +210,15 @@ test('a mine reaches exactly as far as it says it does', () => {
 
     lay(w, layer.id);
     assert.equal(w.mines.length, 1, `${where}: the mine went down`);
+    layer.x -= MINE_BLAST_RADIUS * 2; // off it, so only the victim is near
 
-    // Past arming, well short of the fuse, so anything that happens is the
-    // trigger and not the clock.
+    // Past arming and the half-second warning, well short of the fuse, so
+    // anything that happens is the trigger and not the clock.
     const idle = new Map([
       [layer.id, emptyInput()],
       [victim.id, emptyInput()],
     ]);
-    for (let i = 0; i < MINE_ARM_TICKS + 30; i++) step(w, idle);
+    for (let i = 0; i < MINE_ARM_TICKS + MINE_REACT_TICKS + 10; i++) step(w, idle);
 
     if (shouldFire) {
       assert.equal(w.mines.length, 0, `${where}: the mine should have gone off`);
@@ -282,15 +315,15 @@ test('the blast kills exactly as far as it says it does', () => {
   /*
    * Same shape of gap as the trigger radius, found the same way: widening
    * MINE_BLAST_RADIUS by 60% at the call site broke nothing. Reach and lethal
-   * range are separate numbers -- a mine notices you at 0.9 and kills you at
-   * 1.6 -- and only the first had a test.
+   * range are separate numbers -- a mine notices you at 2.1 and kills you at
+   * 2.7, both centre to centre -- and only the first had a test.
    *
    * Convenient here: the blast edge sits well outside the trigger edge, so a
    * tank placed at blast range does not set the mine off. It goes off on its
    * own fuse, which is what makes this about the explosion and not the trip.
    */
-  const blastEdge = MINE_BLAST_RADIUS + TANK_RADIUS;
-  const triggerEdge = MINE_TRIGGER_RADIUS + TANK_RADIUS;
+  const blastEdge = MINE_BLAST_RADIUS;
+  const triggerEdge = MINE_TRIGGER_RADIUS;
   assert.ok(blastEdge > triggerEdge, 'this test relies on the blast outreaching the trigger');
 
   for (const [where, factor, shouldDie] of [
@@ -334,10 +367,10 @@ test('a blast clears the blocks it reaches and leaves the ones it does not', () 
    *
    * Blocks are measured to their centres, which makes a tile-centred mine a
    * useless probe: the nearest block centres sit at 1, 1.41 and 2 tiles, so the
-   * radius could go from 1.6 to 2.2 without changing a single outcome. The mine
+   * radius could move a good way without changing a single outcome. The mine
    * is placed off-grid instead, solved so one block centre lands at 0.95 of the
-   * radius and the one directly below it at 1.05 -- 1.52 and 1.68 tiles from a
-   * mine at 6.0, 3.744.
+   * radius and the one directly below it at 1.05 -- 2.565 and 2.835 tiles from
+   * a mine at 4.945, 3.271, against a 2.7 blast.
    *
    * Pushed straight into the world rather than laid by a tank, because a tank
    * standing close enough to place it there would be inside its own blast.
@@ -364,8 +397,8 @@ test('a blast clears the blocks it reaches and leaves the ones it does not', () 
     id: w.nextEntityId++,
     ownerId: w.tanks[0].id,
     team: w.tanks[0].team,
-    x: 6.0,
-    y: 3.744,
+    x: 4.945,
+    y: 3.271,
     fuseTick: w.tick + 5,
     armTick: w.tick + 1,
   });
@@ -377,12 +410,12 @@ test('a blast clears the blocks it reaches and leaves the ones it does not', () 
   assert.equal(
     w.arena.at(near.x, near.y),
     Tile.Floor,
-    'a block 1.52 tiles out is inside a 1.6 blast and should be gone',
+    'a block 2.565 tiles out is inside a 2.7 blast and should be gone',
   );
   assert.equal(
     w.arena.at(far.x, far.y),
     Tile.Block,
-    'a block 1.68 tiles out is beyond it and should still be standing',
+    'a block 2.835 tiles out is beyond it and should still be standing',
   );
   assert.equal(w.tanks[0].alive, true, 'and the tank across the room is untouched');
 });
