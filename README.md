@@ -387,9 +387,9 @@ position of every shell to every player inside that budget.
 
 So we don't. A shell's entire future — every bounce, for as long as it lives —
 is fully determined by its spawn position, angle, and bounce count. The host
-sends a single **10-byte spawn event** and every client simulates the trajectory
+sends a single **11-byte spawn event** and every client simulates the trajectory
 locally using the identical physics code. A shell that ricochets around the
-arena for eight seconds costs ten bytes, once.
+arena for eight seconds costs eleven bytes, once.
 
 That only works if every device computes the *same* trajectory. Which leads to
 the constraint that shapes the whole codebase:
@@ -412,7 +412,7 @@ A test asserts this stays true: it monkey-patches `Math.sin` and friends, runs a
 |---|---|---|---|
 | Client → host input | 8 bytes | 60 Hz | 480 B/s up |
 | Host → client snapshot (8 tanks) | 52 bytes | 15 Hz | 780 B/s down |
-| Shell spawn | 10 bytes | per shot | negligible |
+| Shell spawn | 11 bytes | per shot | negligible |
 
 A full 8-tank snapshot is 52 bytes, which fits in a single BLE write on iOS
 (~180 byte safe payload). Tested in `determinism.test.ts`.

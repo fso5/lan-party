@@ -25,6 +25,7 @@ import {
   MAX_SHELLS_PER_TANK,
   MINE_ARM_TICKS,
   MINE_BLAST_RADIUS,
+  MINE_RADIUS,
   MINE_FUSE_TICKS,
   MINE_TRIGGER_RADIUS,
   SHELL_MAX_LIFETIME_TICKS,
@@ -335,6 +336,33 @@ function explodeMine(w: WorldState, mine: Mine): void {
 }
 
 /**
+ * Did two moving circles touch at any point this tick?
+ *
+ * Each moved in a straight line from its start to its end, so their offset
+ * moves in a straight line too, and the closest it gets is on that segment. A
+ * shell that bounced mid-tick moved along a bent path and the chord stands in
+ * for it -- the error is under one tick of travel. Only + - * /, so it is as
+ * deterministic across machines as the rest of the sim.
+ */
+function shellsMet(
+  ax0: number, ay0: number, ax1: number, ay1: number,
+  bx0: number, by0: number, bx1: number, by1: number,
+  reach: number,
+): boolean {
+  const px = ax0 - bx0;
+  const py = ay0 - by0;
+  const dx = ax1 - ax0 - (bx1 - bx0);
+  const dy = ay1 - ay0 - (by1 - by0);
+  const dd = dx * dx + dy * dy;
+  let t = dd > 0 ? -(px * dx + py * dy) / dd : 0;
+  if (t < 0) t = 0;
+  else if (t > 1) t = 1;
+  const cx = px + t * dx;
+  const cy = py + t * dy;
+  return cx * cx + cy * cy < reach * reach;
+}
+
+/**
  * Advance the world one tick. `inputs` is keyed by tank id.
  *
  * `spawnsFor` names the one tank allowed to create shells and mines. Omit it
@@ -404,10 +432,13 @@ export function step(w: WorldState, inputs: Map<number, TankInput>, spawnsFor?: 
   }
 
   // --- Shells ------------------------------------------------------------
+  // Where each shell began the tick, for the shell-on-shell pass below.
+  const shellStart = new Map<Shell, { x: number; y: number }>();
   for (let i = w.shells.length - 1; i >= 0; i--) {
     const s = w.shells[i];
     const startX = s.x;
     const startY = s.y;
+    shellStart.set(s, { x: startX, y: startY });
     const speed = Math.sqrt(s.vx * s.vx + s.vy * s.vy);
 
     const r = stepShell(
@@ -449,12 +480,57 @@ export function step(w: WorldState, inputs: Map<number, TankInput>, spawnsFor?: 
       }
     }
 
+    // Mine hits. Shooting a mine sets it off, armed or not -- a way to clear
+    // one from a distance, or to blow it under whoever is standing next to it.
+    if (!hitSomething) {
+      for (let k = 0; k < w.mines.length; k++) {
+        const m = w.mines[k];
+        if (sweepCircleHit(startX, startY, s.x - startX, s.y - startY, s.radius, m.x, m.y, MINE_RADIUS)) {
+          w.mines.splice(k, 1);
+          explodeMine(w, m);
+          hitSomething = true;
+          break;
+        }
+      }
+    }
+
     const expired = w.tick - s.bornTick > SHELL_MAX_LIFETIME_TICKS;
     if (hitSomething || r.dead || expired) {
       if (!hitSomething) emit(w, EventKind.ShellExpired, s.x, s.y, s.id);
       const owner = tankById(w, s.ownerId);
       if (owner && owner.shellsOut > 0) owner.shellsOut--;
       w.shells.splice(i, 1);
+    }
+  }
+
+  // --- Shell on shell ----------------------------------------------------
+  // Two shells that touch destroy each other, so a shot can be answered with a
+  // shot. Checked over the whole tick's motion rather than at its end: two
+  // shells closing head-on can pass straight through each other between
+  // ticks. Every surviving shell has moved by now, so the result does not
+  // depend on the order they were stepped in.
+  const doomed = new Set<Shell>();
+  for (let i = 0; i < w.shells.length; i++) {
+    const a = w.shells[i];
+    const a0 = shellStart.get(a) ?? a;
+    for (let j = i + 1; j < w.shells.length; j++) {
+      const b = w.shells[j];
+      const b0 = shellStart.get(b) ?? b;
+      if (shellsMet(a0.x, a0.y, a.x, a.y, b0.x, b0.y, b.x, b.y, a.radius + b.radius)) {
+        doomed.add(a);
+        doomed.add(b);
+      }
+    }
+  }
+  if (doomed.size > 0) {
+    for (const s of doomed) {
+      emit(w, EventKind.ShellExpired, s.x, s.y, s.id);
+      const owner = tankById(w, s.ownerId);
+      if (owner && owner.shellsOut > 0) owner.shellsOut--;
+    }
+    // In place: the array is shared with whoever else holds the world.
+    for (let i = w.shells.length - 1; i >= 0; i--) {
+      if (doomed.has(w.shells[i])) w.shells.splice(i, 1);
     }
   }
 
