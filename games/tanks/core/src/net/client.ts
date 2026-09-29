@@ -25,8 +25,8 @@
 
 import { cloneWorld, step, type WorldState } from '../sim.js';
 import { dcos, dsin } from '../math.js';
-import { MINE_ARM_TICKS, MINE_FUSE_TICKS, TICK_HZ } from '../tuning.js';
-import { emptyInput, type Mine, type Shell, type TankInput } from '../types.js';
+import { MINE_ARM_TICKS, MINE_FUSE_TICKS, TANK_SPECS, TICK_HZ } from '../tuning.js';
+import { emptyInput, TankKind, type Mine, type Shell, type TankInput } from '../types.js';
 import {
   MsgType,
   NetEvent,
@@ -40,6 +40,21 @@ import {
 } from './protocol.js';
 import { Reader, Writer } from '@lan-party/net';
 import type { PeerId, Transport } from '@lan-party/net';
+
+/**
+ * The shell a tank of this kind fires, from the same table the host fires it
+ * with.
+ *
+ * This used to be a local copy -- 5.5 normal, 5.0 ricochet, 9.0 rocket, one
+ * radius and one self-arm delay for all -- kept apart so a client could place a
+ * shell for a kind it did not model. The copy went stale the first time the
+ * table changed: grey shells were rebuilt at 5.0 against the host's 5.5 and
+ * green at 5.0 against 9.0, so every bot shell of those kinds drifted off its
+ * real path on a phone. Unknown kinds still resolve, to the player's shell.
+ */
+function shellProfileFor(kind: TankKind | undefined) {
+  return (TANK_SPECS[kind ?? TankKind.Player] ?? TANK_SPECS[TankKind.Player]).shell;
+}
 
 /**
  * How much of its own past the client keeps, so a correction can be folded in
@@ -567,7 +582,7 @@ export class MatchClient {
       // deterministic physics: eleven bytes buys every bounce this shell will
       // ever make.
       const owner = this.world.tanks.find((t) => t.id === s.ownerId);
-      const speed = this.shellSpeedFor(owner?.kind ?? 0);
+      const profile = shellProfileFor(owner?.kind);
       const bornOn = this.expandTick(s.tick);
       const shell: Shell = {
         id: s.shellId,
@@ -575,12 +590,12 @@ export class MatchClient {
         team: owner?.team ?? 1,
         x: s.x,
         y: s.y,
-        vx: dcos(s.angle) * speed,
-        vy: dsin(s.angle) * speed,
-        radius: 0.12,
+        vx: dcos(s.angle) * profile.speed,
+        vy: dsin(s.angle) * profile.speed,
+        radius: profile.radius,
         bouncesLeft: s.bounces,
         bornTick: bornOn,
-        selfArmDelay: 8,
+        selfArmDelay: profile.selfArmDelay,
       };
       this.logSpawn('shell', bornOn, shell);
       if (!this.rewindForSpawn(bornOn)) this.world.shells.push(shell);
@@ -650,21 +665,6 @@ export class MatchClient {
       // true.
       round.resumeAtTick = this.expandTick(round.resumeAtTick);
       this.lastRound = round;
-    }
-  }
-
-  private shellSpeedFor(kind: number): number {
-    // Kept local rather than importing TANK_SPECS wholesale so the client can
-    // resolve a shell for a tank kind it does not otherwise model.
-    switch (kind) {
-      case 3:
-      case 6:
-        return 9.0; // rockets
-      case 2:
-      case 5:
-        return 5.0; // ricochet
-      default:
-        return 5.5;
     }
   }
 

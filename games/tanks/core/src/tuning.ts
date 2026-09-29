@@ -29,7 +29,7 @@ export const MAX_SHELLS_PER_TANK = 5;
 export const MAX_MINES_PER_TANK = 2;
 
 /** Mine timing. */
-export const MINE_FUSE_TICKS = 300; // 5s until it blows on its own
+export const MINE_FUSE_TICKS = 600; // 10s until it blows on its own, as in the original
 export const MINE_ARM_TICKS = 45; // 0.75s before it can be triggered by proximity
 export const MINE_TRIGGER_RADIUS = 0.9;
 export const MINE_BLAST_RADIUS = 1.6;
@@ -108,18 +108,27 @@ export interface TankSpec {
   bankShotDepth: number;
 }
 
-const ROCKET: ShellProfile = { speed: 9.0, maxBounces: 0, radius: 0.11, selfArmDelay: 6 };
-const NORMAL: ShellProfile = { speed: 5.5, maxBounces: 1, radius: 0.12, selfArmDelay: 8 };
+/*
+ * Speeds and reloads follow the original game, by way of TanksRebirth
+ * (github.com/RighteousRyan1/TanksRebirth), a remake that sets out to match
+ * it. It runs at 60 frames a second like this sim, so its reloads are ticks
+ * here as they stand; its speeds convert at 21.7 units to a block -- shells
+ * move 0.62 x speed units a frame and tanks 0.55 x speed. Rockets come out at
+ * twice a normal shell, which is also how the original's players describe
+ * them. These are a remake's numbers, not ones read out of the original.
+ */
+const ROCKET: ShellProfile = { speed: 10.3, maxBounces: 0, radius: 0.11, selfArmDelay: 6 };
+const NORMAL: ShellProfile = { speed: 5.1, maxBounces: 1, radius: 0.12, selfArmDelay: 8 };
 /** The green sniper's: rocket-fast, and bounces twice. */
-const SNIPER: ShellProfile = { speed: 9.0, maxBounces: 2, radius: 0.12, selfArmDelay: 10 };
+const SNIPER: ShellProfile = { speed: 10.3, maxBounces: 2, radius: 0.12, selfArmDelay: 10 };
 
 export const TANK_SPECS: Record<TankKind, TankSpec> = {
   [TankKind.Player]: {
-    moveSpeed: 3.2,
+    moveSpeed: 2.7,
     bodyTurnRate: 7.0,
     turretTurnRate: 9.0,
     shell: NORMAL,
-    fireCooldown: 12,
+    fireCooldown: 5,
     aimError: 0,
     reactionTicks: 0,
     mobile: true,
@@ -133,7 +142,7 @@ export const TANK_SPECS: Record<TankKind, TankSpec> = {
     bodyTurnRate: 0,
     turretTurnRate: 1.1,
     shell: NORMAL,
-    fireCooldown: 100,
+    fireCooldown: 300,
     aimError: 0.09,
     reactionTicks: 55,
     mobile: false,
@@ -143,11 +152,11 @@ export const TANK_SPECS: Record<TankKind, TankSpec> = {
     bankShotDepth: 0,
   },
   [TankKind.Grey]: {
-    moveSpeed: 1.5,
+    moveSpeed: 1.8,
     bodyTurnRate: 3.0,
     turretTurnRate: 2.2,
     shell: NORMAL, // one bounce, as in the original
-    fireCooldown: 80,
+    fireCooldown: 180,
     aimError: 0.05,
     reactionTicks: 40,
     mobile: true,
@@ -157,11 +166,11 @@ export const TANK_SPECS: Record<TankKind, TankSpec> = {
     bankShotDepth: 1,
   },
   [TankKind.Teal]: {
-    moveSpeed: 2.6,
+    moveSpeed: 1.5,
     bodyTurnRate: 5.0,
     turretTurnRate: 3.4,
     shell: ROCKET,
-    fireCooldown: 55,
+    fireCooldown: 180,
     aimError: 0.04,
     reactionTicks: 26,
     mobile: true,
@@ -171,11 +180,11 @@ export const TANK_SPECS: Record<TankKind, TankSpec> = {
     bankShotDepth: 0,
   },
   [TankKind.Yellow]: {
-    moveSpeed: 2.0,
+    moveSpeed: 2.7,
     bodyTurnRate: 4.0,
     turretTurnRate: 2.6,
     shell: NORMAL,
-    fireCooldown: 70,
+    fireCooldown: 180,
     aimError: 0.06,
     reactionTicks: 34,
     mobile: true,
@@ -189,7 +198,7 @@ export const TANK_SPECS: Record<TankKind, TankSpec> = {
     bodyTurnRate: 0,
     turretTurnRate: 1.8,
     shell: SNIPER,
-    fireCooldown: 90,
+    fireCooldown: 60,
     aimError: 0.012, // near-perfect: this is the sniper
     reactionTicks: 30,
     mobile: false,
@@ -199,11 +208,11 @@ export const TANK_SPECS: Record<TankKind, TankSpec> = {
     bankShotDepth: 2,
   },
   [TankKind.Black]: {
-    moveSpeed: 3.4,
+    moveSpeed: 3.6,
     bodyTurnRate: 6.0,
     turretTurnRate: 4.2,
     shell: ROCKET,
-    fireCooldown: 40,
+    fireCooldown: 60,
     aimError: 0.03,
     reactionTicks: 18,
     mobile: true,

@@ -141,12 +141,13 @@ test('eight bots cost a small fraction of a frame', () => {
   // Against what this roster can have in flight, not a fixed number: each
   // type has its own shell limit (as in the original game), so eight bots
   // carry 10 at most -- this was "> 5" when every tank could have five out.
-  // Measured at 4.7 per tick once the limits came in, so over a third of
-  // capacity is a roster that is really firing; a broken `fire` input is ~0.
+  // With the original's reloads too (three seconds for most bots) it measures
+  // 2.2 per tick, so over a tenth of capacity is a roster that is really
+  // firing; a broken `fire` input is ~0.
   const capacity = world.tanks.reduce((n, tank) => n + TANK_SPECS[tank.kind].maxShells, 0);
   const shellsPerTick = shells / TICKS;
   assert.ok(
-    shellsPerTick > capacity * 0.35,
+    shellsPerTick > capacity * 0.1,
     `only ${shellsPerTick.toFixed(1)} of ${capacity} possible shells live per tick, so the collision work being timed is not the real load`,
   );
 
