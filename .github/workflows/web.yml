@@ -113,6 +113,10 @@ jobs:
         working-directory: games/tanks
         run: npm run lan:smoke
 
+      - name: Co-op campaign, two browsers on one team
+        working-directory: games/tanks
+        run: npm run coop:smoke
+
       # The installable version, with the network switched off mid-test.
       #
       # `pages.yml` builds this and deploys it without ever loading it, so a

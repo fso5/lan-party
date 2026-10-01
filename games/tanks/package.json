@@ -15,7 +15,9 @@
     "ble:smoke": "node build.mjs && node ble-smoke.mjs",
     "rounds:smoke": "node build.mjs && node rounds-smoke.mjs",
     "lan:smoke": "node build.mjs && node lanhost-smoke.mjs",
-    "smoke:all": "node build.mjs && node smoke.mjs && node mp-smoke.mjs && node lobby-smoke.mjs && node ble-smoke.mjs && node rounds-smoke.mjs && node lanhost-smoke.mjs && node build-pwa.mjs && node pwa-check.mjs"
+    "smoke:all": "node build.mjs && node smoke.mjs && node mp-smoke.mjs && node lobby-smoke.mjs && node ble-smoke.mjs && node rounds-smoke.mjs && node lanhost-smoke.mjs && node coop-smoke.mjs && node build-pwa.mjs && node pwa-check.mjs",
+    "coop": "MODE=coop node server.mjs",
+    "coop:smoke": "node build.mjs && node coop-smoke.mjs"
   },
   "dependencies": {
     "@lan-party/lobby": "*",

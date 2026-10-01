@@ -509,6 +509,8 @@ function beginNetworkedMatch(start) {
   // having been built -- which tests read, because round labels also advance
   // when a match simply ends.
   state.roundSeed = start.seed;
+  // A campaign mission (1-100) is co-op: label it as a mission, not a round.
+  net.campaignMission = start.mapId >= 1 && start.mapId <= 100 ? start.mapId : null;
   const map = mapById(start.mapId);
   if (!map) {
     setNetStatus('unknown map');
@@ -616,9 +618,9 @@ function loadMap(i) {
   state.mapIndex = ((i % ALL_MAPS.length) + ALL_MAPS.length) % ALL_MAPS.length;
   let map = ALL_MAPS[state.mapIndex];
 
-  // Campaign missions have a single spawn and scripted enemies, so they cannot
-  // seat a second player. Slide to the first versus arena instead of silently
-  // dropping player two onto player one's spawn.
+  // A map with fewer spawns than local players cannot seat them all. Slide to
+  // the first versus arena instead of silently dropping a player onto another's
+  // spawn. Missions carry two, so two players on one phone play them together.
   if (state.localPlayers > 1 && loadArena(map).spawns.length < state.localPlayers) {
     state.mapIndex = ALL_MAPS.indexOf(VERSUS_MAPS[0]);
     map = ALL_MAPS[state.mapIndex];
@@ -651,7 +653,10 @@ function playMap(map, seed) {
   // networked matches build their rosters through one code path.
   const seats = state.localPlayers;
   const players = [];
-  for (let p = 0; p < seats; p++) players.push({ team: p, spawnIndex: p });
+  // On a mission everyone is on the players' side against its enemies -- co-op.
+  // On a versus map each player is their own team.
+  const coop = arena.enemies.length > 0;
+  for (let p = 0; p < seats; p++) players.push({ team: coop ? 0 : p, spawnIndex: p });
 
   const bots = [];
   // VERSUS_BOT_KINDS, not a local list: this one still read [Grey, Teal, Green]
@@ -1285,6 +1290,7 @@ function joinBluetoothMatch() {
       if (r.u8() === MsgType.MatchStart) {
         const start = readMatchStart(r);
         state.roundSeed = start.seed; // see beginNetworkedMatch
+        net.campaignMission = start.mapId >= 1 && start.mapId <= 100 ? start.mapId : null;
         const map = mapById(start.mapId);
         if (!map) {
           // Say so, the way the WiFi path already does. This is the one place
@@ -1760,9 +1766,17 @@ function updateRoundsHud() {
       const drew = result.winner === DRAW;
       const won = !drew && result.winner === myTeam();
       net.banner = {
-        text: drew
-          ? 'Draw'
-          : `${teamLabel(result.winner)} wins the ${result.matchOver ? 'match' : 'round'}`,
+        text: net.campaignMission
+          ? won
+            ? net.campaignMission >= 20
+              ? 'Co-op campaign complete!'
+              : 'Mission cleared!'
+            : drew
+              ? 'Out of time -- once more'
+              : 'Mission failed -- back to mission 1'
+          : drew
+            ? 'Draw'
+            : `${teamLabel(result.winner)} wins the ${result.matchOver ? 'match' : 'round'}`,
         tone: drew ? 'draw' : won ? 'win' : 'lose',
         // A match result stays up. A round result has to get out of the way
         // before the next round starts, or it covers its opening seconds --
@@ -1772,9 +1786,11 @@ function updateRoundsHud() {
     }
   }
 
-  document.getElementById('round-label').textContent = net.matchOver
-    ? 'Final'
-    : `Round ${net.round}`;
+  document.getElementById('round-label').textContent = net.campaignMission
+    ? `Mission ${net.campaignMission}`
+    : net.matchOver
+      ? 'Final'
+      : `Round ${net.round}`;
 
   const scores = new Map(net.scores.map((s) => [s.team, s.score]));
   const teams = [

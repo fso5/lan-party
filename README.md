@@ -204,6 +204,7 @@ npm run pwa:check    # the installed app, with the network cut
 npm run smoke:all    # all of the above
 npm run serve        # single-player, serve on your LAN
 npm run mp           # multiplayer: host + serve on your LAN
+npm run coop         # the 2-player co-op campaign: host + serve on your LAN
 ```
 
 The browser runs are the only things that exercise the multiplayer client at
