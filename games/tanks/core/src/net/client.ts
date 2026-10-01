@@ -467,10 +467,18 @@ export class MatchClient {
     for (const s of this.spawnLog) {
       if (s.tick !== tick) continue;
       if (s.kind === 'shell') {
-        if (this.world.shells.some((x) => x.id === s.entity.id)) continue;
+        // By id *and* owner. Ids are not shared: we number our own predicted
+        // shots and the host numbers everyone's, so another tank's shell can
+        // carry the same id as one of ours -- fire on the same tick as the host
+        // player and it does. Matched on id alone, their shell was taken for
+        // ours and never drawn: on the host the two met and destroyed each
+        // other, and on this screen ours flew through where theirs should be.
+        const e = s.entity as Shell;
+        if (this.world.shells.some((x) => x.id === e.id && x.ownerId === e.ownerId)) continue;
         this.world.shells.push({ ...(s.entity as Shell) });
       } else {
-        if (this.world.mines.some((x) => x.id === s.entity.id)) continue;
+        const m = s.entity as Mine;
+        if (this.world.mines.some((x) => x.id === m.id && x.ownerId === m.ownerId)) continue; // see above
         this.world.mines.push({ ...(s.entity as Mine) });
       }
     }

@@ -817,6 +817,52 @@ test("every kind's shell is rebuilt on a phone exactly as the host fires it", ()
   }
 });
 
+test('two players shooting each other on the same tick see both shells, and both go', () => {
+  /*
+   * Reported in play as "bullets no longer destroy each other". On the host
+   * they did; on the phone the host's shell never appeared. Both sides had
+   * fired one shell, the phone numbering its own and the host numbering
+   * everyone's, so the host's shell arrived with the same id as the phone's
+   * own -- and the spawn replay, matching on id alone, took it for the shell
+   * already on screen and dropped it. The phone saw its shot sail on through
+   * empty air.
+   */
+  for (const [name, profile] of [['WiFi', LAN_PROFILE], ['Bluetooth', BLE_PROFILE]] as const) {
+    const net = new LoopbackNetwork(profile, 5);
+    const hostT = new LoopbackTransport('host', 'Host', net);
+    const clientT = new LoopbackTransport('client', 'Client', net);
+    const hostWorld = versusWorld();
+    const host = new MatchHost(hostWorld, hostT);
+    host.localTankId = 0;
+    const client = new MatchClient(cloneWorld(hostWorld), clientT, 'host', 1);
+    net.connect('host', 'client');
+    host.addClient('client', 1);
+    // Clear the row between them, so the shells meet each other and nothing else.
+    const [a, b] = hostWorld.tanks;
+    for (const w of [hostWorld, client.world]) {
+      const [ta, tb] = w.tanks;
+      ta.x = 3; ta.y = 7.5; tb.x = 20; tb.y = 7.5;
+      for (let x = 2; x < 22; x++) w.arena.set(x, 7, Tile.Floor);
+    }
+
+    let bothOnPhone = false;
+    for (let i = 0; i < 200; i++) {
+      host.setLocalInput({ ...emptyInput(), aimX: 1, aimY: 0, fire: i === 30 });
+      client.setInput({ ...emptyInput(), aimX: -1, aimY: 0, fire: i === 30 });
+      client.update(1000 / 60);
+      net.advance(1000 / 60);
+      host.update(1000 / 60);
+      net.advance(0);
+      const owners = new Set(client.world.shells.map((s) => s.ownerId));
+      if (owners.has(a.id) && owners.has(b.id)) bothOnPhone = true;
+    }
+    assert.ok(bothOnPhone, `${name}: the host's shell never appeared on the phone`);
+    assert.equal(host.world.shells.length, 0, `${name}: the shells did not meet on the host`);
+    assert.equal(client.world.shells.length, 0, `${name}: a shell is still flying on the phone`);
+    assert.ok(host.world.tanks.every((t) => t.alive), `${name}: a shell got through on the host`);
+  }
+});
+
 test('a mine the other player laid is on our screen too', () => {
   // Mines were never networked at all -- NetEvent.MineSpawn was declared and
   // nothing wrote it -- so the only mine a phone could see was its own, and an
