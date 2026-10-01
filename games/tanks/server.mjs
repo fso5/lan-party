@@ -35,11 +35,26 @@ import {
   VERSUS_MAPS,
   writeMatchStart,
   TICK_HZ,
+  campaignMission,
+  coopNext,
+  coopOutcome,
+  COOP_PLAYER_TEAM,
 } from '@lan-party/tanks-core';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 8080);
 const MAP = VERSUS_MAPS[Number(process.env.MAP || 0)] ?? VERSUS_MAPS[0];
+
+/*
+ * MODE=coop plays the two-player campaign instead of versus: twenty missions,
+ * everyone on one team against each mission's enemies, a fallen player back
+ * for the next mission if a partner clears this one, and mission one again if
+ * nobody is left. The rules are coopNext/coopOutcome in campaign.ts.
+ *
+ *   MODE=coop npm run mp --workspace @lan-party/tanks     (or: npm run coop)
+ */
+const COOP = process.env.MODE === 'coop';
+let coopMission = Number(process.env.MISSION || 1);
 
 execFileSync('node', [join(here, 'build.mjs')], { stdio: 'inherit' });
 const html = readFileSync(join(here, 'dist', 'tanks-proto.html'));
@@ -78,7 +93,12 @@ let restartTimer = null;
  * useless for checking what happens at the *end* of a match, which is a
  * distinct code path from the end of a round.
  */
-const RULES = { ...DEFAULT_RULES, roundsToWin: Number(process.env.ROUNDS || DEFAULT_RULES.roundsToWin) };
+const RULES = COOP
+  ? // Every mission is a round and nobody "wins the match": the score would
+    // have to reach 255, a byte's worth, to end it. Ten minutes before a mission
+    // nobody can finish is called and replayed.
+    { ...DEFAULT_RULES, roundsToWin: 255, roundTimeLimitTicks: TICK_HZ * 600 }
+  : { ...DEFAULT_RULES, roundsToWin: Number(process.env.ROUNDS || DEFAULT_RULES.roundsToWin) };
 
 /** Long enough to read who won, short enough that nobody wanders off. */
 const MATCH_OVER_PAUSE_MS = 5000;
@@ -92,6 +112,7 @@ const MATCH_OVER_PAUSE_MS = 5000;
  * server exists to test.
  */
 function startMatch() {
+  if (COOP) return startCoop();
   const arena = loadArena(MAP);
   const peers = [...sockets.keys()];
 
@@ -193,6 +214,38 @@ function startMatch() {
   console.log(`  match started: ${peers.length} player(s), ${bots.length} bot(s) on "${MAP.name}"`);
 }
 
+/** The co-op campaign. Restarts at the current mission when someone joins or leaves. */
+function startCoop() {
+  const peers = [...sockets.keys()];
+  const build = (mission, seed) => {
+    const map = campaignMission(mission);
+    const arena = loadArena(map);
+    const seats = Math.min(peers.length, arena.spawns.length);
+    const players = peers.slice(0, seats).map((_, i) => ({ team: COOP_PLAYER_TEAM, spawnIndex: i }));
+    match = { mapId: map.id, seed, players, bots: [] };
+    return createWorld({ arena, seed, players, bots: [] });
+  };
+
+  const seed = 5000 + coopMission;
+  const world = build(coopMission, seed);
+  host = new MatchHost(world, transport, RULES);
+
+  host.roundBuilder = (round) => {
+    const step = coopNext(coopMission, coopOutcome(host.match.lastRoundWinner));
+    if (step.completed) console.log('  co-op campaign complete -- back to mission 1');
+    coopMission = step.mission;
+    return build(coopMission, 5000 + coopMission + round * 101);
+  };
+  host.onRoundStart = (w) => {
+    for (const peerId of [...sockets.keys()]) host.removeClient(peerId);
+    announce(w);
+    console.log(`  mission ${coopMission}`);
+  };
+
+  announce(world);
+  console.log(`  co-op: ${match.players.length} player(s) on mission ${coopMission}, "${campaignMission(coopMission).name}"`);
+}
+
 /**
  * Seat every connected peer in the current world and tell them about it.
  *
@@ -258,7 +311,7 @@ httpServer.listen(port, '0.0.0.0', () => {
       if (ni.family === 'IPv4' && !ni.internal) addrs.push(ni.address);
     }
   }
-  console.log(`\n  Tanks! multiplayer  —  "${MAP.name}"\n`);
+  console.log(`\n  Tanks! multiplayer  —  ${COOP ? `co-op campaign, mission ${coopMission}` : `"${MAP.name}"`}\n`);
   for (const a of addrs) console.log(`  phone    http://${a}:${port}`);
   console.log(`  local    http://localhost:${port}`);
   console.log('\n  Open on each phone. Same WiFi. Ctrl-C to stop.\n');

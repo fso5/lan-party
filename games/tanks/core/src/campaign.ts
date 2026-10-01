@@ -291,3 +291,42 @@ function allReachable(g: Grid, px: number, py: number, enemies: [number, number]
   }
   return enemies.every(([x, y]) => seen.has(y * W + x));
 }
+
+// --- Co-op ------------------------------------------------------------------
+
+/**
+ * The two-player campaign, as the original has it: twenty missions, the
+ * players on one team, one life each.
+ *
+ * A mission is cleared when its enemies are gone with any player still
+ * standing, and the next one starts with everybody back -- a player who died
+ * is revived by a partner who finished the job. If every player is destroyed
+ * it is over, and the campaign starts again from mission one. A round that
+ * runs out the clock with both sides still up is replayed.
+ */
+export const COOP_MISSIONS = 20;
+/** Players' team in a co-op mission; the mission's enemies are on team 1. */
+export const COOP_PLAYER_TEAM = 0;
+
+export type CoopOutcome = 'cleared' | 'failed' | 'timeout';
+
+export interface CoopStep {
+  /** The mission to play next. */
+  mission: number;
+  /** The players cleared mission 20: the campaign is complete, and starts over. */
+  completed: boolean;
+}
+
+export function coopNext(mission: number, outcome: CoopOutcome): CoopStep {
+  if (outcome === 'timeout') return { mission, completed: false };
+  if (outcome === 'failed') return { mission: 1, completed: false };
+  if (mission >= COOP_MISSIONS) return { mission: 1, completed: true };
+  return { mission: mission + 1, completed: false };
+}
+
+/** A round's winning team (or DRAW, -1, or null) as a co-op outcome. */
+export function coopOutcome(winner: number | null): CoopOutcome {
+  if (winner === COOP_PLAYER_TEAM) return 'cleared';
+  if (winner === null || winner < 0) return 'timeout';
+  return 'failed';
+}

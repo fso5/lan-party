@@ -849,7 +849,10 @@ const seats = await phone.evaluate(() => ({
     && getComputedStyle(document.getElementById('seat-hint')).display !== 'none',
   soloHint: getComputedStyle(document.getElementById('touch-hint')).display !== 'none',
   humans: window.__state.world.tanks.filter((t) => t.kind === 0).length,
+  humanTeams: window.__state.world.tanks.filter((t) => t.kind === 0).map((t) => t.team),
   total: window.__state.world.tanks.length,
+  mission: window.__state.world.arena.enemies.length > 0,
+  scripted: window.__state.world.arena.enemies.length,
 }));
 check(seats.attr === '2' && seats.pressed === 'true', 'the 2P button switches to two seats', JSON.stringify(seats));
 check(seats.humans === 2, 'two human tanks are seated', `got ${seats.humans}`);
@@ -863,8 +866,18 @@ check(seats.humans === 2, 'two human tanks are seated', `got ${seats.humans}`);
  * Nothing failed. The game just got harder, on the phone, in the build that
  * ships.
  */
-check(seats.total === 4, 'couch play is two seats and two bots, not the whole map',
-  `${seats.humans} human(s) and ${seats.total - seats.humans} bot(s)`);
+// A mission carries two player spawns, so two players on one phone play it
+// together -- couch co-op -- against its own enemies and nothing more.
+if (seats.mission) {
+  check(
+    seats.humanTeams.every((t) => t === 0) && seats.total - seats.humans === seats.scripted,
+    'couch play on a mission is co-op: both players on one team, against its own enemies',
+    `teams ${seats.humanTeams}, ${seats.total - seats.humans} enemies against ${seats.scripted} scripted`,
+  );
+} else {
+  check(seats.total === 4, 'couch play is two seats and two bots, not the whole map',
+    `${seats.humans} human(s) and ${seats.total - seats.humans} bot(s)`);
+}
 // One legend or the other, never both: they describe contradictory controls,
 // and `#seat-hint` was one of the elements the `hidden` bug used to leak.
 check(seats.seatHint && !seats.soloHint, 'couch play shows its own legend and hides the solo one',

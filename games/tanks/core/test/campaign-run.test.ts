@@ -112,3 +112,24 @@ test('a networked match can name any map by id', () => {
   assert.equal(mapById(VERSUS_MAPS[0].id), VERSUS_MAPS[0]);
   assert.equal(mapById(0), undefined);
 });
+
+test('co-op: a clear goes on, a wipe starts over, the clock replays, and 20 completes', async () => {
+  const { coopNext, coopOutcome, COOP_MISSIONS } = await import('../src/campaign.js');
+  assert.deepEqual(coopNext(7, 'cleared'), { mission: 8, completed: false });
+  assert.deepEqual(coopNext(7, 'failed'), { mission: 1, completed: false });
+  assert.deepEqual(coopNext(7, 'timeout'), { mission: 7, completed: false });
+  assert.deepEqual(coopNext(COOP_MISSIONS, 'cleared'), { mission: 1, completed: true });
+  assert.equal(coopOutcome(0), 'cleared');
+  assert.equal(coopOutcome(1), 'failed');
+  assert.equal(coopOutcome(-1), 'timeout');
+  assert.equal(coopOutcome(null), 'timeout');
+});
+
+test('every co-op mission seats two players apart', () => {
+  for (let n = 1; n <= 20; n++) {
+    const arena = loadArena(campaignMission(n));
+    assert.ok(arena.spawns.length >= 2, `mission ${n} has no place for a second player`);
+    const [a, b] = arena.spawns;
+    assert.ok(Math.hypot(a.x - b.x, a.y - b.y) >= 1, `mission ${n} stacks the two players`);
+  }
+});
